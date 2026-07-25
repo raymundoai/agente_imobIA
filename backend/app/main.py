@@ -2,20 +2,19 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import Settings, get_settings
 from app.container import Container
 from app.modules.ai.api import ai_router, knowledge_router
 from app.modules.auth.api.routes import router as auth_router
 from app.modules.billing_usage.api import router as usage_router
-from app.modules.capture.api import router as capture_router
 from app.modules.contacts.api import router as contacts_router
 from app.modules.conversations.api.routes import router as conversations_router
 from app.modules.conversations.api.routes import webhook_router
 from app.modules.dashboard.api import router as dashboard_router
 from app.modules.integrations.api import router as integrations_router
 from app.modules.leads.api import router as leads_router
-from app.modules.maintenance.api import router as maintenance_router
 from app.modules.platform.api import router as platform_router
 from app.modules.properties.api import router as properties_router
 from app.modules.tenants.api.routes import router as tenants_router
@@ -51,12 +50,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application.include_router(auth_router, prefix=resolved.api_prefix)
     application.include_router(ai_router, prefix=resolved.api_prefix)
-    application.include_router(capture_router, prefix=resolved.api_prefix)
     application.include_router(dashboard_router, prefix=resolved.api_prefix)
     application.include_router(knowledge_router, prefix=resolved.api_prefix)
     application.include_router(integrations_router, prefix=resolved.api_prefix)
     application.include_router(leads_router, prefix=resolved.api_prefix)
-    application.include_router(maintenance_router, prefix=resolved.api_prefix)
     application.include_router(properties_router, prefix=resolved.api_prefix)
     application.include_router(platform_router, prefix=resolved.api_prefix)
     application.include_router(webhook_router, prefix=resolved.api_prefix)
@@ -65,6 +62,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(tenants_router, prefix=resolved.api_prefix)
     application.include_router(usage_router, prefix=resolved.api_prefix)
     application.include_router(users_router, prefix=resolved.api_prefix)
+    application.mount(
+        "/media/properties",
+        StaticFiles(directory=resolved.property_media_root, check_dir=False),
+        name="property-media",
+    )
 
     @application.get("/health", tags=["system"])
     def health() -> dict[str, str]:

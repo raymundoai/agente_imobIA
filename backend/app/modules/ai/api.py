@@ -25,8 +25,6 @@ from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_prin
 from app.modules.conversations.adapters.repositories import SqlAlchemyConversationRepository
 from app.modules.leads.adapters.repositories import SqlAlchemyLeadDemandRepository
 from app.modules.leads.application.use_cases import LeadQualificationService
-from app.modules.maintenance.adapters.repositories import SqlAlchemyMaintenanceTicketRepository
-from app.modules.maintenance.application.use_cases import MaintenanceTicketingService
 from app.modules.properties.adapters.repositories import SqlAlchemyPropertyRepository
 from app.modules.tenants.adapters.repositories import SqlAlchemyTenantRepository
 from app.shared.errors.exceptions import ConfigurationError, NotFoundError
@@ -215,12 +213,7 @@ def generate_ai_reply(
             container.crm,
             container.event_bus,
         ),
-        MaintenanceTicketingService(
-            SqlAlchemyTenantRepository(session),
-            SqlAlchemyMaintenanceTicketRepository(session),
-            container.event_bus,
-        ),
-        SqlAlchemyPropertyRepository(session),
+        properties=SqlAlchemyPropertyRepository(session),
     ).execute(
         principal.tenant_id,
         conversation_id,

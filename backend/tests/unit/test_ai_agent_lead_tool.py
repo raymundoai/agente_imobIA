@@ -240,9 +240,7 @@ def test_lead_agent_uses_configured_prompt_and_searches_real_properties() -> Non
         EmptyCredentials(),
         EmptyChannel(),
         InMemoryEventBus(),
-        None,
-        None,
-        properties,
+        properties=properties,
     ).execute(tenant.id, conversation.id)
 
     assert result.response_text == "Encontrei uma opção real."

@@ -1,4 +1,6 @@
+import base64
 import json
+from io import BytesIO
 from typing import Any
 
 from openai import OpenAI
@@ -14,12 +16,28 @@ class OpenAiAdapter(AiProviderPort):
         chat_model: str,
         embedding_model: str,
         embedding_dimensions: int = 1536,
+        image_model: str = "gpt-image-1",
         client: OpenAI | None = None,
     ) -> None:
         self._client = client or OpenAI(api_key=api_key)
         self._chat_model = chat_model
         self._embedding_model = embedding_model
         self._embedding_dimensions = embedding_dimensions
+        self._image_model = image_model
+
+    def edit_image(self, content: bytes, *, filename: str, prompt: str) -> bytes:
+        image = BytesIO(content)
+        image.name = filename
+        response = self._client.images.edit(
+            model=self._image_model,
+            image=image,
+            prompt=prompt,
+        )
+        data = response.data[0]
+        encoded = getattr(data, "b64_json", None)
+        if not encoded:
+            raise RuntimeError("OpenAI did not return the processed image content")
+        return base64.b64decode(encoded)
 
     def get_embedding(self, text: str) -> list[float]:
         normalized = text.replace("\n", " ").strip()

@@ -1,4 +1,4 @@
-import { Bot, Building2, Database, PlugZap, Settings, Users, Workflow } from "lucide-react";
+import { Bot, Building2, Database, PlugZap, Settings, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { request } from "../api/client";
 import type { Tenant } from "../api/types";
@@ -6,7 +6,6 @@ import { useAuth } from "../auth/AuthContext";
 import { getTokenClaims } from "../auth/tokenClaims";
 import { AgentsSettingsPanel } from "./settings/AgentsSettingsPanel";
 import { ChannelsSettingsPanel } from "./settings/ChannelsSettingsPanel";
-import { IntegrationsSettingsPanel } from "./settings/IntegrationsSettingsPanel";
 import { KnowledgeSettingsPanel } from "./settings/KnowledgeSettingsPanel";
 import { TenantSettingsPanel } from "./settings/TenantSettingsPanel";
 import { UsageSettingsPanel } from "./settings/UsageSettingsPanel";
@@ -16,7 +15,6 @@ const tabs = [
   { key: "company", label: "Empresa", icon: Building2 },
   { key: "channels", label: "Canais", icon: PlugZap },
   { key: "agents", label: "Agentes", icon: Bot },
-  { key: "systems", label: "Integrações", icon: Workflow },
   { key: "knowledge", label: "Conhecimento", icon: Database },
   { key: "users", label: "Equipe", icon: Users },
   { key: "usage", label: "Uso", icon: Settings },
@@ -75,9 +73,6 @@ export function SettingsPage() {
           ) : null}
           {activeTab === "agents" ? (
             <AgentsSettingsPanel onTenantChange={setTenant} tenant={tenant} />
-          ) : null}
-          {activeTab === "systems" ? (
-            <IntegrationsSettingsPanel onTenantChange={setTenant} tenant={tenant} />
           ) : null}
           {activeTab === "knowledge" ? <KnowledgeSettingsPanel /> : null}
           {activeTab === "users" ? <UsersSettingsPanel /> : null}

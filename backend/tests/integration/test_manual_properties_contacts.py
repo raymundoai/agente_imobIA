@@ -110,3 +110,40 @@ def test_property_requires_prices_for_each_selected_offer(client: TestClient) ->
         },
     )
     assert response.status_code == 422
+
+
+def test_property_image_upload_validates_and_serves_file(client: TestClient) -> None:
+    token = _provision(client, "tenant-a", "a@example.com")
+    png = b"\x89PNG\r\n\x1a\nminimal-test-content"
+    response = client.post(
+        "/properties/images",
+        headers={"Authorization": f"Bearer {token}"},
+        files=[("files", ("fachada.png", png, "image/png"))],
+        data={"optimizations": "[]"},
+    )
+
+    assert response.status_code == 201, response.text
+    image = response.json()[0]
+    assert image["optimized"] is False
+    assert image["content_type"] == "image/png"
+    served = client.get(image["url"])
+    assert served.status_code == 200
+    assert served.content == png
+
+
+def test_property_image_treatment_requires_configured_openai(client: TestClient) -> None:
+    token = _provision(client, "tenant-a", "a@example.com")
+    response = client.post(
+        "/properties/images",
+        headers={"Authorization": f"Bearer {token}"},
+        files=[
+            (
+                "files",
+                ("fachada.png", b"\x89PNG\r\n\x1a\nminimal-test-content", "image/png"),
+            )
+        ],
+        data={"optimizations": '["corrigir iluminação"]'},
+    )
+
+    assert response.status_code == 503
+    assert "OpenAI" in response.json()["detail"]

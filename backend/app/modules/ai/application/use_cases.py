@@ -4,6 +4,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
+from app.modules.ai.application.guardrails import detect_restricted_intent
 from app.modules.ai.domain.entities import (
     AiAgentResult,
     AiAuditLog,
@@ -28,8 +29,6 @@ from app.modules.conversations.ports.repositories import ConversationRepositoryP
 from app.modules.integrations.ports.credentials import ChannelCredentialsPort
 from app.modules.integrations.ports.message_channel import MessageChannelPort
 from app.modules.leads.ports.qualification import LeadQualificationPort
-from app.modules.maintenance.application.use_cases import detect_restricted_intent
-from app.modules.maintenance.ports.ticketing import MaintenanceTicketingPort
 from app.modules.properties.ports.repositories import PropertyRepositoryPort
 from app.modules.tenants.domain.entities import TenantStatus
 from app.modules.tenants.ports.repositories import TenantRepositoryPort
@@ -187,7 +186,6 @@ class GenerateAiReplyUseCase:
         channel: MessageChannelPort,
         events: EventBusPort,
         lead_qualification: LeadQualificationPort | None = None,
-        maintenance_ticketing: MaintenanceTicketingPort | None = None,
         properties: PropertyRepositoryPort | None = None,
     ) -> None:
         self._tenants = tenants
@@ -199,7 +197,6 @@ class GenerateAiReplyUseCase:
         self._channel = channel
         self._events = events
         self._lead_qualification = lead_qualification
-        self._maintenance_ticketing = maintenance_ticketing
         self._properties = properties
 
     def execute(
@@ -401,19 +398,6 @@ class GenerateAiReplyUseCase:
                     }
                     for item in properties
                 ],
-            }
-        if name == "create_maintenance_ticket":
-            if self._maintenance_ticketing is None:
-                return {"status": "unavailable"}
-            ticket = self._maintenance_ticketing.create_ticket(
-                tenant_id,
-                arguments,
-                conversation_id=conversation_id,
-            )
-            return {
-                "status": "created",
-                "ticket_id": str(ticket.id),
-                "urgency": ticket.urgency.value,
             }
         if name == "record_usage":
             return {"status": "recorded"}
@@ -657,43 +641,6 @@ class GenerateAiReplyUseCase:
                         "price_max",
                         "bedrooms",
                         "parking_spaces",
-                    ],
-                    "additionalProperties": False,
-                },
-                "strict": True,
-            },
-            {
-                "type": "function",
-                "name": "create_maintenance_ticket",
-                "description": (
-                    "Cria chamado de manutenção quando o cliente informar problema, "
-                    "imóvel e urgência."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "customer_name": {"type": ["string", "null"]},
-                        "phone": {"type": "string"},
-                        "property_reference": {"type": ["string", "null"]},
-                        "issue_type": {"type": "string"},
-                        "description": {"type": "string"},
-                        "urgency": {
-                            "type": ["string", "null"],
-                            "enum": ["low", "medium", "high", "critical", None],
-                        },
-                        "attachments": {
-                            "type": "array",
-                            "items": {"type": "object", "additionalProperties": True},
-                        },
-                    },
-                    "required": [
-                        "customer_name",
-                        "phone",
-                        "property_reference",
-                        "issue_type",
-                        "description",
-                        "urgency",
-                        "attachments",
                     ],
                     "additionalProperties": False,
                 },

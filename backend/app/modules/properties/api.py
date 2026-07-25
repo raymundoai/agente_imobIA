@@ -1,16 +1,24 @@
+import json
 from decimal import Decimal
+from pathlib import Path
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
-from app.container import get_db_session
+from app.container import Container, get_container, get_db_session
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
 from app.modules.properties.adapters.repositories import SqlAlchemyPropertyRepository
 from app.modules.properties.application.use_cases import ListPropertiesUseCase
 from app.modules.properties.domain.entities import Property, PropertyPurpose
+from app.modules.properties.media import (
+    LocalPropertyImageStorage,
+    PropertyImageUpload,
+    optimization_prompt,
+    validate_property_image,
+)
 
 router = APIRouter(prefix="/properties", tags=["properties"])
 
@@ -141,6 +149,111 @@ class CreatePropertyRequest(BaseModel):
         if self.suites is not None and self.bedrooms is not None and self.suites > self.bedrooms:
             raise ValueError("suites cannot exceed bedrooms")
         return self
+
+
+class PropertyImageResponse(BaseModel):
+    url: str
+    original_name: str
+    content_type: str
+    size: int
+    optimized: bool
+
+
+@router.post(
+    "/images",
+    response_model=list[PropertyImageResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_property_images(
+    files: Annotated[list[UploadFile], File(description="Imagens JPEG, PNG ou WebP")],
+    optimizations: Annotated[str, Form()] = "[]",
+    note: Annotated[str | None, Form(max_length=1000)] = None,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    container: Container = Depends(get_container),
+) -> list[PropertyImageResponse]:
+    if not files:
+        raise HTTPException(status_code=422, detail="Envie pelo menos uma imagem.")
+    if len(files) > container.settings.property_image_max_files:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Envie no máximo {container.settings.property_image_max_files} imagens.",
+        )
+    requested = _parse_optimizations(optimizations)
+    should_optimize = bool(requested or (note and note.strip()))
+    if should_optimize and container.ai_provider is None:
+        raise HTTPException(
+            status_code=503,
+            detail="O tratamento por OpenAI foi solicitado, mas a integração não está configurada.",
+        )
+
+    prepared: list[PropertyImageUpload] = []
+    for file in files:
+        content = await file.read(container.settings.property_image_max_bytes + 1)
+        upload = PropertyImageUpload(
+            original_name=Path(file.filename or "imagem").name,
+            content_type=(file.content_type or "").lower(),
+            content=content,
+        )
+        try:
+            validate_property_image(upload, max_bytes=container.settings.property_image_max_bytes)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"{upload.original_name}: {exc}") from exc
+        prepared.append(upload)
+
+    if should_optimize:
+        prompt = optimization_prompt(requested, note)
+        processed: list[PropertyImageUpload] = []
+        for upload in prepared:
+            try:
+                content = container.ai_provider.edit_image(
+                    upload.content,
+                    filename=upload.original_name,
+                    prompt=prompt,
+                )
+                output = PropertyImageUpload(
+                    original_name=upload.original_name,
+                    content_type="image/png",
+                    content=content,
+                )
+                validate_property_image(
+                    output, max_bytes=container.settings.property_image_max_bytes
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        f"A OpenAI não conseguiu tratar {upload.original_name}; "
+                        "nenhuma imagem deste envio foi salva."
+                    ),
+                ) from exc
+            processed.append(output)
+        prepared = processed
+
+    storage = LocalPropertyImageStorage(container.settings.property_media_root)
+    return [
+        PropertyImageResponse.model_validate(
+            storage.save(principal.tenant_id, upload, optimized=should_optimize),
+            from_attributes=True,
+        )
+        for upload in prepared
+    ]
+
+
+def _parse_optimizations(raw: str) -> list[str]:
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=422, detail="optimizations deve ser um JSON válido."
+        ) from exc
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise HTTPException(
+            status_code=422,
+            detail="optimizations deve ser uma lista JSON de textos.",
+        )
+    if len(value) > 10 or any(len(item) > 120 for item in value):
+        raise HTTPException(status_code=422, detail="As otimizações solicitadas excedem o limite.")
+    return value
 
 
 @router.post("", response_model=PropertyResponse, status_code=status.HTTP_201_CREATED)

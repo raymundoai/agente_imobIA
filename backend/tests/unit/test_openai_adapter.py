@@ -1,3 +1,4 @@
+import base64
 from types import SimpleNamespace
 
 from app.modules.ai.adapters.openai_adapter import OpenAiAdapter
@@ -34,6 +35,14 @@ class _Client:
     responses = _Responses()
 
 
+class _Images:
+    def edit(self, **kwargs):
+        assert kwargs["model"] == "test-image"
+        return SimpleNamespace(
+            data=[SimpleNamespace(b64_json=base64.b64encode(b"\x89PNG\r\n\x1a\nedited").decode())]
+        )
+
+
 def test_openai_adapter_get_embedding_and_function_calls() -> None:
     adapter = OpenAiAdapter(
         api_key="test",
@@ -51,3 +60,17 @@ def test_openai_adapter_get_embedding_and_function_calls() -> None:
     assert response.tool_calls is not None
     assert response.tool_calls[0].name == "search_knowledge_base"
     assert response.tool_calls[0].arguments == {"query": "boleto"}
+
+
+def test_openai_adapter_returns_edited_image_bytes() -> None:
+    client = SimpleNamespace(images=_Images())
+    adapter = OpenAiAdapter(
+        api_key="test",
+        chat_model="test-chat",
+        embedding_model="test-embedding",
+        image_model="test-image",
+        client=client,
+    )
+
+    edited = adapter.edit_image(b"\x89PNG\r\n\x1a\ninput", filename="input.png", prompt="melhore")
+    assert edited == b"\x89PNG\r\n\x1a\nedited"

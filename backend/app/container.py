@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.modules.ai.adapters.document_parser import PlainTextDocumentParser
 from app.modules.ai.adapters.openai_adapter import OpenAiAdapter
-from app.modules.ai.domain.ports import AiProviderPort, DocumentParserPort
+from app.modules.ai.domain.ports import DocumentParserPort
 from app.modules.auth.ports.security import PasswordHasherPort, TokenServicePort
 from app.modules.integrations.adapters.evolution_api import EvolutionApiAdapter
 from app.modules.integrations.adapters.hubspot import HubSpotCrmAdapter
@@ -52,7 +52,7 @@ class Container:
     crm: CrmPort
     tecimob_credentials: SettingsPlatformCredentialsProvider
     tecimob: RealEstatePlatformPort
-    ai_provider: AiProviderPort | None
+    ai_provider: OpenAiAdapter | None
     document_parser: DocumentParserPort
     http_client: httpx.Client
 
@@ -65,6 +65,7 @@ class Container:
                 chat_model=settings.openai_chat_model,
                 embedding_model=settings.openai_embedding_model,
                 embedding_dimensions=settings.openai_embedding_dimensions,
+                image_model=settings.openai_image_model,
             )
             if settings.openai_api_key is not None
             else None

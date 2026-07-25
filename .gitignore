@@ -12,6 +12,7 @@ htmlcov/
 dist/
 dist-platform/
 build/
+storage/
 *.egg-info/
 .DS_Store
 *.log

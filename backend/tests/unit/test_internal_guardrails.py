@@ -1,4 +1,4 @@
-from app.modules.maintenance.application.use_cases import detect_restricted_intent
+from app.modules.ai.application.guardrails import detect_restricted_intent
 
 
 def test_internal_guardrails_detect_financial_and_legal_handoff_cases() -> None:

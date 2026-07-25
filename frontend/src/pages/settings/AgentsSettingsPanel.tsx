@@ -1,4 +1,4 @@
-import { Bot, Headphones, UserRoundSearch } from "lucide-react";
+import { Bot } from "lucide-react";
 import { useEffect, useState } from "react";
 import { request } from "../../api/client";
 import type { Tenant, TenantSettings } from "../../api/types";
@@ -6,8 +6,6 @@ import { useAuth } from "../../auth/AuthContext";
 import { getTokenClaims } from "../../auth/tokenClaims";
 import { Badge } from "../../components/Badge";
 import { Card } from "../../components/Card";
-
-type AgentKey = "leads" | "service";
 
 type AgentConfig = {
   name: string;
@@ -21,29 +19,16 @@ type AgentConfig = {
   knowledge_scope: string;
 };
 
-const defaultAgents: Record<AgentKey, AgentConfig> = {
-  leads: {
-    name: "Agente de Leads",
-    status: "active",
-    audience: "Novos contatos, compradores e interessados em locação",
-    goal: "Receber o lead, entender o perfil do imóvel, cadastrar demanda e acionar o corretor quando estiver qualificado.",
-    channels: "WhatsApp, Instagram",
-    handoff_rules: "Lead pronto para visita, pedido de negociação, dúvida complexa ou baixa confiança da IA.",
-    restrictions: "Não prometer disponibilidade, não negociar valores finais e não assumir compromisso em nome do corretor.",
-    transfer_message: "Vou acionar um corretor da equipe para seguir com as melhores opções.",
-    knowledge_scope: "Regiões atendidas, tipos de imóvel, processo de compra e locação, critérios de qualificação.",
-  },
-  service: {
-    name: "Agente de Atendimento",
-    status: "active",
-    audience: "Inquilinos e proprietários ativos",
-    goal: "Resolver dúvidas operacionais, coletar informações, abrir chamados e encaminhar situações sensíveis para a equipe.",
-    channels: "WhatsApp",
-    handoff_rules: "Manutenção urgente, reclamação grave, inadimplência, rescisão, jurídico ou pedido de alteração contratual.",
-    restrictions: "Não negociar dívida, não dar orientação jurídica conclusiva e não alterar contratos.",
-    transfer_message: "Vou registrar sua solicitação e acionar a equipe responsável.",
-    knowledge_scope: "FAQ de locação, manutenção, boletos, repasses, contratos e procedimentos internos.",
-  },
+const defaultAgent: AgentConfig = {
+  name: "Agente de Leads",
+  status: "active",
+  audience: "Novos contatos, compradores e interessados em locação",
+  goal: "Receber o lead, entender o perfil do imóvel, cadastrar a demanda e acionar o corretor quando estiver qualificado.",
+  channels: "WhatsApp, Telegram",
+  handoff_rules: "Lead pronto para visita, pedido de negociação, dúvida complexa ou baixa confiança da IA.",
+  restrictions: "Não prometer disponibilidade, não negociar valores finais e não assumir compromisso em nome do corretor.",
+  transfer_message: "Vou acionar um corretor da equipe para seguir com as melhores opções.",
+  knowledge_scope: "Regiões atendidas, tipos de imóvel, processo de compra e locação e critérios de qualificação.",
 };
 
 export function AgentsSettingsPanel({
@@ -55,24 +40,17 @@ export function AgentsSettingsPanel({
 }) {
   const { token } = useAuth();
   const claims = getTokenClaims(token);
-  const [activeAgent, setActiveAgent] = useState<AgentKey>("leads");
-  const [agents, setAgents] = useState<Record<AgentKey, AgentConfig>>(defaultAgents);
+  const [agent, setAgent] = useState(defaultAgent);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    const savedAgents = tenant?.settings.agents as Partial<Record<AgentKey, Partial<AgentConfig>>> | undefined;
-    setAgents({
-      leads: { ...defaultAgents.leads, ...(savedAgents?.leads ?? {}) },
-      service: { ...defaultAgents.service, ...(savedAgents?.service ?? {}) },
-    });
+    const saved = tenant?.settings.agents as { leads?: Partial<AgentConfig> } | undefined;
+    setAgent({ ...defaultAgent, ...(saved?.leads ?? {}) });
   }, [tenant]);
 
   function updateAgent(patch: Partial<AgentConfig>) {
-    setAgents((current) => ({
-      ...current,
-      [activeAgent]: { ...current[activeAgent], ...patch },
-    }));
+    setAgent((current) => ({ ...current, ...patch }));
   }
 
   async function save() {
@@ -85,82 +63,45 @@ export function AgentsSettingsPanel({
     try {
       const settings: TenantSettings = {
         ...tenant.settings,
-        agents,
+        agents: { leads: agent },
       };
       const updated = await request<Tenant>(
         `/tenants/${claims.tenantId}/settings`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ settings }),
-        },
+        { method: "PATCH", body: JSON.stringify({ settings }) },
         token,
       );
       onTenantChange(updated);
-      setMessage("Agentes salvos.");
+      setMessage("Agente salvo.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Falha ao salvar agentes.");
+      setMessage(error instanceof Error ? error.message : "Falha ao salvar o agente.");
     } finally {
       setSaving(false);
     }
   }
 
-  const current = agents[activeAgent];
-
   return (
     <Card className="settings-panel-card">
       <div className="settings-panel-header">
         <div>
-          <h2>Agentes</h2>
-          <p>Configure quem a IA atende, o que ela pode fazer e quando deve chamar a equipe.</p>
+          <h2>Agente de qualificação</h2>
+          <p>Configure o atendimento inicial, os limites da IA e a passagem para a equipe.</p>
         </div>
-        <Badge variant="success">
+        <Badge variant={agent.status === "active" ? "success" : "muted"}>
           <Bot size={13} />
-          2 agentes
+          {agent.status === "active" ? "Ativo" : "Inativo"}
         </Badge>
       </div>
 
-      <div className="agent-card-grid">
-        <button
-          className={activeAgent === "leads" ? "agent-choice active" : "agent-choice"}
-          onClick={() => setActiveAgent("leads")}
-          type="button"
-        >
-          <UserRoundSearch size={19} />
-          <span>
-            <strong>{agents.leads.name}</strong>
-            <small>Novos leads e primeiros contatos</small>
-          </span>
-          <Badge variant={agents.leads.status === "active" ? "success" : "muted"}>
-            {agents.leads.status === "active" ? "Ativo" : "Inativo"}
-          </Badge>
-        </button>
-        <button
-          className={activeAgent === "service" ? "agent-choice active" : "agent-choice"}
-          onClick={() => setActiveAgent("service")}
-          type="button"
-        >
-          <Headphones size={19} />
-          <span>
-            <strong>{agents.service.name}</strong>
-            <small>Inquilinos e proprietários</small>
-          </span>
-          <Badge variant={agents.service.status === "active" ? "success" : "muted"}>
-            {agents.service.status === "active" ? "Ativo" : "Inativo"}
-          </Badge>
-        </button>
-      </div>
-
       <div className="settings-subsection">
-        <h3>{current.name}</h3>
         <div className="form-grid">
           <label>
             Nome do agente
-            <input value={current.name} onChange={(event) => updateAgent({ name: event.target.value })} />
+            <input value={agent.name} onChange={(event) => updateAgent({ name: event.target.value })} />
           </label>
           <label>
             Status
             <select
-              value={current.status}
+              value={agent.status}
               onChange={(event) => updateAgent({ status: event.target.value as AgentConfig["status"] })}
             >
               <option value="active">Ativo</option>
@@ -169,49 +110,31 @@ export function AgentsSettingsPanel({
           </label>
           <label className="form-span-2">
             Público atendido
-            <input
-              value={current.audience}
-              onChange={(event) => updateAgent({ audience: event.target.value })}
-            />
+            <input value={agent.audience} onChange={(event) => updateAgent({ audience: event.target.value })} />
           </label>
           <label className="form-span-2">
             Objetivo
-            <textarea value={current.goal} onChange={(event) => updateAgent({ goal: event.target.value })} />
+            <textarea value={agent.goal} onChange={(event) => updateAgent({ goal: event.target.value })} />
           </label>
           <label>
             Canais onde atua
-            <input
-              value={current.channels}
-              onChange={(event) => updateAgent({ channels: event.target.value })}
-            />
+            <input value={agent.channels} onChange={(event) => updateAgent({ channels: event.target.value })} />
           </label>
           <label>
             Base usada
-            <input
-              value={current.knowledge_scope}
-              onChange={(event) => updateAgent({ knowledge_scope: event.target.value })}
-            />
+            <input value={agent.knowledge_scope} onChange={(event) => updateAgent({ knowledge_scope: event.target.value })} />
           </label>
           <label className="form-span-2">
             Quando chamar uma pessoa
-            <textarea
-              value={current.handoff_rules}
-              onChange={(event) => updateAgent({ handoff_rules: event.target.value })}
-            />
+            <textarea value={agent.handoff_rules} onChange={(event) => updateAgent({ handoff_rules: event.target.value })} />
           </label>
           <label className="form-span-2">
             O que não pode fazer
-            <textarea
-              value={current.restrictions}
-              onChange={(event) => updateAgent({ restrictions: event.target.value })}
-            />
+            <textarea value={agent.restrictions} onChange={(event) => updateAgent({ restrictions: event.target.value })} />
           </label>
           <label className="form-span-2">
             Mensagem ao transferir para a equipe
-            <input
-              value={current.transfer_message}
-              onChange={(event) => updateAgent({ transfer_message: event.target.value })}
-            />
+            <input value={agent.transfer_message} onChange={(event) => updateAgent({ transfer_message: event.target.value })} />
           </label>
         </div>
       </div>
@@ -219,7 +142,7 @@ export function AgentsSettingsPanel({
       <div className="settings-actions">
         {message ? <span>{message}</span> : null}
         <button disabled={saving || !tenant} onClick={save} type="button">
-          {saving ? "Salvando..." : "Salvar agentes"}
+          {saving ? "Salvando..." : "Salvar agente"}
         </button>
       </div>
     </Card>

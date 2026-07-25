@@ -6,8 +6,7 @@ import { navigationItems } from "./Sidebar";
 
 const subtitles: Record<string, string> = {
   dashboard: "Métricas principais da operação",
-  capture: "Missões de captação, imóveis compatíveis e extensão do corretor",
-  conversations: "Atendimento WhatsApp com IA e equipe humana",
+  conversations: "Atendimento de leads por WhatsApp e Telegram com IA e equipe humana",
   contacts: "Gestão de leads, clientes, tags e histórico de relacionamento",
   settings: "Canais, agentes, sistemas e equipe",
 };

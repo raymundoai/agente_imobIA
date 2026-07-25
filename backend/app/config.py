@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import BaseModel, Field, HttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -60,6 +61,10 @@ class Settings(BaseSettings):
     openai_chat_model: str = "gpt-5.5"
     openai_embedding_model: str = "text-embedding-3-small"
     openai_embedding_dimensions: int = Field(default=1536, gt=0, le=2048)
+    openai_image_model: str = "gpt-image-1"
+    property_media_root: Path = Path("storage/property-images")
+    property_image_max_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
+    property_image_max_files: int = Field(default=12, gt=0, le=50)
     ai_auto_reply_enabled: bool = False
     ai_auto_send_to_channel: bool = False
     platform_bootstrap_token: SecretStr | None = None

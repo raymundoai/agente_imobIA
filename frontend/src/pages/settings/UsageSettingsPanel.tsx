@@ -61,15 +61,11 @@ export function UsageSettingsPanel() {
 const moduleLabels: Record<string, string> = {
   ai: "IA",
   conversations: "Conversas",
-  capture: "Buscador",
-  maintenance: "Pós-contrato",
 };
 
 const typeLabels: Record<string, string> = {
   conversation: "Conversa",
   message: "Mensagem",
   ai_call: "Chamada de IA",
-  capture: "Captação",
   handoff: "Passagem para equipe",
-  ticket: "Chamado",
 };

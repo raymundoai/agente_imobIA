@@ -1,11 +1,9 @@
-import { FileSpreadsheet, ImagePlus, Plus, Upload, X } from "lucide-react";
+import { ImagePlus, Plus, X } from "lucide-react";
 import { type ChangeEvent, type FormEvent, useEffect, useState } from "react";
 import { request } from "../api/client";
 import type { Property } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { PropertyCard } from "../components/PropertyCard";
-
-type PropertyTab = "own" | "captured";
 
 type PropertyForm = {
   listing_code: string;
@@ -133,25 +131,19 @@ function splitList(value: string) {
 export function PropertiesPage() {
   const { token } = useAuth();
   const [items, setItems] = useState<Property[]>([]);
-  const [activeTab, setActiveTab] = useState<PropertyTab>("own");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [form, setForm] = useState<PropertyForm>(initialPropertyForm);
   const [photos, setPhotos] = useState<PropertyPhoto[]>([]);
   const [imageOptimizations, setImageOptimizations] = useState<string[]>([]);
   const [imageOptimizationNote, setImageOptimizationNote] = useState("");
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [formMessage, setFormMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     void request<Property[]>("/properties", {}, token).then((properties) =>
       setItems(properties),
     );
   }, [token]);
-
-  const filteredItems = items.filter((item) =>
-    activeTab === "captured" ? item.via_extension : !item.via_extension,
-  );
 
   function updateForm(field: keyof PropertyForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -163,6 +155,7 @@ export function PropertiesPage() {
     setImageOptimizations([]);
     setImageOptimizationNote("");
     setForm(initialPropertyForm);
+    setFormMessage(null);
     setIsCreateModalOpen(false);
   }
 
@@ -202,8 +195,23 @@ export function PropertiesPage() {
 
   async function handleCreateProperty(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setSaving(true);
+    setFormMessage(null);
 
-    const payload = {
+    let images: Array<Record<string, unknown>> = [];
+    try {
+      if (photos.length > 0) {
+        const body = new FormData();
+        photos.forEach((photo) => body.append("files", photo.file));
+        body.append("optimizations", JSON.stringify(imageOptimizations));
+        body.append("note", imageOptimizationNote.trim());
+        const uploaded = await request<
+          Array<Record<string, unknown>> | { images: Array<Record<string, unknown>> }
+        >("/properties/images", { method: "POST", body }, token);
+        images = Array.isArray(uploaded) ? uploaded : uploaded.images;
+      }
+
+      const payload = {
       listing_code: form.listing_code.trim() || null,
       title: form.title.trim(),
       purpose: form.purpose,
@@ -238,89 +246,51 @@ export function PropertiesPage() {
         rooms: splitList(form.rooms),
         amenities: splitList(form.amenities),
       },
-      images: [],
+      images,
       owner_name: form.advertiser_name.trim() || null,
       owner_phone: form.advertiser_phone.trim() || null,
       source_url: form.source_url.trim() || null,
     };
-    try {
       const created = await request<Property>("/properties", {
         method: "POST",
         body: JSON.stringify(payload),
       }, token);
       setItems((current) => [created, ...current]);
     } catch (error) {
-      setImportMessage(error instanceof Error ? error.message : "Falha ao salvar imóvel.");
+      setFormMessage(error instanceof Error ? error.message : "Falha ao salvar imóvel.");
+      setSaving(false);
       return;
     }
-    setActiveTab("own");
+    photos.forEach((photo) => URL.revokeObjectURL(photo.previewUrl));
     setForm(initialPropertyForm);
     setPhotos([]);
     setImageOptimizations([]);
     setImageOptimizationNote("");
     setIsCreateModalOpen(false);
-  }
-
-  function handleImportFileChange(event: ChangeEvent<HTMLInputElement>) {
-    setImportFile(event.target.files?.[0] ?? null);
-    setImportMessage(null);
-  }
-
-  function handleImportSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!importFile) {
-      setImportMessage("Selecione um arquivo para importar.");
-      return;
-    }
-
-    setImportMessage(
-      `Arquivo "${importFile.name}" selecionado. O processamento será conectado quando definirmos o formato de importação.`,
-    );
+    setSaving(false);
   }
 
   return (
     <section className="page-stack properties-page">
       <div className="property-toolbar">
-        <div className="property-tabs" role="tablist" aria-label="Tipo de imóvel">
-          <button
-            className={activeTab === "own" ? "active" : ""}
-            onClick={() => setActiveTab("own")}
-            type="button"
-          >
-            Imóveis próprios
-          </button>
-          <button
-            className={activeTab === "captured" ? "active" : ""}
-            onClick={() => setActiveTab("captured")}
-            type="button"
-          >
-            Captados pelo Buscador
-          </button>
-        </div>
+        <h2>Carteira de imóveis</h2>
         <div className="toolbar-actions">
           <button className="button-outline" onClick={() => setIsCreateModalOpen(true)} type="button">
             <Plus size={15} />
             Cadastrar Imóvel
           </button>
-          <button className="button-outline" onClick={() => setIsImportModalOpen(true)} type="button">
-            <Upload size={15} />
-            Importar Carteira de Imóveis
-          </button>
         </div>
       </div>
 
-      {filteredItems.length > 0 ? (
+      {items.length > 0 ? (
         <div className="property-grid">
-          {filteredItems.map((property) => (
+          {items.map((property) => (
             <PropertyCard key={property.id} property={property} />
           ))}
         </div>
       ) : (
         <div className="empty-state large">
-          {activeTab === "own"
-            ? "Nenhum imóvel próprio cadastrado."
-            : "Nenhum imóvel captado pelo Buscador."}
+          Nenhum imóvel cadastrado.
         </div>
       )}
 
@@ -583,67 +553,19 @@ export function PropertiesPage() {
               </fieldset>
 
               <div className="modal-actions">
+                {formMessage ? <div className="error-box">{formMessage}</div> : null}
                 <button className="button-outline" onClick={closeCreateModal} type="button">
                   Cancelar
                 </button>
-                <button type="submit">Salvar imóvel</button>
-              </div>
-            </form>
-          </section>
-        </div>
-      ) : null}
-
-      {isImportModalOpen ? (
-        <div className="modal-backdrop" role="presentation">
-          <section aria-modal="true" className="demand-modal property-modal compact" role="dialog">
-            <div className="modal-header">
-              <div>
-                <h2>Importar carteira de imóveis</h2>
-                <p>Selecione o arquivo da carteira. Os formatos aceitos serão definidos na próxima etapa.</p>
-              </div>
-              <button
-                className="icon-button"
-                onClick={() => {
-                  setIsImportModalOpen(false);
-                  setImportMessage(null);
-                }}
-                type="button"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleImportSubmit}>
-              <label className="import-file-box">
-                <FileSpreadsheet size={24} />
-                <strong>{importFile ? importFile.name : "Selecionar arquivo da carteira"}</strong>
-                <span>
-                  {importFile
-                    ? `${(importFile.size / 1024).toFixed(1)} KB`
-                    : "CSV, XLSX, XLS ou JSON poderão ser usados quando definirmos o padrão."}
-                </span>
-                <input accept=".csv,.xlsx,.xls,.json" onChange={handleImportFileChange} type="file" />
-              </label>
-
-              {importMessage ? <div className="inline-feedback">{importMessage}</div> : null}
-
-              <div className="modal-actions">
-                <button
-                  className="button-outline"
-                  onClick={() => {
-                    setIsImportModalOpen(false);
-                    setImportMessage(null);
-                  }}
-                  type="button"
-                >
-                  Cancelar
+                <button disabled={saving} type="submit">
+                  {saving ? "Salvando..." : "Salvar imóvel"}
                 </button>
-                <button type="submit">Importar arquivo</button>
               </div>
             </form>
           </section>
         </div>
       ) : null}
+
     </section>
   );
 }

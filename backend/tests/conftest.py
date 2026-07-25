@@ -1,5 +1,6 @@
 import os
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from alembic.config import Config
@@ -81,7 +82,7 @@ def clean_database(request: pytest.FixtureRequest) -> Generator[None, None, None
 
 
 @pytest.fixture
-def client(migrated_database: str) -> Generator[TestClient, None, None]:
+def client(migrated_database: str, tmp_path: Path) -> Generator[TestClient, None, None]:
     from app.main import create_app
 
     settings = Settings(
@@ -92,6 +93,7 @@ def client(migrated_database: str) -> Generator[TestClient, None, None]:
         ai_auto_send_to_channel=False,
         platform_bootstrap_token=TEST_PLATFORM_BOOTSTRAP_TOKEN,
         telegram_auto_reply_enabled=False,
+        property_media_root=tmp_path / "property-images",
         telegram_tenant_configs={
             "tenant-a": {
                 "bot_token": "test-telegram-token-a",

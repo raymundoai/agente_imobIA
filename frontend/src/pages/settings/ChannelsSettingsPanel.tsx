@@ -1,4 +1,4 @@
-import { Instagram, Loader2, LogIn, MessageCircle, Music2, PlugZap, QrCode, Send, X } from "lucide-react";
+import { Loader2, LogIn, MessageCircle, PlugZap, QrCode, Send, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { request } from "../../api/client";
@@ -8,28 +8,20 @@ import { getTokenClaims } from "../../auth/tokenClaims";
 import { Badge } from "../../components/Badge";
 import { Card } from "../../components/Card";
 
-type ChannelKey = "whatsapp" | "telegram" | "instagram" | "tiktok";
+type ChannelKey = "whatsapp" | "telegram";
 
 type ChannelConfig = {
   status: "connected" | "pending" | "disabled" | "disconnected";
-  agents: Array<"leads" | "service">;
+  agents: Array<"leads">;
 };
 
 const defaultChannels: Record<ChannelKey, ChannelConfig> = {
   whatsapp: {
     status: "pending",
-    agents: ["leads", "service"],
+    agents: ["leads"],
   },
   telegram: {
     status: "pending",
-    agents: ["leads"],
-  },
-  instagram: {
-    status: "disabled",
-    agents: ["leads"],
-  },
-  tiktok: {
-    status: "disabled",
     agents: ["leads"],
   },
 };
@@ -55,13 +47,11 @@ export function ChannelsSettingsPanel({
 
   useEffect(() => {
     const savedChannels = tenant?.settings.channels as
-      | Partial<Record<ChannelKey, Partial<ChannelConfig> & { agent?: "leads" | "service" }>>
+      | Partial<Record<ChannelKey, Partial<ChannelConfig> & { agent?: "leads" }>>
       | undefined;
     setChannels({
       whatsapp: normalizeChannel(defaultChannels.whatsapp, savedChannels?.whatsapp),
       telegram: normalizeChannel(defaultChannels.telegram, savedChannels?.telegram),
-      instagram: normalizeChannel(defaultChannels.instagram, savedChannels?.instagram),
-      tiktok: normalizeChannel(defaultChannels.tiktok, savedChannels?.tiktok),
     });
   }, [tenant]);
 
@@ -206,20 +196,6 @@ export function ChannelsSettingsPanel({
           connection={whatsappConnection}
           connecting={connectingWhatsapp}
         />
-        <ChannelEditor
-          channel="instagram"
-          config={channels.instagram}
-          icon={<Instagram size={20} />}
-          title="Instagram"
-          onChange={updateChannel}
-        />
-        <ChannelEditor
-          channel="tiktok"
-          config={channels.tiktok}
-          icon={<Music2 size={20} />}
-          title="TikTok"
-          onChange={updateChannel}
-        />
       </div>
 
       <div className="settings-actions">
@@ -295,7 +271,7 @@ function ChannelEditor({
       <div className="integration-actions">
         <button
           className="button-outline"
-          disabled={channel === "instagram" || channel === "tiktok" || connecting}
+          disabled={connecting}
           onClick={onConnect}
           type="button"
         >
@@ -308,24 +284,16 @@ function ChannelEditor({
           )}
           {channel === "whatsapp"
             ? "Gerar QR Code"
-            : channel === "telegram"
-              ? "Configurar webhook"
-              : channel === "tiktok"
-                ? "Em planejamento"
-                : "Conectar / fazer login"}
+            : "Configurar webhook"}
         </button>
         <span>
           {channel === "whatsapp"
             ? connection && "instance" in connection && connection.instance
               ? `Instância: ${connection.instance}`
               : "A conexão será feita pela Evolution API."
-            : channel === "telegram"
-              ? connection && "bot_username" in connection && connection.bot_username
-                ? `Bot: @${connection.bot_username}`
-                : "Configure o token do BotFather no backend."
-            : channel === "instagram"
-              ? "A conexão será ativada depois da criação do app Meta e configuração do login no backend."
-              : "Canal planejado. A integração dependerá do acesso à API oficial do TikTok."}
+            : connection && "bot_username" in connection && connection.bot_username
+              ? `Bot: @${connection.bot_username}`
+              : "Configure o token do BotFather no backend."}
         </span>
       </div>
     </section>
@@ -339,14 +307,13 @@ const statusLabels: Record<ChannelConfig["status"], string> = {
   disconnected: "Desconectado",
 };
 
-const agentOptions: Array<{ key: "leads" | "service"; label: string }> = [
+const agentOptions: Array<{ key: "leads"; label: string }> = [
   { key: "leads", label: "Agente de Leads" },
-  { key: "service", label: "Agente de Atendimento" },
 ];
 
 function normalizeChannel(
   defaults: ChannelConfig,
-  saved?: Partial<ChannelConfig> & { agent?: "leads" | "service" },
+  saved?: Partial<ChannelConfig> & { agent?: "leads" },
 ): ChannelConfig {
   return {
     ...defaults,

@@ -8,7 +8,6 @@ export type DashboardStats = {
   conversations: number;
   leads: number;
   handoffs: number;
-  maintenance_tickets: number;
   properties: number;
 };
 
@@ -95,49 +94,6 @@ export type Property = {
   via_extension: boolean;
 };
 
-export type CaptureMission = {
-  demand: Record<string, string | string[] | null>;
-  search_filters: Record<string, string | string[] | number | null>;
-  existing_matches: Array<{
-    id: string;
-    title: string;
-    source_url: string | null;
-    price: string | null;
-    score: number;
-    matched: string[];
-    tradeoffs: string[];
-  }>;
-  portal_searches: Array<{
-    id: string;
-    name: string;
-    url: string;
-    applied_filters: string[];
-    pending_filters: string[];
-  }>;
-};
-
-export type DiscoverMissionResult = {
-  portal: string;
-  discovered: number;
-  imported: number;
-  properties: Property[];
-};
-
-export type MaintenanceTicket = {
-  id: string;
-  tenant_id: string;
-  conversation_id: string | null;
-  customer_name: string;
-  phone: string;
-  property_reference: string | null;
-  issue_type: string;
-  description: string;
-  urgency: string;
-  status: string;
-  assigned_user_id: string | null;
-  attachments: Array<Record<string, unknown>>;
-};
-
 export type KnowledgeDocument = {
   id: string;
   filename: string;
@@ -175,7 +131,6 @@ export type TenantSettings = {
   ai_agent?: {
     handoff_policies?: string;
     autonomy_limits?: string;
-    maintenance_rules?: string;
     fallback_message?: string;
     faq_scope?: string;
   };
@@ -199,7 +154,6 @@ export type TenantSettings = {
       embedding_model?: string;
       embedding_dimensions?: string;
     };
-    capture?: Record<string, string | undefined>;
   };
   [key: string]: unknown;
 };
