@@ -1,7 +1,11 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
+from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.config import Settings, get_settings
 from app.container import Container
@@ -12,7 +16,7 @@ from app.modules.contacts.api import router as contacts_router
 from app.modules.conversations.api.routes import router as conversations_router
 from app.modules.conversations.api.routes import webhook_router
 from app.modules.dashboard.api import router as dashboard_router
-from app.modules.integrations.api import router as integrations_router
+from app.modules.integrations.api import mvp_router as integrations_router
 from app.modules.leads.api import router as leads_router
 from app.modules.messaging.api import router as messaging_router
 from app.modules.platform.api import router as platform_router
@@ -28,6 +32,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings or get_settings()
     configure_logging(resolved.log_level)
     container = Container.build(resolved)
+    alembic_config = AlembicConfig(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+    expected_database_revision = ScriptDirectory.from_config(
+        alembic_config
+    ).get_current_head()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -66,6 +74,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/health", tags=["system"])
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @application.get("/ready", tags=["system"])
+    def readiness(response: Response) -> dict[str, str]:
+        try:
+            with container.database.session_factory() as session:
+                session.execute(text("SELECT 1"))
+                revision = session.scalar(text("SELECT version_num FROM alembic_version"))
+            if not revision or revision != expected_database_revision:
+                raise RuntimeError("database migration revision is not current")
+        except Exception:
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            return {"status": "not_ready"}
+        return {"status": "ready", "database_revision": str(revision)}
 
     return application
 

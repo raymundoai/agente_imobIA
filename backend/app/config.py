@@ -113,6 +113,37 @@ class Settings(BaseSettings):
             return None
         return value
 
+    @field_validator(
+        "property_media_legacy_root",
+        "property_s3_endpoint_url",
+        "property_s3_region",
+        mode="before",
+    )
+    @classmethod
+    def empty_property_storage_value_to_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator(
+        "property_s3_access_key",
+        "property_s3_secret_key",
+        mode="before",
+    )
+    @classmethod
+    def empty_property_storage_secret_to_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("cors_origins")
+    @classmethod
+    def validate_cors_origins(cls, value: list[str]) -> list[str]:
+        normalized = [origin.rstrip("/") for origin in value]
+        if "*" in normalized:
+            raise ValueError("CORS_ORIGINS cannot contain wildcard origins")
+        return normalized
+
 
 @lru_cache
 def get_settings() -> Settings:

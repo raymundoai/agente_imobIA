@@ -20,6 +20,7 @@ from app.shared.errors.exceptions import ConfigurationError, ExternalServiceErro
 from app.shared.security.secrets import SecretCipher, integration_cipher
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
+mvp_router = APIRouter(prefix="/integrations", tags=["integrations"])
 
 SUPPORTED_SETUP_PROVIDERS = {
     "kenlo": {
@@ -178,7 +179,7 @@ def get_tecimob_status(
     )
 
 
-@router.post("/telegram/connect", response_model=TelegramConnectionResponse)
+@mvp_router.post("/telegram/connect", response_model=TelegramConnectionResponse)
 def connect_telegram(
     principal: CurrentPrincipal = Depends(get_current_principal),
     session: Session = Depends(get_db_session),
@@ -210,7 +211,7 @@ def connect_telegram(
     return _telegram_response(credentials is not None, bot, info)
 
 
-@router.get("/telegram/status", response_model=TelegramConnectionResponse)
+@mvp_router.get("/telegram/status", response_model=TelegramConnectionResponse)
 def telegram_status(
     principal: CurrentPrincipal = Depends(get_current_principal),
     session: Session = Depends(get_db_session),
@@ -254,7 +255,7 @@ def test_tecimob_connection(
     )
 
 
-@router.post("/evolution/whatsapp/connect", response_model=EvolutionWhatsappResponse)
+@mvp_router.post("/evolution/whatsapp/connect", response_model=EvolutionWhatsappResponse)
 def connect_whatsapp(
     principal: CurrentPrincipal = Depends(
         require_roles(UserRole.ADMIN, UserRole.GESTOR)
@@ -341,7 +342,7 @@ def connect_whatsapp(
     )
 
 
-@router.get("/evolution/whatsapp/status", response_model=EvolutionWhatsappResponse)
+@mvp_router.get("/evolution/whatsapp/status", response_model=EvolutionWhatsappResponse)
 def get_whatsapp_status(
     principal: CurrentPrincipal = Depends(get_current_principal),
     session: Session = Depends(get_db_session),

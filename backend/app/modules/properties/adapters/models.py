@@ -94,7 +94,11 @@ class PropertyModel(Base):
         JSONB, nullable=False, default=dict, server_default=sql_text("'{}'::jsonb")
     )
     images: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, default=list, server_default=sql_text("'[]'::jsonb")
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default=sql_text("'[]'::jsonb"),
+        comment="Deprecated read-only legacy archive; property_images is authoritative",
     )
     advertiser_name: Mapped[str | None] = mapped_column(Text)
     advertiser_phone: Mapped[str | None] = mapped_column(Text)

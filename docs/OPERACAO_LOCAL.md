@@ -144,6 +144,77 @@ Para parar o banco sem apagar os dados:
 docker compose --env-file backend/.env stop postgres
 ```
 
+## Homologação operacional
+
+Antes de liberar um piloto, valide:
+
+1. `GET /health` responde `200` e `GET /ready` confirma banco e revisão Alembic;
+2. mensagens mock de WhatsApp e Telegram criam conversa, contato, demanda, job e lançamento
+   de crédito uma única vez;
+3. repetição do mesmo webhook não duplica mensagens, jobs nem consumo;
+4. dois tenants não conseguem consultar contatos, conversas, imóveis ou mídias um do outro;
+5. agente inativo e conversa em modo humano não geram resposta automática;
+6. queda e reinício do worker recuperam jobs elegíveis e reservas expiradas;
+7. CRUD de imóveis, imagem principal, ordenação, reprocessamento e limpeza funcionam;
+8. o painel administrativo permanece na aplicação/porta isolada.
+
+Os testes mock comprovam o contrato interno. WhatsApp Evolution, bot Telegram, DNS, HTTPS e
+credenciais OpenAI ainda precisam de uma rodada final com serviços externos reais.
+
+## Backup e recuperação
+
+Para o storage local, coordene banco e arquivos pausando todas as escritas. O `pg_dump` sozinho
+é consistente para o PostgreSQL, mas não cria um ponto consistente com uploads simultâneos:
+
+```bash
+mkdir -p backups
+docker compose --env-file backend/.env stop backend message-worker
+docker compose --env-file backend/.env exec -T postgres \
+  sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > backups/imobia.dump
+docker run --rm -v agente_imobia_imobos_property_media:/source:ro \
+  -v "$PWD/backups:/backup" alpine \
+  tar -C /source -czf /backup/property-media.tar.gz .
+sha256sum backups/imobia.dump backups/property-media.tar.gz > backups/SHA256SUMS
+docker compose --env-file backend/.env up -d backend message-worker
+```
+
+Nunca valide restore sobre os volumes atuais. O exemplo abaixo usa container, porta e volumes
+isolados; ajuste as credenciais descartáveis e remova-os somente após guardar a evidência:
+
+```bash
+sha256sum -c backups/SHA256SUMS
+docker volume create imobia_restore_db
+docker volume create imobia_restore_media
+docker run -d --name imobia-restore-postgres -p 55432:5432 \
+  -e POSTGRES_DB=imobia_restore -e POSTGRES_USER=restore \
+  -e POSTGRES_PASSWORD=restore-only-local \
+  -v imobia_restore_db:/var/lib/postgresql/data pgvector/pgvector:pg16
+until docker exec imobia-restore-postgres pg_isready -U restore -d imobia_restore; do sleep 1; done
+docker exec -i imobia-restore-postgres \
+  pg_restore -U restore -d imobia_restore --clean --if-exists --no-owner \
+  < backups/imobia.dump
+docker run --rm -v imobia_restore_media:/target \
+  -v "$PWD/backups:/backup:ro" alpine \
+  tar -C /target -xzf /backup/property-media.tar.gz
+docker exec imobia-restore-postgres psql -U restore -d imobia_restore \
+  -c 'SELECT version_num FROM alembic_version'
+docker run --rm -v imobia_restore_media:/target:ro alpine find /target -type f
+```
+
+Depois da conferência: `docker rm -f imobia-restore-postgres`. Preserve os volumes para
+investigação ou remova explicitamente `imobia_restore_db` e `imobia_restore_media`.
+
+Em produção S3, habilite versionamento, criptografia, bloqueio de acesso público e política de
+retenção. Registre no manifesto do backup a versão/horário do dump e um inventário do bucket.
+Teste recuperação copiando versões para outro bucket ou prefixo isolado e aponte uma instância
+de homologação para esse destino; nunca restaure por cima do bucket ativo. Confirme originais,
+derivadas e chaves do banco antes de promover o ambiente recuperado.
+
+Em 25/07/2026 este procedimento local foi exercitado com API/worker pausados durante a
+captura, checksums válidos e restore em container PostgreSQL, porta e volumes descartáveis.
+A revisão `20260725_0016`, tenants, imóveis, ledger e arquivos foram consultados no destino;
+os recursos descartáveis foram removidos e os volumes atuais não foram alterados.
+
 Evite `docker compose down -v`: `-v` remove o volume do banco.
 
 ## 5. Criar acessos

@@ -648,8 +648,6 @@ def update_property_image(
     session.commit()
     session.refresh(image)
     return _linked_image_response(image)
-
-
 @router.delete(
     "/{property_id}/images/{image_id}",
     response_model=list[LinkedPropertyImageResponse],
@@ -891,33 +889,3 @@ def reprocess_property_image(
         heartbeat_stopped.set()
         heartbeat_thread.join(timeout=2)
     return _linked_image_response(image)
-
-
-@router.post("/media-cleanup/process")
-def process_property_media_cleanup(
-    principal: CurrentPrincipal = Depends(get_current_principal),
-    container: Container = Depends(get_container),
-    session: Session = Depends(get_db_session),
-) -> dict[str, int]:
-    jobs = session.scalars(
-        select(PropertyMediaCleanupModel)
-        .where(
-            PropertyMediaCleanupModel.tenant_id == principal.tenant_id,
-            PropertyMediaCleanupModel.status.in_(["pending", "failed"]),
-        )
-        .order_by(PropertyMediaCleanupModel.created_at)
-        .limit(100)
-    ).all()
-    completed = 0
-    for job in jobs:
-        try:
-            container.property_image_storage.delete(principal.tenant_id, job.storage_key)
-            job.status = "done"
-            job.completed_at = datetime.now(UTC)
-            job.error = None
-            completed += 1
-        except Exception as exc:
-            job.status = "failed"
-            job.error = str(exc)[:1000]
-    session.commit()
-    return {"processed": len(jobs), "completed": completed}
