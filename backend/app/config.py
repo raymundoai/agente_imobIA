@@ -63,6 +63,14 @@ class Settings(BaseSettings):
     openai_embedding_dimensions: int = Field(default=1536, gt=0, le=2048)
     openai_image_model: str = "gpt-image-2"
     property_media_root: Path = Path("storage/property-images")
+    property_media_legacy_root: Path | None = None
+    property_legacy_url_allowed_hosts: list[str] = Field(default_factory=list)
+    property_storage_backend: str = Field(default="local", pattern="^(local|s3)$")
+    property_s3_bucket: str | None = None
+    property_s3_endpoint_url: str | None = None
+    property_s3_region: str | None = None
+    property_s3_access_key: SecretStr | None = None
+    property_s3_secret_key: SecretStr | None = None
     property_image_max_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
     property_image_max_files: int = Field(default=12, gt=0, le=50)
     ai_auto_reply_enabled: bool = False

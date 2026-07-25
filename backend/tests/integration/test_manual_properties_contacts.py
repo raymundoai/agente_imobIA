@@ -114,35 +114,84 @@ def test_property_requires_prices_for_each_selected_offer(client: TestClient) ->
 
 def test_property_image_upload_validates_and_serves_file(client: TestClient) -> None:
     token = _provision(client, "tenant-a", "a@example.com")
+    auth = {"Authorization": f"Bearer {token}"}
+    created = client.post(
+        "/properties",
+        headers=auth,
+        json={
+            "title": "Apartamento de teste",
+            "purpose": "buy",
+            "property_type": "apartamento",
+            "category": "residential",
+            "sale_price": 500000,
+            "address": {
+                "street": "Rua Teste",
+                "neighborhood": "Centro",
+                "city": "São Paulo",
+                "state": "SP",
+            },
+        },
+    )
+    property_id = created.json()["id"]
     png = b"\x89PNG\r\n\x1a\nminimal-test-content"
     response = client.post(
-        "/properties/images",
-        headers={"Authorization": f"Bearer {token}"},
+        f"/properties/{property_id}/images",
+        headers=auth,
         files=[("files", ("fachada.png", png, "image/png"))],
-        data={"optimizations": "[]"},
     )
 
     assert response.status_code == 201, response.text
     image = response.json()[0]
-    assert image["optimized"] is False
-    assert image["content_type"] == "image/png"
-    served = client.get(image["url"])
+    served = client.get(image["display_url"], headers=auth)
     assert served.status_code == 200
     assert served.content == png
+    assert client.get(image["display_url"]).status_code == 401
+    other_token = _provision(client, "tenant-b", "b@example.com")
+    assert (
+        client.get(
+            image["display_url"],
+            headers={"Authorization": f"Bearer {other_token}"},
+        ).status_code
+        == 404
+    )
 
 
 def test_property_image_treatment_requires_configured_openai(client: TestClient) -> None:
     token = _provision(client, "tenant-a", "a@example.com")
-    response = client.post(
-        "/properties/images",
-        headers={"Authorization": f"Bearer {token}"},
+    auth = {"Authorization": f"Bearer {token}"}
+    created = client.post(
+        "/properties",
+        headers=auth,
+        json={
+            "title": "Apartamento de teste",
+            "purpose": "buy",
+            "property_type": "apartamento",
+            "category": "residential",
+            "sale_price": 500000,
+            "address": {
+                "street": "Rua Teste",
+                "neighborhood": "Centro",
+                "city": "São Paulo",
+                "state": "SP",
+            },
+        },
+    )
+    property_id = created.json()["id"]
+    upload = client.post(
+        f"/properties/{property_id}/images",
+        headers=auth,
         files=[
             (
                 "files",
                 ("fachada.png", b"\x89PNG\r\n\x1a\nminimal-test-content", "image/png"),
             )
         ],
-        data={"optimizations": '["corrigir iluminação"]'},
+    )
+    image_id = upload.json()[0]["id"]
+    response = client.post(
+        f"/properties/{property_id}/images/{image_id}/reprocess",
+        headers=auth,
+        json={"optimizations": ["corrigir iluminação"]},
     )
 
     assert response.status_code == 503

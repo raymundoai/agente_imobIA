@@ -4,13 +4,28 @@ import { formatCurrency, labelOrDash } from "../lib/format";
 import { Badge } from "./Badge";
 import { Card } from "./Card";
 
-export function PropertyCard({ property }: { property: Property }) {
-  const firstImage = property.images.find((image) => typeof image.url === "string")?.url;
-
+export function PropertyCard({
+  property,
+  imageUrl,
+  onClick,
+}: {
+  property: Property;
+  imageUrl?: string;
+  onClick?: () => void;
+}) {
   return (
     <Card className="property-card">
+      <div
+        className="property-card-button"
+        onClick={onClick}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") onClick?.();
+        }}
+        role="button"
+        tabIndex={0}
+      >
       <div className="property-media">
-        {typeof firstImage === "string" ? <img alt={property.title} src={firstImage} /> : <Home size={26} />}
+        {imageUrl ? <img alt={property.title} src={imageUrl} /> : <Home size={26} />}
       </div>
       <div className="property-body">
         <div className="property-title-row">
@@ -31,6 +46,7 @@ export function PropertyCard({ property }: { property: Property }) {
             <ExternalLink size={14} />
           </a>
         ) : null}
+      </div>
       </div>
     </Card>
   );

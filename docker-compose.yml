@@ -20,6 +20,7 @@ services:
     env_file: ./backend/.env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PROPERTY_MEDIA_ROOT: /data/property-images
     command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     depends_on:
       postgres:
@@ -32,17 +33,23 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    volumes:
+      - imobos_property_media:/data/property-images
 
   message-worker:
     build: ./backend
     env_file: ./backend/.env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PROPERTY_MEDIA_ROOT: /data/property-images
     command: ["python", "-m", "app.modules.messaging.worker"]
     depends_on:
       backend:
         condition: service_healthy
     restart: unless-stopped
+    volumes:
+      - imobos_property_media:/data/property-images
 
 volumes:
   imobos_postgres:
+  imobos_property_media:

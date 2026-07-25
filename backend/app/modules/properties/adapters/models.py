@@ -107,7 +107,7 @@ class PropertyModel(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
     @classmethod
@@ -189,3 +189,120 @@ class PropertyDemandMatchModel(Base):
             match_score=match.match_score,
             created_at=match.created_at,
         )
+
+
+class PropertyImageModel(Base):
+    __tablename__ = "property_images"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "property_id"],
+            ["properties.tenant_id", "properties.id"],
+            name="fk_property_images_tenant_property",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "status IN ('uploaded', 'processing', 'ready', 'failed')",
+            name="status",
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_property_images_tenant_id_id"),
+        Index("ix_property_images_property_order", "tenant_id", "property_id", "sort_order"),
+        Index(
+            "uq_property_images_primary",
+            "tenant_id",
+            "property_id",
+            unique=True,
+            postgresql_where=sql_text("is_primary"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    property_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    original_storage_key: Mapped[str | None] = mapped_column(Text)
+    legacy_url: Mapped[str | None] = mapped_column(Text)
+    legacy_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=sql_text("'{}'::jsonb")
+    )
+    derived_storage_key: Mapped[str | None] = mapped_column(Text)
+    original_name: Mapped[str] = mapped_column(Text, nullable=False)
+    original_content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    original_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    derived_content_type: Mapped[str | None] = mapped_column(Text)
+    derived_size: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="uploaded", server_default="uploaded"
+    )
+    is_primary: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    optimization_prompt: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PropertyMediaCleanupModel(Base):
+    __tablename__ = "property_media_cleanup"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'done', 'failed')", name="status"),
+        UniqueConstraint("storage_key", name="uq_property_media_cleanup_storage_key"),
+        Index("ix_property_media_cleanup_status", "status", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    storage_key: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="pending", server_default="pending"
+    )
+    error: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PropertyImageOperationModel(Base):
+    __tablename__ = "property_image_operations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "image_id"],
+            ["property_images.tenant_id", "property_images.id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "status IN ('processing', 'ready', 'failed', 'uncertain')", name="status"
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_property_image_operations_id"),
+        Index("ix_property_image_operations_image", "tenant_id", "image_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    image_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    reservation_key: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+    derived_storage_key: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

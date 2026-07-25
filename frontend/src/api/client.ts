@@ -37,6 +37,22 @@ export async function request<T>(
   return (await response.json()) as T;
 }
 
+export async function requestBlob(
+  path: string,
+  token?: string | null,
+): Promise<Blob> {
+  const headers = new Headers();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const response = await fetch(`${API_BASE}${path}`, { headers });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new ApiError(readErrorMessage(text), response.status);
+  }
+  return response.blob();
+}
+
 function readErrorMessage(text: string) {
   if (!text) {
     return "Erro na API";

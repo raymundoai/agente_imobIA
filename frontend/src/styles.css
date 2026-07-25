@@ -1191,6 +1191,67 @@ button:disabled {
   padding: 0;
 }
 
+.property-card-button {
+  cursor: pointer;
+  display: block;
+  text-align: left;
+  width: 100%;
+}
+
+.property-card-button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.linked-image-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.linked-image-card {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 96px minmax(140px, 1fr) auto;
+  padding: 10px;
+}
+
+.linked-image-card > img {
+  aspect-ratio: 4 / 3;
+  border-radius: 7px;
+  object-fit: cover;
+  width: 96px;
+}
+
+.linked-image-card > div {
+  display: grid;
+  gap: 4px;
+}
+
+.linked-image-card span,
+.linked-image-card small {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.linked-image-actions {
+  align-items: center;
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.linked-image-actions button,
+.linked-image-actions a {
+  align-items: center;
+  display: inline-flex;
+  min-height: 32px;
+  padding: 7px 9px;
+}
+
 .property-media {
   align-items: center;
   background:

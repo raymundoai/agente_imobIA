@@ -5,11 +5,13 @@ import threading
 from app.config import get_settings
 from app.container import Container
 from app.modules.messaging.processor import MessageJobProcessor
+from app.modules.properties.cleanup import PropertyMediaCleanupProcessor
 
 
 def main() -> None:
     container = Container.build(get_settings())
     processor = MessageJobProcessor(container)
+    media_cleanup = PropertyMediaCleanupProcessor(container)
     logging.basicConfig(level=container.settings.log_level)
     stopping = threading.Event()
 
@@ -20,7 +22,9 @@ def main() -> None:
     signal.signal(signal.SIGINT, stop)
     try:
         while not stopping.is_set():
-            if processor.process_next() is None:
+            cleanup_result = media_cleanup.process_next()
+            message_result = processor.process_next()
+            if cleanup_result is None and message_result is None:
                 stopping.wait(1)
     finally:
         container.close()

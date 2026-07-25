@@ -90,11 +90,24 @@ export type Property = {
   land_area?: number | null;
   address?: Record<string, unknown>;
   details?: Record<string, unknown>;
-  images: Array<Record<string, unknown>>;
   advertiser_name: string | null;
   advertiser_phone: string | null;
   source_url: string | null;
   via_extension: boolean;
+};
+
+export type PropertyImage = {
+  id: string;
+  property_id: string;
+  original_name: string;
+  status: "uploaded" | "processing" | "ready" | "failed";
+  is_primary: boolean;
+  sort_order: number;
+  original_size: number;
+  derived_size: number | null;
+  original_url: string;
+  display_url: string;
+  error: string | null;
 };
 
 export type KnowledgeDocument = {

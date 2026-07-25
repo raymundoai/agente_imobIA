@@ -30,6 +30,11 @@ from app.modules.integrations.ports.credentials import ChannelCredentialsPort
 from app.modules.integrations.ports.crm import CrmCredentialsPort, CrmPort
 from app.modules.integrations.ports.message_channel import MessageChannelPort
 from app.modules.integrations.ports.real_estate_platform import RealEstatePlatformPort
+from app.modules.properties.media import (
+    LocalPropertyImageStorage,
+    PropertyImageStorage,
+    S3PropertyImageStorage,
+)
 from app.shared.database.session import Database
 from app.shared.events.in_memory import InMemoryEventBus
 from app.shared.events.ports import EventBusPort
@@ -54,6 +59,7 @@ class Container:
     tecimob: RealEstatePlatformPort
     ai_provider: OpenAiAdapter | None
     document_parser: DocumentParserPort
+    property_image_storage: PropertyImageStorage
     http_client: httpx.Client
 
     @classmethod
@@ -71,6 +77,26 @@ class Container:
             if settings.openai_api_key is not None
             else None
         )
+        if settings.property_storage_backend == "s3":
+            if not settings.property_s3_bucket:
+                raise ValueError("PROPERTY_S3_BUCKET is required for S3 storage")
+            property_image_storage: PropertyImageStorage = S3PropertyImageStorage(
+                bucket=settings.property_s3_bucket,
+                endpoint_url=settings.property_s3_endpoint_url,
+                region=settings.property_s3_region,
+                access_key=(
+                    settings.property_s3_access_key.get_secret_value()
+                    if settings.property_s3_access_key
+                    else None
+                ),
+                secret_key=(
+                    settings.property_s3_secret_key.get_secret_value()
+                    if settings.property_s3_secret_key
+                    else None
+                ),
+            )
+        else:
+            property_image_storage = LocalPropertyImageStorage(settings.property_media_root)
         return cls(
             settings=settings,
             database=database,
@@ -109,6 +135,7 @@ class Container:
             ),
             ai_provider=ai_provider,
             document_parser=PlainTextDocumentParser(),
+            property_image_storage=property_image_storage,
             http_client=http_client,
         )
 

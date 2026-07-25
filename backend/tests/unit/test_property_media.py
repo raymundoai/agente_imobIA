@@ -13,15 +13,21 @@ from app.modules.properties.media import (
 
 def test_local_property_image_storage_scopes_file_by_tenant(tmp_path: Path) -> None:
     tenant_id = uuid4()
+    property_id = uuid4()
+    image_id = uuid4()
     upload = PropertyImageUpload(
         original_name="../../fachada.png",
         content_type="image/png",
         content=b"\x89PNG\r\n\x1a\ncontent",
     )
-    stored = LocalPropertyImageStorage(tmp_path).save(tenant_id, upload, optimized=False)
+    storage = LocalPropertyImageStorage(tmp_path)
+    key = storage.build_key(
+        tenant_id, property_id, image_id, "original", upload.content_type
+    )
+    storage.put(tenant_id, key, upload.content, upload.content_type)
 
-    assert stored.url.startswith(f"/media/properties/{tenant_id}/")
-    assert (tmp_path / str(tenant_id) / Path(stored.url).name).read_bytes() == upload.content
+    with storage.open(tenant_id, key) as stored:
+        assert stored.read() == upload.content
 
 
 def test_property_image_validation_rejects_spoofed_mime_and_size() -> None:

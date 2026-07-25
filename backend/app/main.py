@@ -2,7 +2,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from app.config import Settings, get_settings
 from app.container import Container
@@ -64,12 +63,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(tenants_router, prefix=resolved.api_prefix)
     application.include_router(usage_router, prefix=resolved.api_prefix)
     application.include_router(users_router, prefix=resolved.api_prefix)
-    application.mount(
-        "/media/properties",
-        StaticFiles(directory=resolved.property_media_root, check_dir=False),
-        name="property-media",
-    )
-
     @application.get("/health", tags=["system"])
     def health() -> dict[str, str]:
         return {"status": "ok"}

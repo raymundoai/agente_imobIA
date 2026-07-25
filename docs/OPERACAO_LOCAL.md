@@ -88,6 +88,31 @@ python -m app.modules.messaging.worker
 O worker recebe `SIGTERM`, termina o ciclo atual e encerra. Nunca opere resposta automática sem
 ao menos uma instância do worker.
 
+### Migração das imagens do armazenamento antigo
+
+Antes de remover definitivamente uma instalação antiga que servia
+`/media/properties`, preserve sua pasta e configure-a como somente leitura:
+
+```dotenv
+PROPERTY_MEDIA_LEGACY_ROOT=/caminho/absoluto/para/storage/property-images
+```
+
+Depois de executar `alembic upgrade head`, rode dentro do mesmo ambiente do backend:
+
+```bash
+python -m app.modules.properties.migrate_legacy_media
+```
+
+O comando é idempotente: valida que cada caminho pertence ao tenant, copia somente
+arquivos existentes para o storage atual e marca separadamente arquivos ausentes ou
+inválidos. Execute novamente para confirmar que os itens aparecem como `skipped`.
+Só então arquive ou remova a pasta antiga.
+
+URLs externas legadas não são baixadas pelo servidor. Isso evita SSRF. Caso seja
+indispensável manter redirecionamento autenticado para um CDN confiável, declare
+explicitamente seus hosts em `PROPERTY_LEGACY_URL_ALLOWED_HOSTS`; por padrão nenhum
+host é permitido.
+
 O handoff, a mensagem de saída, o log da IA e o débito de créditos são confirmados numa única
 transação PostgreSQL. O envio Evolution é tentado apenas uma vez: respostas 5xx e falhas de
 transporte são ambíguas e levam o job a `delivery_unknown`, sem um segundo POST automático.

@@ -335,11 +335,18 @@ def test_image_insufficient_balance_returns_402_before_openai(
     )
     ai = CountingImageAi()
     client.app.state.container.ai_provider = ai
-    response = client.post(
-        "/properties/images",
-        headers={"Authorization": f"Bearer {token}"},
-        data={"optimizations": '["iluminação"]'},
+    auth = {"Authorization": f"Bearer {token}"}
+    property_id = _create_property_for_image(client, auth)
+    upload = client.post(
+        f"/properties/{property_id}/images",
+        headers=auth,
         files={"files": ("foto.png", b"\x89PNG\r\n\x1a\nsource", "image/png")},
+    )
+    image_id = upload.json()[0]["id"]
+    response = client.post(
+        f"/properties/{property_id}/images/{image_id}/reprocess",
+        headers=auth,
+        json={"optimizations": ["iluminação"]},
     )
     assert response.status_code == 402
     assert ai.image_calls == 0
@@ -351,16 +358,53 @@ def test_image_billing_idempotency_prevents_duplicate_openai_cost(
     _, token = _provision(client, "tenant-a")
     ai = CountingImageAi()
     client.app.state.container.ai_provider = ai
-    request = {
-        "headers": {"Authorization": f"Bearer {token}"},
-        "data": {"optimizations": '["iluminação"]'},
-        "files": {"files": ("foto.png", b"\x89PNG\r\n\x1a\nsource", "image/png")},
-    }
-    first = client.post("/properties/images", **request)
-    second = client.post("/properties/images", **request)
-    assert first.status_code == 201, first.text
+    auth = {"Authorization": f"Bearer {token}"}
+    property_id = _create_property_for_image(client, auth)
+    upload = client.post(
+        f"/properties/{property_id}/images",
+        headers=auth,
+        files={"files": ("foto.png", b"\x89PNG\r\n\x1a\nsource", "image/png")},
+    )
+    image_id = upload.json()[0]["id"]
+    url = f"/properties/{property_id}/images/{image_id}/reprocess"
+    operation_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    payload = {"operation_id": operation_id, "optimizations": ["iluminação"]}
+    first = client.post(url, headers=auth, json=payload)
+    second = client.post(url, headers=auth, json=payload)
+    retry = client.post(
+        url,
+        headers=auth,
+        json={
+            "operation_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "optimizations": ["iluminação"],
+        },
+    )
+    assert first.status_code == 200, first.text
     assert second.status_code == 409
-    assert ai.image_calls == 1
+    assert retry.status_code == 200, retry.text
+    assert ai.image_calls == 2
+
+
+def _create_property_for_image(client: TestClient, headers: dict[str, str]) -> str:
+    response = client.post(
+        "/properties",
+        headers=headers,
+        json={
+            "title": "Imóvel para imagem",
+            "purpose": "buy",
+            "property_type": "apartamento",
+            "category": "residential",
+            "sale_price": 500000,
+            "address": {
+                "street": "Rua Teste",
+                "neighborhood": "Centro",
+                "city": "São Paulo",
+                "state": "SP",
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
 
 
 def test_expired_crash_reservation_is_reconciled(

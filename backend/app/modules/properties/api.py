@@ -1,13 +1,15 @@
-import hashlib
-import json
 import threading
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
-from uuid import UUID
+from urllib.parse import urlparse
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
@@ -21,7 +23,16 @@ from app.modules.billing_usage.service import (
     estimated_image_charge,
     image_token_charge,
 )
-from app.modules.properties.adapters.repositories import SqlAlchemyPropertyRepository
+from app.modules.properties.adapters.models import (
+    PropertyImageModel,
+    PropertyImageOperationModel,
+    PropertyMediaCleanupModel,
+    PropertyModel,
+)
+from app.modules.properties.adapters.repositories import (
+    SqlAlchemyPropertyRepository,
+    _to_domain,
+)
 from app.modules.properties.application.use_cases import ListPropertiesUseCase
 from app.modules.properties.domain.entities import Property, PropertyPurpose
 from app.modules.properties.media import (
@@ -91,7 +102,9 @@ class PropertyResponse(BaseModel):
             land_area=property_.land_area,
             address=property_.address,
             details=property_.details,
-            images=property_.images,
+            # Compatibilidade de contrato: a coleção operacional é consultada
+            # exclusivamente em /properties/{id}/images.
+            images=[],
             advertiser_name=property_.advertiser_name,
             advertiser_phone=property_.advertiser_phone,
             via_extension=property_.via_extension,
@@ -146,7 +159,6 @@ class CreatePropertyRequest(BaseModel):
     land_area: int | None = Field(default=None, ge=0)
     address: PropertyAddressRequest
     details: PropertyDetailsRequest = Field(default_factory=PropertyDetailsRequest)
-    images: list[dict[str, Any]] = Field(default_factory=list)
     owner_name: str | None = Field(default=None, max_length=200)
     owner_phone: str | None = Field(default=None, max_length=40)
     source_url: str | None = Field(default=None, max_length=2000)
@@ -162,213 +174,35 @@ class CreatePropertyRequest(BaseModel):
         return self
 
 
-class PropertyImageResponse(BaseModel):
-    url: str
+class LinkedPropertyImageResponse(BaseModel):
+    id: UUID
+    property_id: UUID
     original_name: str
-    content_type: str
-    size: int
-    optimized: bool
+    status: str
+    is_primary: bool
+    sort_order: int
+    original_size: int
+    derived_size: int | None
+    original_url: str
+    display_url: str
+    error: str | None
 
 
-@router.post(
-    "/images",
-    response_model=list[PropertyImageResponse],
-    status_code=status.HTTP_201_CREATED,
-)
-async def upload_property_images(
-    files: Annotated[list[UploadFile], File(description="Imagens JPEG, PNG ou WebP")],
-    optimizations: Annotated[str, Form()] = "[]",
-    note: Annotated[str | None, Form(max_length=1000)] = None,
-    principal: CurrentPrincipal = Depends(get_current_principal),
-    container: Container = Depends(get_container),
-    session: Session = Depends(get_db_session),
-) -> list[PropertyImageResponse]:
-    if not files:
-        raise HTTPException(status_code=422, detail="Envie pelo menos uma imagem.")
-    if len(files) > container.settings.property_image_max_files:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Envie no máximo {container.settings.property_image_max_files} imagens.",
-        )
-    requested = _parse_optimizations(optimizations)
-    should_optimize = bool(requested or (note and note.strip()))
-    if should_optimize and container.ai_provider is None:
-        raise HTTPException(
-            status_code=503,
-            detail="O tratamento por OpenAI foi solicitado, mas a integração não está configurada.",
-        )
-    ledger = CreditLedgerService(session)
-    prepared: list[PropertyImageUpload] = []
-    for file in files:
-        content = await file.read(container.settings.property_image_max_bytes + 1)
-        upload = PropertyImageUpload(
-            original_name=Path(file.filename or "imagem").name,
-            content_type=(file.content_type or "").lower(),
-            content=content,
-        )
-        try:
-            validate_property_image(upload, max_bytes=container.settings.property_image_max_bytes)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=f"{upload.original_name}: {exc}") from exc
-        prepared.append(upload)
-
-    if should_optimize:
-        prompt = optimization_prompt(requested, note)
-        reservation_keys = [
-            "image-edit:"
-            + hashlib.sha256(
-                f"{principal.tenant_id}:{index}:{prompt}:".encode() + upload.content
-            ).hexdigest()
-            for index, upload in enumerate(prepared)
-        ]
-        reserved_keys: list[str] = []
-        try:
-            for reservation_key in reservation_keys:
-                reservation = ledger.reserve(
-                    principal.tenant_id,
-                    resource="image_edit",
-                    model=container.settings.openai_image_model,
-                    estimate=estimated_image_charge(
-                        container.settings.openai_image_model
-                    ),
-                    idempotency_key=reservation_key,
-                    reference_id=None,
-                )
-                if reservation.status == "settled":
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Este tratamento de imagem já foi processado.",
-                    )
-                if reservation.status == "started":
-                    raise HTTPException(
-                        status_code=409,
-                        detail=(
-                            "Este tratamento possui uma chamada anterior em reconciliação."
-                        ),
-                    )
-                reserved_keys.append(reservation_key)
-        except Exception:
-            for key in reserved_keys:
-                ledger.release_reservation(principal.tenant_id, key)
-            raise
-        processed: list[PropertyImageUpload] = []
-        for index, upload in enumerate(prepared):
-            reservation_key = reservation_keys[index]
-            provider_started = False
-            heartbeat_stopped = threading.Event()
-            heartbeat_thread: threading.Thread | None = None
-            try:
-                ledger.start_reservation(principal.tenant_id, reservation_key)
-                provider_started = True
-
-                def renew_reservation(
-                    stopped: threading.Event = heartbeat_stopped,
-                    key: str = reservation_key,
-                ) -> None:
-                    while not stopped.wait(60):
-                        with container.database.session_factory() as heartbeat_session:
-                            CreditLedgerService(heartbeat_session).touch_reservation(
-                                principal.tenant_id, key
-                            )
-
-                heartbeat_thread = threading.Thread(
-                    target=renew_reservation, daemon=True
-                )
-                heartbeat_thread.start()
-                edit_result = container.ai_provider.edit_image(
-                    upload.content,
-                    filename=upload.original_name,
-                    prompt=prompt,
-                )
-                output = PropertyImageUpload(
-                    original_name=upload.original_name,
-                    content_type="image/png",
-                    content=edit_result.content,
-                )
-                validate_property_image(
-                    output, max_bytes=container.settings.property_image_max_bytes
-                )
-            except AiProviderRejectedError as exc:
-                for key in reservation_keys[index:]:
-                    ledger.release_reservation(principal.tenant_id, key)
-                raise HTTPException(
-                    status_code=502,
-                    detail="A OpenAI rejeitou definitivamente o tratamento solicitado.",
-                ) from exc
-            except AiProviderDispatchUncertainError as exc:
-                for key in reservation_keys[index + 1 :]:
-                    ledger.release_reservation(principal.tenant_id, key)
-                raise HTTPException(
-                    status_code=502,
-                    detail="O resultado da chamada OpenAI é incerto e requer reconciliação.",
-                ) from exc
-            except HTTPException:
-                raise
-            except Exception as exc:
-                release_from = index + 1 if provider_started else index
-                for key in reservation_keys[release_from:]:
-                    ledger.release_reservation(principal.tenant_id, key)
-                raise HTTPException(
-                    status_code=502,
-                    detail=(
-                        f"A OpenAI não conseguiu tratar {upload.original_name}; "
-                        "nenhuma imagem deste envio foi salva."
-                    ),
-                ) from exc
-            finally:
-                heartbeat_stopped.set()
-                if heartbeat_thread is not None:
-                    heartbeat_thread.join(timeout=2)
-            processed.append(output)
-            charge = image_token_charge(
-                container.settings.openai_image_model,
-                input_image_tokens=edit_result.input_image_tokens,
-                input_text_tokens=edit_result.input_text_tokens,
-                output_image_tokens=edit_result.output_image_tokens,
-            )
-            ledger.settle_reservation(
-                principal.tenant_id,
-                idempotency_key=reservation_key,
-                charge=charge,
-                model=container.settings.openai_image_model,
-                reference_id=None,
-                extra={
-                    "quality": "medium",
-                    "size": "1024x1024",
-                    "input_image_tokens": edit_result.input_image_tokens,
-                    "input_text_tokens": edit_result.input_text_tokens,
-                    "output_image_tokens": edit_result.output_image_tokens,
-                },
-            )
-        prepared = processed
-
-    storage = LocalPropertyImageStorage(container.settings.property_media_root)
-    response = [
-        PropertyImageResponse.model_validate(
-            storage.save(principal.tenant_id, upload, optimized=should_optimize),
-            from_attributes=True,
-        )
-        for upload in prepared
-    ]
-    session.commit()
-    return response
+class PropertyStatusRequest(BaseModel):
+    status: str = Field(pattern="^(active|inactive)$")
 
 
-def _parse_optimizations(raw: str) -> list[str]:
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status_code=422, detail="optimizations deve ser um JSON válido."
-        ) from exc
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise HTTPException(
-            status_code=422,
-            detail="optimizations deve ser uma lista JSON de textos.",
-        )
-    if len(value) > 10 or any(len(item) > 120 for item in value):
-        raise HTTPException(status_code=422, detail="As otimizações solicitadas excedem o limite.")
-    return value
+class PropertyImageUpdateRequest(BaseModel):
+    is_primary: bool | None = None
+    sort_order: int | None = Field(default=None, ge=0, le=10000)
+
+
+class ReprocessImageRequest(BaseModel):
+    operation_id: UUID = Field(default_factory=uuid4)
+    optimizations: list[str] = Field(default_factory=list, max_length=10)
+    note: str | None = Field(default=None, max_length=1000)
+
+
 
 
 @router.post("", response_model=PropertyResponse, status_code=status.HTTP_201_CREATED)
@@ -404,7 +238,7 @@ def create_property(
         land_area=payload.land_area,
         address=address,
         details=details,
-        images=payload.images,
+        images=[],
         advertiser_name=payload.owner_name,
         advertiser_phone=payload.owner_phone,
     )
@@ -424,3 +258,564 @@ def list_properties(
         principal.tenant_id, demand_id=demand_id, limit=limit, offset=offset
     )
     return [PropertyResponse.from_domain(item) for item in properties]
+
+
+def _property_model(session: Session, tenant_id: UUID, property_id: UUID) -> PropertyModel:
+    model = session.scalar(
+        select(PropertyModel).where(
+            PropertyModel.tenant_id == tenant_id,
+            PropertyModel.id == property_id,
+        )
+    )
+    if model is None:
+        raise HTTPException(status_code=404, detail="Imóvel não encontrado.")
+    return model
+
+
+def _image_model(
+    session: Session, tenant_id: UUID, property_id: UUID, image_id: UUID
+) -> PropertyImageModel:
+    model = session.scalar(
+        select(PropertyImageModel).where(
+            PropertyImageModel.tenant_id == tenant_id,
+            PropertyImageModel.property_id == property_id,
+            PropertyImageModel.id == image_id,
+        )
+    )
+    if model is None:
+        raise HTTPException(status_code=404, detail="Imagem não encontrada.")
+    return model
+
+
+def _linked_image_response(image: PropertyImageModel) -> LinkedPropertyImageResponse:
+    base = f"/properties/{image.property_id}/images/{image.id}/content"
+    return LinkedPropertyImageResponse(
+        id=image.id,
+        property_id=image.property_id,
+        original_name=image.original_name,
+        status=image.status,
+        is_primary=image.is_primary,
+        sort_order=image.sort_order,
+        original_size=image.original_size,
+        derived_size=image.derived_size,
+        original_url=f"{base}?variant=original",
+        display_url=f"{base}?variant=display",
+        error=image.error,
+    )
+
+
+@router.get("/{property_id}", response_model=PropertyResponse)
+def get_property(
+    property_id: UUID,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    session: Session = Depends(get_db_session),
+) -> PropertyResponse:
+    model = _property_model(session, principal.tenant_id, property_id)
+    return PropertyResponse.from_domain(_to_domain(model))
+
+
+@router.put("/{property_id}", response_model=PropertyResponse)
+def update_property(
+    property_id: UUID,
+    payload: CreatePropertyRequest,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    session: Session = Depends(get_db_session),
+) -> PropertyResponse:
+    model = _property_model(session, principal.tenant_id, property_id)
+    data = payload.model_dump(mode="python")
+    address = data.pop("address")
+    details = data.pop("details")
+    model.title = data["title"]
+    model.listing_code = data["listing_code"]
+    model.purpose = data["purpose"]
+    model.property_type = data["property_type"]
+    model.category = data["category"]
+    model.status = data["status"]
+    model.sale_price = data["sale_price"]
+    model.rent_price = data["rent_price"]
+    model.price = data["sale_price"] or data["rent_price"]
+    model.description = data["description"]
+    model.bedrooms = data["bedrooms"]
+    model.suites = data["suites"]
+    model.bathrooms = data["bathrooms"]
+    model.parking_spaces = data["parking_spaces"]
+    model.area = data["area"]
+    model.land_area = data["land_area"]
+    model.address = address
+    model.city = address["city"]
+    model.neighborhood = address["neighborhood"]
+    model.details = details
+    model.advertiser_name = data["owner_name"]
+    model.advertiser_phone = data["owner_phone"]
+    model.source_url = data["source_url"]
+    model.updated_at = datetime.now(UTC)
+    session.commit()
+    session.refresh(model)
+    return PropertyResponse.from_domain(_to_domain(model))
+
+
+@router.patch("/{property_id}/status", response_model=PropertyResponse)
+def set_property_status(
+    property_id: UUID,
+    payload: PropertyStatusRequest,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    session: Session = Depends(get_db_session),
+) -> PropertyResponse:
+    model = _property_model(session, principal.tenant_id, property_id)
+    model.status = payload.status
+    model.updated_at = datetime.now(UTC)
+    session.commit()
+    session.refresh(model)
+    return PropertyResponse.from_domain(_to_domain(model))
+
+
+@router.delete("/{property_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_property(
+    property_id: UUID,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    session: Session = Depends(get_db_session),
+) -> None:
+    model = _property_model(session, principal.tenant_id, property_id)
+    if model.status != "inactive":
+        raise HTTPException(
+            status_code=409,
+            detail="Inative o imóvel antes de excluí-lo definitivamente.",
+        )
+    keys = [
+        key
+        for key in session.scalars(
+        select(PropertyImageModel.original_storage_key).where(
+            PropertyImageModel.tenant_id == principal.tenant_id,
+            PropertyImageModel.property_id == property_id,
+            PropertyImageModel.original_storage_key.is_not(None),
+        )
+        ).all()
+        if key
+    ]
+    keys += [
+        key
+        for key in session.scalars(
+            select(PropertyImageModel.derived_storage_key).where(
+                PropertyImageModel.tenant_id == principal.tenant_id,
+                PropertyImageModel.property_id == property_id,
+                PropertyImageModel.derived_storage_key.is_not(None),
+            )
+        ).all()
+        if key
+    ]
+    for key in keys:
+        session.add(
+            PropertyMediaCleanupModel(
+                id=uuid4(), tenant_id=principal.tenant_id, storage_key=key
+            )
+        )
+    session.delete(model)
+    session.commit()
+
+
+@router.get("/{property_id}/images", response_model=list[LinkedPropertyImageResponse])
+def list_property_images(
+    property_id: UUID,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    session: Session = Depends(get_db_session),
+) -> list[LinkedPropertyImageResponse]:
+    _property_model(session, principal.tenant_id, property_id)
+    images = session.scalars(
+        select(PropertyImageModel)
+        .where(
+            PropertyImageModel.tenant_id == principal.tenant_id,
+            PropertyImageModel.property_id == property_id,
+        )
+        .order_by(PropertyImageModel.is_primary.desc(), PropertyImageModel.sort_order)
+    ).all()
+    return [_linked_image_response(image) for image in images]
+
+
+@router.post(
+    "/{property_id}/images",
+    response_model=list[LinkedPropertyImageResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_property_images(
+    property_id: UUID,
+    files: Annotated[list[UploadFile], File(description="Imagens JPEG, PNG ou WebP")],
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> list[LinkedPropertyImageResponse]:
+    property_model = _property_model(session, principal.tenant_id, property_id)
+    session.execute(
+        select(PropertyModel.id)
+        .where(PropertyModel.id == property_model.id)
+        .with_for_update()
+    )
+    if not files or len(files) > container.settings.property_image_max_files:
+        raise HTTPException(status_code=422, detail="Quantidade de imagens inválida.")
+    current_count = session.scalar(
+        select(func.count()).select_from(PropertyImageModel).where(
+            PropertyImageModel.tenant_id == principal.tenant_id,
+            PropertyImageModel.property_id == property_id,
+        )
+    ) or 0
+    if current_count + len(files) > container.settings.property_image_max_files:
+        raise HTTPException(status_code=422, detail="O imóvel excederia o limite de imagens.")
+    created: list[PropertyImageModel] = []
+    stored_keys: list[str] = []
+    try:
+        for index, file in enumerate(files):
+            upload = PropertyImageUpload(
+                original_name=Path(file.filename or "imagem").name,
+                content_type=(file.content_type or "").lower(),
+                content=await file.read(container.settings.property_image_max_bytes + 1),
+            )
+            try:
+                validate_property_image(
+                    upload, max_bytes=container.settings.property_image_max_bytes
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            image_id = uuid4()
+            key = LocalPropertyImageStorage.build_key(
+                principal.tenant_id, property_id, image_id, "original", upload.content_type
+            )
+            container.property_image_storage.put(
+                principal.tenant_id, key, upload.content, upload.content_type
+            )
+            stored_keys.append(key)
+            image = PropertyImageModel(
+                id=image_id,
+                tenant_id=principal.tenant_id,
+                property_id=property_id,
+                original_storage_key=key,
+                original_name=upload.original_name,
+                original_content_type=upload.content_type,
+                original_size=len(upload.content),
+                status="uploaded",
+                is_primary=current_count == 0 and index == 0,
+                sort_order=current_count + index,
+            )
+            session.add(image)
+            created.append(image)
+        session.commit()
+    except Exception:
+        session.rollback()
+        for key in stored_keys:
+            container.property_image_storage.delete(principal.tenant_id, key)
+        raise
+    return [_linked_image_response(image) for image in created]
+
+
+@router.get("/{property_id}/images/{image_id}/content")
+def property_image_content(
+    property_id: UUID,
+    image_id: UUID,
+    variant: Annotated[str, Query(pattern="^(original|display)$")] = "display",
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+):
+    image = _image_model(session, principal.tenant_id, property_id, image_id)
+    derived = variant == "display" and image.derived_storage_key is not None
+    key = image.derived_storage_key if derived else image.original_storage_key
+    content_type = image.derived_content_type if derived else image.original_content_type
+    if key is None:
+        parsed = urlparse(image.legacy_url or "")
+        allowed_hosts = {
+            host.lower() for host in container.settings.property_legacy_url_allowed_hosts
+        }
+        if (
+            image.legacy_url
+            and parsed.scheme == "https"
+            and parsed.hostname
+            and parsed.hostname.lower() in allowed_hosts
+        ):
+            return RedirectResponse(image.legacy_url)
+        raise HTTPException(
+            status_code=404,
+            detail="Imagem legada preservada, mas sua origem não é confiável ou acessível.",
+        )
+    signed = container.property_image_storage.signed_url(principal.tenant_id, key)
+    if signed:
+        return RedirectResponse(signed)
+    try:
+        stream = container.property_image_storage.open(principal.tenant_id, key)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Arquivo da imagem não encontrado.") from exc
+    return StreamingResponse(stream, media_type=content_type)
+
+
+@router.patch(
+    "/{property_id}/images/{image_id}", response_model=LinkedPropertyImageResponse
+)
+def update_property_image(
+    property_id: UUID,
+    image_id: UUID,
+    payload: PropertyImageUpdateRequest,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    session: Session = Depends(get_db_session),
+) -> LinkedPropertyImageResponse:
+    property_model = _property_model(session, principal.tenant_id, property_id)
+    session.execute(
+        select(PropertyModel.id)
+        .where(PropertyModel.id == property_model.id)
+        .with_for_update()
+    )
+    image = _image_model(session, principal.tenant_id, property_id, image_id)
+    if payload.is_primary:
+        session.execute(
+            update(PropertyImageModel)
+            .where(
+                PropertyImageModel.tenant_id == principal.tenant_id,
+                PropertyImageModel.property_id == property_id,
+                PropertyImageModel.id != image_id,
+            )
+            .values(is_primary=False)
+        )
+        image.is_primary = True
+    elif payload.is_primary is False:
+        image.is_primary = False
+    if payload.sort_order is not None:
+        image.sort_order = payload.sort_order
+    image.updated_at = datetime.now(UTC)
+    session.commit()
+    session.refresh(image)
+    return _linked_image_response(image)
+
+
+@router.delete("/{property_id}/images/{image_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_property_image(
+    property_id: UUID,
+    image_id: UUID,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    session: Session = Depends(get_db_session),
+) -> None:
+    image = _image_model(session, principal.tenant_id, property_id, image_id)
+    keys = [key for key in [image.original_storage_key] if key]
+    if image.derived_storage_key:
+        keys.append(image.derived_storage_key)
+    for key in keys:
+        session.add(
+            PropertyMediaCleanupModel(
+                id=uuid4(), tenant_id=principal.tenant_id, storage_key=key
+            )
+        )
+    session.delete(image)
+    session.commit()
+
+
+@router.post(
+    "/{property_id}/images/{image_id}/reprocess",
+    response_model=LinkedPropertyImageResponse,
+)
+def reprocess_property_image(
+    property_id: UUID,
+    image_id: UUID,
+    payload: ReprocessImageRequest,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> LinkedPropertyImageResponse:
+    if container.ai_provider is None:
+        raise HTTPException(status_code=503, detail="A integração OpenAI não está configurada.")
+    image = _image_model(session, principal.tenant_id, property_id, image_id)
+    if image.original_storage_key is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Imagem legada sem original local; faça um novo upload antes de tratar.",
+        )
+    prompt = optimization_prompt(payload.optimizations, payload.note)
+    with container.property_image_storage.open(
+        principal.tenant_id, image.original_storage_key
+    ) as source:
+        original = source.read()
+    reservation_key = f"property-image-reprocess:{image.id}:{payload.operation_id}"
+    existing_operation = session.scalar(
+        select(PropertyImageOperationModel).where(
+            PropertyImageOperationModel.tenant_id == principal.tenant_id,
+            PropertyImageOperationModel.id == payload.operation_id,
+        )
+    )
+    if existing_operation is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Operação já registrada com status {existing_operation.status}.",
+        )
+    operation = PropertyImageOperationModel(
+        id=payload.operation_id,
+        tenant_id=principal.tenant_id,
+        image_id=image.id,
+        reservation_key=reservation_key,
+        prompt=prompt,
+        status="processing",
+    )
+    session.add(operation)
+    ledger = CreditLedgerService(session)
+    reservation = ledger.reserve(
+        principal.tenant_id,
+        resource="image_edit",
+        model=container.settings.openai_image_model,
+        estimate=estimated_image_charge(container.settings.openai_image_model),
+        idempotency_key=reservation_key,
+        reference_id=image.id,
+    )
+    if reservation.status == "settled":
+        raise HTTPException(status_code=409, detail="Este tratamento já foi concluído.")
+    if reservation.status == "started":
+        raise HTTPException(
+            status_code=409, detail="Este tratamento está em processamento ou reconciliação."
+        )
+    ledger.start_reservation(principal.tenant_id, reservation_key)
+    image.status = "processing"
+    image.optimization_prompt = prompt
+    image.error = None
+    session.commit()
+    heartbeat_stopped = threading.Event()
+
+    def renew_reservation() -> None:
+        while not heartbeat_stopped.wait(60):
+            with container.database.session_factory() as heartbeat_session:
+                CreditLedgerService(heartbeat_session).touch_reservation(
+                    principal.tenant_id, reservation_key
+                )
+
+    heartbeat_thread = threading.Thread(target=renew_reservation, daemon=True)
+    heartbeat_thread.start()
+    new_key: str | None = None
+    call_accepted = False
+    try:
+        result = container.ai_provider.edit_image(
+            original, filename=image.original_name, prompt=prompt
+        )
+        call_accepted = True
+        output = PropertyImageUpload(
+            original_name=image.original_name,
+            content_type="image/png",
+            content=result.content,
+        )
+        # A chamada aceita é faturada antes da persistência do artefato. Assim uma
+        # falha de storage não libera indevidamente créditos já consumidos.
+        ledger.settle_reservation(
+            principal.tenant_id,
+            idempotency_key=reservation_key,
+            charge=image_token_charge(
+                container.settings.openai_image_model,
+                input_image_tokens=result.input_image_tokens,
+                input_text_tokens=result.input_text_tokens,
+                output_image_tokens=result.output_image_tokens,
+            ),
+            model=container.settings.openai_image_model,
+            reference_id=image.id,
+            extra={"property_id": str(property_id), "image_id": str(image.id)},
+        )
+        validate_property_image(output, max_bytes=container.settings.property_image_max_bytes)
+        new_key = LocalPropertyImageStorage.build_key(
+            principal.tenant_id,
+            property_id,
+            image.id,
+            f"derived-{uuid4().hex}",
+            output.content_type,
+        )
+        container.property_image_storage.put(
+            principal.tenant_id, new_key, output.content, output.content_type
+        )
+        old_key = image.derived_storage_key
+        image.derived_storage_key = new_key
+        image.derived_content_type = output.content_type
+        image.derived_size = len(output.content)
+        image.status = "ready"
+        image.updated_at = datetime.now(UTC)
+        operation.status = "ready"
+        operation.derived_storage_key = new_key
+        operation.completed_at = datetime.now(UTC)
+        if old_key:
+            session.add(
+                PropertyMediaCleanupModel(
+                    id=uuid4(), tenant_id=principal.tenant_id, storage_key=old_key
+                )
+            )
+        session.commit()
+    except AiProviderRejectedError as exc:
+        ledger.release_reservation(principal.tenant_id, reservation_key)
+        image.status = "failed"
+        image.error = "A OpenAI rejeitou o tratamento solicitado."
+        operation.status = "failed"
+        operation.error = image.error
+        operation.completed_at = datetime.now(UTC)
+        session.commit()
+        raise HTTPException(status_code=502, detail=image.error) from exc
+    except AiProviderDispatchUncertainError as exc:
+        image.status = "failed"
+        image.error = "Resultado incerto; a reserva aguarda reconciliação."
+        operation.status = "uncertain"
+        operation.error = image.error
+        operation.completed_at = datetime.now(UTC)
+        session.commit()
+        raise HTTPException(status_code=502, detail=image.error) from exc
+    except Exception as exc:
+        session.rollback()
+        if new_key is not None:
+            with container.database.session_factory() as cleanup_session:
+                cleanup_session.add(
+                    PropertyMediaCleanupModel(
+                        id=uuid4(),
+                        tenant_id=principal.tenant_id,
+                        storage_key=new_key,
+                    )
+                )
+                cleanup_session.commit()
+        with container.database.session_factory() as failure_session:
+            failed = _image_model(
+                failure_session, principal.tenant_id, property_id, image_id
+            )
+            failed.status = "failed"
+            failed.error = f"Falha ao persistir o tratamento: {exc}"[:1000]
+            failed_operation = failure_session.get(
+                PropertyImageOperationModel, payload.operation_id
+            )
+            if failed_operation is not None:
+                failed_operation.status = "failed" if call_accepted else "uncertain"
+                failed_operation.error = failed.error
+                failed_operation.completed_at = datetime.now(UTC)
+            failure_session.commit()
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "O tratamento foi faturado, mas a imagem derivada não pôde ser persistida."
+                if call_accepted
+                else "O resultado da chamada é incerto e requer reconciliação."
+            ),
+        ) from exc
+    finally:
+        heartbeat_stopped.set()
+        heartbeat_thread.join(timeout=2)
+    return _linked_image_response(image)
+
+
+@router.post("/media-cleanup/process")
+def process_property_media_cleanup(
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> dict[str, int]:
+    jobs = session.scalars(
+        select(PropertyMediaCleanupModel)
+        .where(
+            PropertyMediaCleanupModel.tenant_id == principal.tenant_id,
+            PropertyMediaCleanupModel.status.in_(["pending", "failed"]),
+        )
+        .order_by(PropertyMediaCleanupModel.created_at)
+        .limit(100)
+    ).all()
+    completed = 0
+    for job in jobs:
+        try:
+            container.property_image_storage.delete(principal.tenant_id, job.storage_key)
+            job.status = "done"
+            job.completed_at = datetime.now(UTC)
+            job.error = None
+            completed += 1
+        except Exception as exc:
+            job.status = "failed"
+            job.error = str(exc)[:1000]
+    session.commit()
+    return {"processed": len(jobs), "completed": completed}

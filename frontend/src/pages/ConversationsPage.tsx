@@ -9,9 +9,9 @@ import {
   UserCheck,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { request } from "../api/client";
-import type { Conversation, ConversationDetail, LeadDemand, Message, Property } from "../api/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { request, requestBlob } from "../api/client";
+import type { Conversation, ConversationDetail, LeadDemand, Message, Property, PropertyImage } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { Badge } from "../components/Badge";
 import { DemandModal } from "../components/DemandModal";
@@ -28,6 +28,8 @@ export function ConversationsPage() {
   const [propertyShareOpen, setPropertyShareOpen] = useState(false);
   const [demandModalOpen, setDemandModalOpen] = useState(false);
   const [properties, setProperties] = useState<Property[]>([]);
+  const [propertyCovers, setPropertyCovers] = useState<Record<string, string>>({});
+  const propertyCoverUrls = useRef<Record<string, string>>({});
   const [aiEnabledById, setAiEnabledById] = useState<Record<string, boolean>>({});
   const [actionError, setActionError] = useState<string | null>(null);
   const [messagesById, setMessagesById] = useState<Record<string, ChatMessage[]>>({});
@@ -48,13 +50,48 @@ export function ConversationsPage() {
   }, [token]);
 
   useEffect(() => {
+    let active = true;
     void request<Property[]>("/properties", {}, token)
-      .then(setProperties)
+      .then(async (loaded) => {
+        if (!active) return;
+        setProperties(loaded);
+        const entries = await Promise.all(loaded.map(async (property) => {
+          try {
+            const images = await request<PropertyImage[]>(`/properties/${property.id}/images`, {}, token);
+            const primary = images.find((image) => image.is_primary) ?? images[0];
+            if (!primary) return null;
+            const blob = await requestBlob(primary.display_url, token);
+            return [property.id, URL.createObjectURL(blob)] as const;
+          } catch {
+            return null;
+          }
+        }));
+        const next = Object.fromEntries(
+          entries.filter(Boolean) as Array<readonly [string, string]>,
+        );
+        if (!active) {
+          Object.values(next).forEach(URL.revokeObjectURL);
+          return;
+        }
+        Object.values(propertyCoverUrls.current).forEach(URL.revokeObjectURL);
+        propertyCoverUrls.current = next;
+        setPropertyCovers(next);
+      })
       .catch((error) => {
-        setProperties([]);
-        setActionError(readActionError(error));
+        if (active) {
+          setProperties([]);
+          setActionError(readActionError(error));
+        }
       });
+    return () => {
+      active = false;
+    };
   }, [token]);
+
+  useEffect(() => () => {
+    Object.values(propertyCoverUrls.current).forEach(URL.revokeObjectURL);
+    propertyCoverUrls.current = {};
+  }, []);
 
   useEffect(() => {
     if (!selectedId) {
@@ -333,7 +370,7 @@ export function ConversationsPage() {
               <article className={`message ${message.direction}`} key={message.id}>
                 <small>{authorLabels[message.author_type] ?? message.author_type}</small>
                 <p>{message.text}</p>
-                {message.sharedProperty ? <SharedPropertyPreview property={message.sharedProperty} /> : null}
+                {message.sharedProperty ? <SharedPropertyPreview imageUrl={propertyCovers[message.sharedProperty.id]} property={message.sharedProperty} /> : null}
               </article>
             ))}
           </div>
@@ -405,7 +442,7 @@ export function ConversationsPage() {
               <div className="property-share-list">
                 {properties.map((property) => (
                   <article className="property-share-item" key={property.id}>
-                    <PropertyShareThumb property={property} />
+                    <PropertyShareThumb imageUrl={propertyCovers[property.id]} property={property} />
                     <div>
                       <strong>{property.title}</strong>
                       <span>
@@ -435,16 +472,12 @@ export function ConversationsPage() {
   );
 }
 
-function SharedPropertyPreview({ property }: { property: Property }) {
-  const imageUrls = getPropertyImageUrls(property);
-
+function SharedPropertyPreview({ property, imageUrl }: { property: Property; imageUrl?: string }) {
   return (
     <div className="shared-property-preview">
-      {imageUrls.length > 0 ? (
+      {imageUrl ? (
         <div className="shared-property-images">
-          {imageUrls.slice(0, 3).map((url, index) => (
-            <img alt={`${property.title} - foto ${index + 1}`} key={url} src={url} />
-          ))}
+          <img alt={`${property.title} - foto principal`} src={imageUrl} />
         </div>
       ) : null}
       <div>
@@ -457,20 +490,12 @@ function SharedPropertyPreview({ property }: { property: Property }) {
   );
 }
 
-function PropertyShareThumb({ property }: { property: Property }) {
-  const imageUrl = getPropertyImageUrls(property)[0];
-
+function PropertyShareThumb({ property, imageUrl }: { property: Property; imageUrl?: string }) {
   return (
     <div className="property-share-thumb">
       {imageUrl ? <img alt={property.title} src={imageUrl} /> : <Building2 size={20} />}
     </div>
   );
-}
-
-function getPropertyImageUrls(property: Property) {
-  return property.images
-    .map((image) => image.url)
-    .filter((url): url is string => typeof url === "string" && Boolean(url.trim()));
 }
 
 function buildPropertyShareText(property: Property) {

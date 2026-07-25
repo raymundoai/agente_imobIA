@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import BinaryIO, Protocol
 from uuid import UUID, uuid4
 
 ALLOWED_IMAGE_TYPES = {
@@ -32,41 +32,127 @@ class PropertyImageUpload:
     content: bytes
 
 
-@dataclass(frozen=True, slots=True)
-class StoredPropertyImage:
-    url: str
-    original_name: str
-    content_type: str
-    size: int
-    optimized: bool
+class PropertyImageStorage(Protocol):
+    def put(self, tenant_id: UUID, key: str, content: bytes, content_type: str) -> None: ...
+
+    def open(self, tenant_id: UUID, key: str) -> BinaryIO: ...
+
+    def delete(self, tenant_id: UUID, key: str) -> None: ...
+
+    def exists(self, tenant_id: UUID, key: str) -> bool: ...
+
+    def signed_url(
+        self, tenant_id: UUID, key: str, *, expires_seconds: int = 300
+    ) -> str | None: ...
 
 
 class LocalPropertyImageStorage:
-    def __init__(self, root: Path, *, url_prefix: str = "/media/properties") -> None:
+    def __init__(self, root: Path) -> None:
         self._root = root
-        self._url_prefix = url_prefix.rstrip("/")
 
-    def save(
-        self,
+    @staticmethod
+    def build_key(
         tenant_id: UUID,
-        upload: PropertyImageUpload,
-        *,
-        optimized: bool,
-    ) -> StoredPropertyImage:
-        extension = ALLOWED_IMAGE_TYPES[upload.content_type][0]
-        filename = f"{uuid4().hex}{extension}"
-        tenant_directory = self._root / str(tenant_id)
-        tenant_directory.mkdir(parents=True, exist_ok=True)
-        target = tenant_directory / filename
-        temporary = target.with_suffix(f"{target.suffix}.tmp")
-        temporary.write_bytes(upload.content)
+        property_id: UUID,
+        image_id: UUID,
+        variant: str,
+        content_type: str,
+    ) -> str:
+        extension = ALLOWED_IMAGE_TYPES[content_type][0]
+        return f"{tenant_id}/{property_id}/{image_id}/{variant}{extension}"
+
+    def _path(self, tenant_id: UUID, key: str) -> Path:
+        expected = f"{tenant_id}/"
+        if not key.startswith(expected) or ".." in Path(key).parts:
+            raise ValueError("Storage key outside tenant scope")
+        root = self._root.resolve()
+        target = (root / key).resolve()
+        if root not in target.parents:
+            raise ValueError("Invalid storage key")
+        return target
+
+    def put(self, tenant_id: UUID, key: str, content: bytes, content_type: str) -> None:
+        if content_type not in ALLOWED_IMAGE_TYPES:
+            raise ValueError("Unsupported image type")
+        target = self._path(tenant_id, key)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_suffix(f"{target.suffix}.{uuid4().hex}.tmp")
+        temporary.write_bytes(content)
         os.replace(temporary, target)
-        return StoredPropertyImage(
-            url=f"{self._url_prefix}/{tenant_id}/{filename}",
-            original_name=upload.original_name,
-            content_type=upload.content_type,
-            size=len(upload.content),
-            optimized=optimized,
+
+    def open(self, tenant_id: UUID, key: str) -> BinaryIO:
+        return self._path(tenant_id, key).open("rb")
+
+    def delete(self, tenant_id: UUID, key: str) -> None:
+        self._path(tenant_id, key).unlink(missing_ok=True)
+
+    def exists(self, tenant_id: UUID, key: str) -> bool:
+        return self._path(tenant_id, key).is_file()
+
+    def signed_url(self, tenant_id: UUID, key: str, *, expires_seconds: int = 300) -> None:
+        self._path(tenant_id, key)
+        return None
+
+class S3PropertyImageStorage:
+    def __init__(
+        self,
+        *,
+        bucket: str,
+        endpoint_url: str | None,
+        region: str | None,
+        access_key: str | None,
+        secret_key: str | None,
+    ) -> None:
+        import boto3
+
+        self._bucket = bucket
+        self._client = boto3.client(
+            "s3",
+            endpoint_url=endpoint_url,
+            region_name=region,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+        )
+
+    @staticmethod
+    def _scoped(tenant_id: UUID, key: str) -> str:
+        if not key.startswith(f"{tenant_id}/") or ".." in Path(key).parts:
+            raise ValueError("Storage key outside tenant scope")
+        return key
+
+    def put(self, tenant_id: UUID, key: str, content: bytes, content_type: str) -> None:
+        self._client.put_object(
+            Bucket=self._bucket,
+            Key=self._scoped(tenant_id, key),
+            Body=content,
+            ContentType=content_type,
+        )
+
+    def open(self, tenant_id: UUID, key: str) -> BinaryIO:
+        return self._client.get_object(
+            Bucket=self._bucket, Key=self._scoped(tenant_id, key)
+        )["Body"]
+
+    def delete(self, tenant_id: UUID, key: str) -> None:
+        self._client.delete_object(Bucket=self._bucket, Key=self._scoped(tenant_id, key))
+
+    def exists(self, tenant_id: UUID, key: str) -> bool:
+        try:
+            self._client.head_object(
+                Bucket=self._bucket, Key=self._scoped(tenant_id, key)
+            )
+        except Exception as exc:
+            response = getattr(exc, "response", {})
+            if response.get("ResponseMetadata", {}).get("HTTPStatusCode") == 404:
+                return False
+            raise
+        return True
+
+    def signed_url(self, tenant_id: UUID, key: str, *, expires_seconds: int = 300) -> str:
+        return self._client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self._bucket, "Key": self._scoped(tenant_id, key)},
+            ExpiresIn=expires_seconds,
         )
 
 
