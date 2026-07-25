@@ -44,6 +44,8 @@ export function ChannelsSettingsPanel({
   const [qrError, setQrError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   useEffect(() => {
     const savedChannels = tenant?.settings.channels as
@@ -59,18 +61,24 @@ export function ChannelsSettingsPanel({
     if (!token) {
       return undefined;
     }
-    request<EvolutionWhatsappConnection>("/integrations/evolution/whatsapp/status", {}, token)
-      .then((connection) => {
+    setStatusLoading(true);
+    void Promise.allSettled([
+      request<EvolutionWhatsappConnection>("/integrations/evolution/whatsapp/status", {}, token),
+      request<TelegramConnection>("/integrations/telegram/status", {}, token),
+    ]).then(([whatsapp, telegram]) => {
+      const errors: string[] = [];
+      if (whatsapp.status === "fulfilled") {
+        const connection = whatsapp.value;
         setWhatsappConnection(connection);
         updateChannel("whatsapp", { status: toChannelStatus(connection.status) });
-      })
-      .catch(() => undefined);
-    request<TelegramConnection>("/integrations/telegram/status", {}, token)
-      .then((connection) => {
+      } else errors.push("WhatsApp");
+      if (telegram.status === "fulfilled") {
+        const connection = telegram.value;
         setTelegramConnection(connection);
         updateChannel("telegram", { status: toChannelStatus(connection.status) });
-      })
-      .catch(() => undefined);
+      } else errors.push("Telegram");
+      setStatusError(errors.length ? `Não foi possível consultar: ${errors.join(" e ")}.` : null);
+    }).finally(() => setStatusLoading(false));
     return undefined;
   }, [token]);
 
@@ -165,6 +173,8 @@ export function ChannelsSettingsPanel({
 
   return (
     <Card className="settings-panel-card">
+      {statusLoading ? <div className="empty-state" aria-live="polite">Consultando canais...</div> : null}
+      {statusError ? <div className="error-box" role="alert">{statusError}</div> : null}
       <div className="settings-panel-header">
         <div>
           <h2>Canais</h2>

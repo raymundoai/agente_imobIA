@@ -1,25 +1,72 @@
 import { useEffect, useState } from "react";
 import {
+  AlertTriangle,
   Building2,
   CheckCircle2,
   MessageSquare,
   UserCheck,
   Users,
 } from "lucide-react";
-import { request } from "../api/client";
-import type { DashboardStats } from "../api/types";
+import { ApiError, request } from "../api/client";
+import type { CreditAccount, DashboardStats, EvolutionWhatsappConnection, TelegramConnection } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { Badge } from "../components/Badge";
 import { Card } from "../components/Card";
 import { MetricCard } from "../components/MetricCard";
+import { jobsUnavailableAlert } from "../lib/operationalAlerts";
 
 export function DashboardPage() {
   const { token } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<string[]>([]);
 
   useEffect(() => {
-    void request<DashboardStats>("/dashboard/stats", {}, token).then(setStats);
+    setLoading(true);
+    void Promise.allSettled([
+      request<DashboardStats>("/dashboard/stats", {}, token),
+      request<CreditAccount>("/usage/credits", {}, token),
+      request<EvolutionWhatsappConnection>("/integrations/evolution/whatsapp/status", {}, token),
+      request<TelegramConnection>("/integrations/telegram/status", {}, token),
+      request<Array<{ status: string }>>("/message-jobs?limit=50", {}, token),
+    ]).then(([statsResult, creditResult, whatsappResult, telegramResult, jobsResult]) => {
+      if (statsResult.status === "rejected") {
+        setError(statsResult.reason instanceof Error ? statsResult.reason.message : "Falha ao carregar o painel.");
+        setStats(null);
+      } else {
+        setStats(statsResult.value);
+        setError(null);
+      }
+      const operational: string[] = [];
+      if (creditResult.status === "rejected") operational.push("Não foi possível verificar o saldo de créditos.");
+      if (creditResult.status === "fulfilled" && creditResult.value.enforcement_mode === "enforce" && creditResult.value.available_credits <= 0) {
+        operational.push("Saldo de créditos indisponível: automações cobradas podem ser bloqueadas.");
+      }
+      if (whatsappResult.status === "fulfilled" && whatsappResult.value.status !== "connected") {
+        operational.push("WhatsApp não está conectado.");
+      }
+      if (whatsappResult.status === "rejected") operational.push("Status do WhatsApp indisponível.");
+      if (telegramResult.status === "fulfilled" && telegramResult.value.status !== "connected") {
+        operational.push("Telegram não está conectado.");
+      }
+      if (telegramResult.status === "rejected") operational.push("Status do Telegram indisponível.");
+      if (jobsResult.status === "fulfilled") {
+        const failed = jobsResult.value.filter((job) => ["failed", "delivery_unknown"].includes(job.status)).length;
+        if (failed) operational.push(`${failed} atendimento(s) exigem revisão operacional.`);
+      } else {
+        operational.push(
+          jobsUnavailableAlert(
+            jobsResult.reason instanceof ApiError ? jobsResult.reason.status : undefined,
+          ),
+        );
+      }
+      setAlerts(operational);
+    }).finally(() => setLoading(false));
   }, [token]);
+
+  if (loading) return <section className="empty-state large" aria-live="polite">Carregando visão geral...</section>;
+  if (error) return <section className="error-box" role="alert">{error}</section>;
 
   return (
     <section className="page-stack">
@@ -27,7 +74,7 @@ export function DashboardPage() {
         <MetricCard
           detail="Conversas registradas na empresa"
           icon={MessageSquare}
-          label="Conversas WhatsApp"
+          label="Conversas multicanal"
           value={stats?.conversations ?? "—"}
         />
         <MetricCard
@@ -66,11 +113,19 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      <Card className="health-card">
-        <CheckCircle2 size={18} />
-        <span>Métricas exibidas somente para a empresa acessada.</span>
-        <Badge variant="success">Operação saudável</Badge>
-      </Card>
+      {alerts.length ? (
+        <Card className="health-card operational-warning" role="alert">
+          <AlertTriangle size={18} />
+          <div>{alerts.map((alert) => <p key={alert}>{alert}</p>)}</div>
+          <Badge variant="muted">Atenção</Badge>
+        </Card>
+      ) : (
+        <Card className="health-card">
+          <CheckCircle2 size={18} />
+          <span>Nenhum alerta foi retornado pelas APIs consultadas.</span>
+          <Badge variant="success">Sem alertas detectados</Badge>
+        </Card>
+      )}
     </section>
   );
 }

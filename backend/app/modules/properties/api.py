@@ -197,6 +197,25 @@ class PropertyImageUpdateRequest(BaseModel):
     sort_order: int | None = Field(default=None, ge=0, le=10000)
 
 
+class PropertyImageOrderItem(BaseModel):
+    id: UUID
+    sort_order: int = Field(ge=0, le=10000)
+
+
+class PropertyImageOrderRequest(BaseModel):
+    images: list[PropertyImageOrderItem] = Field(min_length=1, max_length=50)
+
+    @model_validator(mode="after")
+    def validate_unique_ids_and_orders(self) -> "PropertyImageOrderRequest":
+        ids = [item.id for item in self.images]
+        orders = [item.sort_order for item in self.images]
+        if len(ids) != len(set(ids)):
+            raise ValueError("image ids must be unique")
+        if len(orders) != len(set(orders)):
+            raise ValueError("sort orders must be unique")
+        return self
+
+
 class ReprocessImageRequest(BaseModel):
     operation_id: UUID = Field(default_factory=uuid4)
     optimizations: list[str] = Field(default_factory=list, max_length=10)
@@ -544,6 +563,50 @@ def property_image_content(
     return StreamingResponse(stream, media_type=content_type)
 
 
+@router.put(
+    "/{property_id}/images/order",
+    response_model=list[LinkedPropertyImageResponse],
+)
+def reorder_property_images(
+    property_id: UUID,
+    payload: PropertyImageOrderRequest,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    session: Session = Depends(get_db_session),
+) -> list[LinkedPropertyImageResponse]:
+    property_model = session.scalar(
+        select(PropertyModel)
+        .where(
+            PropertyModel.tenant_id == principal.tenant_id,
+            PropertyModel.id == property_id,
+        )
+        .with_for_update()
+    )
+    if property_model is None:
+        raise HTTPException(status_code=404, detail="Imóvel não encontrado.")
+    images = session.scalars(
+        select(PropertyImageModel)
+        .where(
+            PropertyImageModel.tenant_id == principal.tenant_id,
+            PropertyImageModel.property_id == property_id,
+        )
+        .with_for_update()
+    ).all()
+    current_ids = {image.id for image in images}
+    requested_ids = {item.id for item in payload.images}
+    if requested_ids != current_ids:
+        raise HTTPException(
+            status_code=409,
+            detail="A ordenação deve conter exatamente todas as imagens atuais do imóvel.",
+        )
+    order_by_id = {item.id: item.sort_order for item in payload.images}
+    for image in images:
+        image.sort_order = order_by_id[image.id]
+        image.updated_at = datetime.now(UTC)
+    session.commit()
+    ordered = sorted(images, key=lambda item: (not item.is_primary, item.sort_order, item.id))
+    return [_linked_image_response(image) for image in ordered]
+
+
 @router.patch(
     "/{property_id}/images/{image_id}", response_model=LinkedPropertyImageResponse
 )
@@ -573,6 +636,11 @@ def update_property_image(
         )
         image.is_primary = True
     elif payload.is_primary is False:
+        if image.is_primary:
+            raise HTTPException(
+                status_code=409,
+                detail="Defina outra imagem como principal antes de remover esta marcação.",
+            )
         image.is_primary = False
     if payload.sort_order is not None:
         image.sort_order = payload.sort_order
@@ -582,14 +650,47 @@ def update_property_image(
     return _linked_image_response(image)
 
 
-@router.delete("/{property_id}/images/{image_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{property_id}/images/{image_id}",
+    response_model=list[LinkedPropertyImageResponse],
+)
 def delete_property_image(
     property_id: UUID,
     image_id: UUID,
     principal: CurrentPrincipal = Depends(get_current_principal),
     session: Session = Depends(get_db_session),
-) -> None:
-    image = _image_model(session, principal.tenant_id, property_id, image_id)
+) -> list[LinkedPropertyImageResponse]:
+    property_model = session.scalar(
+        select(PropertyModel)
+        .where(
+            PropertyModel.tenant_id == principal.tenant_id,
+            PropertyModel.id == property_id,
+        )
+        .with_for_update()
+    )
+    if property_model is None:
+        raise HTTPException(status_code=404, detail="Imóvel não encontrado.")
+    images = session.scalars(
+        select(PropertyImageModel)
+        .where(
+            PropertyImageModel.tenant_id == principal.tenant_id,
+            PropertyImageModel.property_id == property_id,
+        )
+        .order_by(PropertyImageModel.sort_order, PropertyImageModel.created_at)
+        .with_for_update()
+    ).all()
+    image = next((item for item in images if item.id == image_id), None)
+    if image is None:
+        raise HTTPException(status_code=404, detail="Imagem não encontrada.")
+    remaining = [item for item in images if item.id != image_id]
+    if image.is_primary and remaining:
+        # A restrição parcial de principal único é imediata no PostgreSQL.
+        # Desmarcar e flushar dentro da mesma transação libera a chave antes
+        # de promover a substituta, sem expor o estado intermediário.
+        image.is_primary = False
+        session.flush()
+        remaining[0].is_primary = True
+        remaining[0].updated_at = datetime.now(UTC)
     keys = [key for key in [image.original_storage_key] if key]
     if image.derived_storage_key:
         keys.append(image.derived_storage_key)
@@ -601,6 +702,7 @@ def delete_property_image(
         )
     session.delete(image)
     session.commit()
+    return [_linked_image_response(item) for item in remaining]
 
 
 @router.post(

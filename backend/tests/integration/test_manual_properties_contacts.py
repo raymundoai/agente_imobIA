@@ -196,3 +196,84 @@ def test_property_image_treatment_requires_configured_openai(client: TestClient)
 
     assert response.status_code == 503
     assert "OpenAI" in response.json()["detail"]
+
+
+def test_property_image_order_and_primary_delete_are_atomic_and_isolated(
+    client: TestClient,
+) -> None:
+    token = _provision(client, "tenant-a", "a@example.com")
+    other_token = _provision(client, "tenant-b", "b@example.com")
+    auth = {"Authorization": f"Bearer {token}"}
+    created = client.post(
+        "/properties",
+        headers=auth,
+        json={
+            "title": "Casa com galeria",
+            "purpose": "buy",
+            "property_type": "casa",
+            "category": "residential",
+            "sale_price": 750000,
+            "address": {
+                "street": "Rua Galeria",
+                "neighborhood": "Centro",
+                "city": "São Paulo",
+                "state": "SP",
+            },
+        },
+    )
+    property_id = created.json()["id"]
+    uploaded = client.post(
+        f"/properties/{property_id}/images",
+        headers=auth,
+        files=[
+            ("files", ("a.png", b"\x89PNG\r\n\x1a\na", "image/png")),
+            ("files", ("b.png", b"\x89PNG\r\n\x1a\nb", "image/png")),
+            ("files", ("c.png", b"\x89PNG\r\n\x1a\nc", "image/png")),
+        ],
+    ).json()
+    original_order = {item["id"]: item["sort_order"] for item in uploaded}
+
+    incomplete = client.put(
+        f"/properties/{property_id}/images/order",
+        headers=auth,
+        json={"images": [{"id": uploaded[0]["id"], "sort_order": 9}]},
+    )
+    assert incomplete.status_code == 409
+    unchanged = client.get(
+        f"/properties/{property_id}/images", headers=auth
+    ).json()
+    assert {item["id"]: item["sort_order"] for item in unchanged} == original_order
+
+    isolated = client.put(
+        f"/properties/{property_id}/images/order",
+        headers={"Authorization": f"Bearer {other_token}"},
+        json={
+            "images": [
+                {"id": item["id"], "sort_order": index}
+                for index, item in enumerate(reversed(uploaded))
+            ]
+        },
+    )
+    assert isolated.status_code == 404
+
+    reordered = client.put(
+        f"/properties/{property_id}/images/order",
+        headers=auth,
+        json={
+            "images": [
+                {"id": item["id"], "sort_order": index}
+                for index, item in enumerate(reversed(uploaded))
+            ]
+        },
+    )
+    assert reordered.status_code == 200, reordered.text
+    assert {item["sort_order"] for item in reordered.json()} == {0, 1, 2}
+
+    primary = next(item for item in reordered.json() if item["is_primary"])
+    deleted = client.delete(
+        f"/properties/{property_id}/images/{primary['id']}", headers=auth
+    )
+    assert deleted.status_code == 200, deleted.text
+    remaining = deleted.json()
+    assert len(remaining) == 2
+    assert sum(item["is_primary"] for item in remaining) == 1

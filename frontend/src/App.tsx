@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { AppShell } from "./components/AppShell";
 import { ConversationsPage } from "./pages/ConversationsPage";
@@ -7,10 +7,15 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PropertiesPage } from "./pages/PropertiesPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { type AppPage, navigateToPage, pageFromPath, subscribeToPageChanges } from "./lib/appNavigation";
 
 export function App() {
   const { isAuthenticated } = useAuth();
-  const [page, setPage] = useState("dashboard");
+  const [page, setPage] = useState<AppPage>(() => pageFromPath(window.location.pathname));
+
+  useEffect(() => {
+    return subscribeToPageChanges(setPage);
+  }, []);
 
   if (!isAuthenticated) {
     return <LoginPage />;
@@ -20,7 +25,7 @@ export function App() {
     <AppShell
       activePage={page}
       onNavigate={(nextPage) => {
-        setPage(nextPage);
+        navigateToPage(nextPage as AppPage);
       }}
     >
       {renderPage(page)}
@@ -28,7 +33,7 @@ export function App() {
   );
 }
 
-function renderPage(page: string) {
+function renderPage(page: AppPage) {
   switch (page) {
     case "conversations":
       return <ConversationsPage />;

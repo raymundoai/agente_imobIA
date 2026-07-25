@@ -33,6 +33,7 @@ export function ConversationsPage() {
   const [aiEnabledById, setAiEnabledById] = useState<Record<string, boolean>>({});
   const [actionError, setActionError] = useState<string | null>(null);
   const [messagesById, setMessagesById] = useState<Record<string, ChatMessage[]>>({});
+  const [listLoading, setListLoading] = useState(true);
 
   useEffect(() => {
     void request<Conversation[]>("/conversations", {}, token)
@@ -46,7 +47,8 @@ export function ConversationsPage() {
       .catch((error) => {
         setItems([]);
         setActionError(readActionError(error));
-      });
+      })
+      .finally(() => setListLoading(false));
   }, [token]);
 
   useEffect(() => {
@@ -284,12 +286,13 @@ export function ConversationsPage() {
             <input
               aria-label="Buscar conversas"
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buscar por cliente, telefone ou status"
+              placeholder="Buscar por cliente, identificação ou status"
               value={query}
             />
           </label>
           <div className="conversation-list">
-            {visibleItems.map((item) => {
+            {listLoading ? <div className="empty-state" aria-live="polite">Carregando conversas...</div> : null}
+            {!listLoading && visibleItems.map((item) => {
               const isActive = item.id === selected?.id;
               const itemAiEnabled = aiEnabledById[item.id] ?? item.mode !== "human";
               return (
@@ -312,7 +315,7 @@ export function ConversationsPage() {
                 </button>
               );
             })}
-            {visibleItems.length === 0 ? <div className="empty-state">Nenhuma conversa encontrada.</div> : null}
+            {!listLoading && visibleItems.length === 0 ? <div className="empty-state">Nenhuma conversa encontrada.</div> : null}
           </div>
         </aside>
 

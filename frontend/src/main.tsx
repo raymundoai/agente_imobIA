@@ -4,10 +4,11 @@ import { App } from "./App";
 import { AuthProvider } from "./auth/AuthContext";
 import { applyTheme, getActiveTheme } from "./lib/theme";
 import "./styles.css";
+import { isPlatformPath } from "./lib/appNavigation";
 
 applyTheme(getActiveTheme());
 
-const redirectToPlatform = /^\/(platform|plataform)(\/|$)/.test(window.location.pathname);
+const redirectToPlatform = isPlatformPath(window.location.pathname);
 
 if (redirectToPlatform) {
   const configuredUrl = import.meta.env.VITE_PLATFORM_URL as string | undefined;

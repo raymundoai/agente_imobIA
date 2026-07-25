@@ -26,14 +26,19 @@ export function ContactsPage() {
   const [form, setForm] = useState<ContactForm>(emptyForm);
   const [creating, setCreating] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   async function load() {
+    setLoading(true);
     const items = await request<Contact[]>("/contacts", {}, token);
     setContacts(items);
     setSelectedId((current) => current || items[0]?.id || "");
+    setLoadError(null);
+    setLoading(false);
   }
 
-  useEffect(() => { void load().catch((error) => setFeedback(readError(error))); }, [token]);
+  useEffect(() => { void load().catch((error) => { setLoadError(readError(error)); setLoading(false); }); }, [token]);
   const selected = contacts.find((item) => item.id === selectedId) ?? null;
   useEffect(() => {
     if (selected) setForm(toForm(selected));
@@ -66,7 +71,12 @@ export function ContactsPage() {
     <div className="contacts-layout">
       <section className="contacts-list-panel">
         <label className="inbox-search"><Search size={16} /><input onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por nome, telefone, email ou tag" value={query} /></label>
-        <div className="contacts-list">{filtered.map((contact) => <button className={contact.id === selectedId && !creating ? "contact-row active" : "contact-row"} key={contact.id} onClick={() => { setCreating(false); setSelectedId(contact.id); }} type="button"><span className="conversation-avatar"><UserRoundCog size={16} /></span><span><strong>{contact.name}</strong><small>{contact.phone}</small><span className="tag-row">{contact.tags.slice(0, 2).map((tag) => <i key={tag}>{tag}</i>)}</span></span><Badge variant={contact.kind === "lead" ? "accent" : "success"}>{kindLabels[contact.kind]}</Badge></button>)}</div>
+        <div className="contacts-list">
+          {loading ? <div className="empty-state" aria-live="polite">Carregando contatos...</div> : null}
+          {loadError ? <div className="error-box" role="alert">{loadError}</div> : null}
+          {!loading && !loadError && filtered.length === 0 ? <div className="empty-state">Nenhum contato encontrado.</div> : null}
+          {filtered.map((contact) => <button className={contact.id === selectedId && !creating ? "contact-row active" : "contact-row"} key={contact.id} onClick={() => { setCreating(false); setSelectedId(contact.id); }} type="button"><span className="conversation-avatar"><UserRoundCog size={16} /></span><span><strong>{contact.name}</strong><small>{contact.phone}</small><span className="tag-row">{contact.tags.slice(0, 2).map((tag) => <i key={tag}>{tag}</i>)}</span></span><Badge variant={contact.kind === "lead" ? "accent" : "success"}>{kindLabels[contact.kind]}</Badge></button>)}
+        </div>
       </section>
       <aside className="contact-detail-panel">
         <div className="contact-detail-header"><div><span className="eyebrow">{creating ? "Novo cadastro" : "Cadastro"}</span><h2>{creating ? "Novo contato" : selected?.name ?? "Selecione um contato"}</h2></div>{creating ? <button className="icon-button" onClick={() => setCreating(false)} type="button"><X size={18} /></button> : null}</div>

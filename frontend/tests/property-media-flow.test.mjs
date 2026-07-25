@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  atomicImageOrderSwap,
   imageOrderSwap,
   mergeSavedProperty,
-  primaryReplacement,
+  propertySaveFailureMessage,
+  validateImageSelection,
 } from "../src/lib/propertyMediaState.ts";
 
 const property = (id, title = id) => ({ id, title });
@@ -42,11 +44,37 @@ test("reordenação troca posições sem criar ordem duplicada", () => {
     { id: "a", sort_order: 7 },
   ]);
   assert.equal(imageOrderSwap(images, 0, -1), null);
+  assert.deepEqual(atomicImageOrderSwap(images, 1, -1), [
+    { id: "a", sort_order: 7 },
+    { id: "b", sort_order: 3 },
+    { id: "c", sort_order: 10 },
+  ]);
 });
 
-test("remoção só elege substituta quando a imagem removida era principal", () => {
-  const images = [image("a", 0, true), image("b", 1)];
+test("seleção aceita apenas formatos e limites publicados", () => {
+  assert.equal(
+    validateImageSelection(0, [{ name: "foto.webp", type: "image/webp", size: 1024 }]),
+    null,
+  );
+  assert.match(
+    validateImageSelection(0, [{ name: "foto.gif", type: "image/gif", size: 1024 }]),
+    /JPEG, PNG ou WebP/,
+  );
+  assert.match(
+    validateImageSelection(12, [{ name: "foto.jpg", type: "image/jpeg", size: 1024 }]),
+    /máximo 12/,
+  );
+});
 
-  assert.equal(primaryReplacement(images, images[1]), null);
-  assert.equal(primaryReplacement(images, images[0])?.id, "b");
+test("falha parcial informa com precisão o que já foi persistido", () => {
+  assert.match(propertySaveFailureMessage("timeout", false, false), /não foi salvo/);
+  assert.match(
+    propertySaveFailureMessage("timeout", false, false, true),
+    /cadastro anterior permanece/,
+  );
+  assert.match(propertySaveFailureMessage("timeout", true, false), /imóvel foi salvo.*imagens/s);
+  assert.match(
+    propertySaveFailureMessage("timeout", true, true),
+    /imóvel e as imagens originais foram salvos.*tratamento/s,
+  );
 });

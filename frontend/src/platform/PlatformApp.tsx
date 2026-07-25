@@ -12,6 +12,7 @@ import {
 import { request } from "../api/client";
 import { Card } from "../components/Card";
 import { MetricCard } from "../components/MetricCard";
+import { runWithLoading } from "../lib/asyncState";
 
 type Dashboard = {
   total_clients: number;
@@ -72,20 +73,32 @@ export function PlatformApp() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<TenantForm>(emptyTenant);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   async function load(activeToken = token) {
-    if (!activeToken) return;
-    const [stats, clients] = await Promise.all([
-      request<Dashboard>("/platform/dashboard", {}, activeToken),
-      request<Tenant[]>("/platform/tenants", {}, activeToken),
-    ]);
-    setDashboard(stats);
-    setTenants(clients);
-    if (selected)
-      setSelected(clients.find((item) => item.id === selected.id) ?? null);
+    if (!activeToken) {
+      setLoading(false);
+      return;
+    }
+    await runWithLoading(
+      setLoading,
+      async () => {
+        const [stats, clients] = await Promise.all([
+          request<Dashboard>("/platform/dashboard", {}, activeToken),
+          request<Tenant[]>("/platform/tenants", {}, activeToken),
+        ]);
+        setDashboard(stats);
+        setTenants(clients);
+        setSelected((current) =>
+          current ? clients.find((item) => item.id === current.id) ?? null : null,
+        );
+        setError(null);
+      },
+      (reason) => setError(readError(reason)),
+    );
   }
   useEffect(() => {
-    void load().catch((reason) => setError(readError(reason)));
+    void load();
   }, [token]);
 
   if (!token)
@@ -116,6 +129,7 @@ export function PlatformApp() {
     }
   }
   async function toggleStatus(tenant: Tenant) {
+    if (!window.confirm(tenant.status === "active" ? "Suspender este cliente e interromper seu acesso?" : "Reativar o acesso deste cliente?")) return;
     try {
       const updated = await request<Tenant>(
         `/platform/tenants/${tenant.id}/status`,
@@ -157,6 +171,8 @@ export function PlatformApp() {
         </button>
       </header>
       {error ? <div className="error-box">{error}</div> : null}
+      {loading ? <div className="empty-state large" aria-live="polite">Carregando administração da plataforma...</div> : null}
+      {!loading ? <>
       <section className="metrics-grid">
         <MetricCard
           icon={Building2}
@@ -208,6 +224,7 @@ export function PlatformApp() {
             </button>
           </div>
           <div className="contacts-list">
+            {tenants.length === 0 ? <div className="empty-state">Nenhum cliente cadastrado.</div> : null}
             {tenants.map((tenant) => (
               <button
                 className={
@@ -297,6 +314,7 @@ export function PlatformApp() {
           )}
         </Card>
       </div>
+      </> : null}
     </main>
   );
 }
@@ -367,6 +385,7 @@ function TenantDetail({
   const [feedback, setFeedback] = useState<string | null>(null);
   async function grant(event: FormEvent) {
     event.preventDefault();
+    if (!window.confirm(`Adicionar ${Number(credits).toLocaleString("pt-BR")} créditos para ${tenant.name}?`)) return;
     setFeedback(null);
     try {
       await request(
@@ -388,6 +407,7 @@ function TenantDetail({
     }
   }
   async function savePolicy() {
+    if (!window.confirm("Alterar a política de bloqueio por saldo deste cliente?")) return;
     try {
       await request(
         `/platform/tenants/${tenant.id}/credits/settings`,
@@ -409,6 +429,7 @@ function TenantDetail({
     }
   }
   async function toggleUnlimited() {
+    if (!window.confirm(tenant.unlimited_messages ? "Voltar a cobrar mensagens deste cliente?" : "Tornar as mensagens ilimitadas para este cliente?")) return;
     try {
       await request(
         `/platform/tenants/${tenant.id}/credits/settings`,

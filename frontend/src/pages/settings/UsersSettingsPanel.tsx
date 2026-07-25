@@ -76,6 +76,7 @@ export function UsersSettingsPanel() {
   }
 
   async function patchUser(user: User, patch: Partial<Pick<User, "role" | "status">>) {
+    if (patch.status && !window.confirm(patch.status === "inactive" ? `Desativar o acesso de ${user.name}?` : `Reativar o acesso de ${user.name}?`)) return;
     setMessage(null);
     try {
       const updated = await request<User>(

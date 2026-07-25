@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
+import { appRoutes, type AppPage, shouldHandleClientNavigation } from "../lib/appNavigation";
 
 export const navigationItems = [
   { key: "dashboard", label: "Visão geral", icon: BarChart3 },
@@ -25,7 +26,7 @@ export function Sidebar({
   onNavigate,
 }: {
   activePage: string;
-  onNavigate: (page: string) => void;
+  onNavigate: (page: AppPage) => void;
 }) {
   const { tenantSlug } = useAuth();
   const [collapsed, setCollapsed] = useState(
@@ -59,20 +60,22 @@ export function Sidebar({
           const Icon = item.icon;
           const isActive = activePage === item.key;
           return (
-            <button
+            <a
+              aria-current={isActive ? "page" : undefined}
               className={["nav-v2-item", isActive ? "active" : ""]
                 .filter(Boolean)
                 .join(" ")}
               key={item.key}
-              onClick={() => {
+              href={appRoutes[item.key]}
+              onClick={(event) => {
+                if (!shouldHandleClientNavigation(event)) return;
+                event.preventDefault();
                 onNavigate(item.key);
               }}
-              type="button"
             >
               <Icon size={17} />
               <span>{item.label}</span>
-              {"highlight" in item && item.highlight ? <span className="nav-dot" /> : null}
-            </button>
+            </a>
           );
         })}
       </nav>

@@ -4,7 +4,13 @@ import { request, requestBlob } from "../api/client";
 import type { Property, PropertyImage } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { PropertyCard } from "../components/PropertyCard";
-import { imageOrderSwap, mergeSavedProperty, primaryReplacement } from "../lib/propertyMediaState";
+import {
+  ACCEPTED_PROPERTY_IMAGE_TYPES,
+  atomicImageOrderSwap,
+  mergeSavedProperty,
+  propertySaveFailureMessage,
+  validateImageSelection,
+} from "../lib/propertyMediaState";
 
 type PropertyForm = {
   listing_code: string;
@@ -51,7 +57,7 @@ type PropertyPhoto = {
 const imageOptimizationOptions = [
   { id: "lighting", label: "Melhorar iluminação" },
   { id: "straighten", label: "Corrigir enquadramento" },
-  { id: "declutter", label: "Remover móveis e utensílios" },
+  { id: "visual_organization", label: "Organizar visualmente sem remover elementos" },
   { id: "walls", label: "Suavizar marcas em paredes" },
   { id: "windows", label: "Realçar vista e janelas" },
   { id: "sharpen", label: "Aumentar nitidez" },
@@ -303,19 +309,26 @@ export function PropertiesPage() {
   async function refreshCover(propertyId: string) {
     try {
       const images = await request<PropertyImage[]>(`/properties/${propertyId}/images`, {}, token);
-      const primary = images.find((image) => image.is_primary) ?? images[0];
-      if (!primary) {
-        removeObjectUrls((key) => key === propertyId);
-        return;
-      }
-      const blob = await requestBlob(primary.display_url, token);
-      replaceObjectUrls(
-        { [propertyId]: URL.createObjectURL(blob) },
-        (key) => key === propertyId,
-      );
+      await refreshCoverFromImages(propertyId, images);
     } catch {
       removeObjectUrls((key) => key === propertyId);
     }
+  }
+
+  async function refreshCoverFromImages(
+    propertyId: string,
+    images: PropertyImage[],
+  ) {
+    const primary = images.find((image) => image.is_primary) ?? images[0];
+    if (!primary) {
+      removeObjectUrls((key) => key === propertyId);
+      return;
+    }
+    const blob = await requestBlob(primary.display_url, token);
+    replaceObjectUrls(
+      { [propertyId]: URL.createObjectURL(blob) },
+      (key) => key === propertyId,
+    );
   }
 
   function handlePhotoUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -325,6 +338,16 @@ export function PropertiesPage() {
       return;
     }
 
+    const selectionError = validateImageSelection(
+      photos.length + linkedImages.length,
+      files,
+    );
+    if (selectionError) {
+      setFormMessage(selectionError);
+      event.target.value = "";
+      return;
+    }
+    setFormMessage(null);
     setPhotos((current) => [
       ...current,
       ...files.map((file) => ({
@@ -393,19 +416,23 @@ export function PropertiesPage() {
     event.preventDefault();
     setSaving(true);
     setFormMessage(null);
+    let persistedProperty: Property | null = null;
+    let originalsPersisted = false;
+    const wasEditing = Boolean(selected);
 
     try {
-      const wasEditing = Boolean(selected);
       const property = await request<Property>(selected ? `/properties/${selected.id}` : "/properties", {
         method: selected ? "PUT" : "POST",
         body: JSON.stringify(propertyPayload()),
       }, token);
+      persistedProperty = property;
       setSelected(property);
       setItems((current) => mergeSavedProperty(current, property, wasEditing));
       if (photos.length) {
         const body = new FormData();
         photos.forEach((photo) => body.append("files", photo.file));
         const uploaded = await request<PropertyImage[]>(`/properties/${property.id}/images`, { method: "POST", body }, token);
+        originalsPersisted = true;
         photos.forEach((photo) => URL.revokeObjectURL(photo.previewUrl));
         setPhotos([]);
         await loadLinkedImages(property.id);
@@ -423,7 +450,15 @@ export function PropertiesPage() {
       }
       await refreshCover(property.id);
     } catch (error) {
-      setFormMessage(error instanceof Error ? error.message : "Falha ao salvar imóvel.");
+      const reason = error instanceof Error ? error.message : "Erro inesperado.";
+      setFormMessage(
+        propertySaveFailureMessage(
+          reason,
+          Boolean(persistedProperty),
+          originalsPersisted,
+          wasEditing,
+        ),
+      );
       setSaving(false);
       return;
     }
@@ -438,6 +473,7 @@ export function PropertiesPage() {
 
   async function changeStatus() {
     if (!selected) return;
+    if (!window.confirm(selected.status === "inactive" ? "Reativar este imóvel?" : "Inativar este imóvel? Ele deixará de ser oferecido nos atendimentos.")) return;
     setSaving(true);
     try {
       const updated = await request<Property>(`/properties/${selected.id}/status`, {
@@ -480,17 +516,15 @@ export function PropertiesPage() {
 
   async function moveImage(index: number, direction: -1 | 1) {
     if (!selected) return;
-    const swap = imageOrderSwap(linkedImages, index, direction);
-    if (!swap) return;
-    setImageBusy(swap[0].id);
+    const atomicOrder = atomicImageOrderSwap(linkedImages, index, direction);
+    if (!atomicOrder) return;
+    setImageBusy(linkedImages[index].id);
     try {
-      await request<PropertyImage>(`/properties/${selected.id}/images/${swap[0].id}`, {
-        method: "PATCH", body: JSON.stringify({ sort_order: swap[0].sort_order }),
+      const ordered = await request<PropertyImage[]>(`/properties/${selected.id}/images/order`, {
+        method: "PUT",
+        body: JSON.stringify({ images: atomicOrder }),
       }, token);
-      await request<PropertyImage>(`/properties/${selected.id}/images/${swap[1].id}`, {
-        method: "PATCH", body: JSON.stringify({ sort_order: swap[1].sort_order }),
-      }, token);
-      await loadLinkedImages(selected.id);
+      setLinkedImages(ordered);
     } catch (error) { setFormMessage(error instanceof Error ? error.message : "Falha ao reordenar imagem."); }
     finally { setImageBusy(null); }
   }
@@ -499,21 +533,19 @@ export function PropertiesPage() {
     if (!selected || !window.confirm("Remover esta imagem?")) return;
     setImageBusy(image.id);
     try {
-      await request<void>(`/properties/${selected.id}/images/${image.id}`, { method: "DELETE" }, token);
-      const replacement = primaryReplacement(linkedImages, image);
-      if (replacement) {
-          await request<PropertyImage>(`/properties/${selected.id}/images/${replacement.id}`, {
-            method: "PATCH", body: JSON.stringify({ is_primary: true }),
-          }, token);
-      }
-      await loadLinkedImages(selected.id);
-      await refreshCover(selected.id);
+      const remaining = await request<PropertyImage[]>(`/properties/${selected.id}/images/${image.id}`, { method: "DELETE" }, token);
+      removeObjectUrls(
+        (key) => key === `detail:${image.id}` || key === `original:${image.id}`,
+      );
+      setLinkedImages(remaining);
+      await refreshCoverFromImages(selected.id, remaining);
     } catch (error) { setFormMessage(error instanceof Error ? error.message : "Falha ao remover imagem."); }
     finally { setImageBusy(null); }
   }
 
   async function reprocessImage(image: PropertyImage) {
     if (!selected) return;
+    if (!window.confirm("Reprocessar a imagem original com IA? Esta operação pode consumir créditos.")) return;
     setImageBusy(image.id);
     try {
       await request<PropertyImage>(`/properties/${selected.id}/images/${image.id}/reprocess`, {
@@ -767,12 +799,12 @@ export function PropertiesPage() {
                 <div className="section-inline-header">
                   <div>
                     <strong>Fotos do imóvel</strong>
-                    <span>Adicione imagens para compor a vitrine e os atendimentos.</span>
+                    <span>JPEG, PNG ou WebP · até 10 MB cada · máximo de 12 imagens por imóvel.</span>
                   </div>
                   <label className="button-outline photo-upload-button">
                     <ImagePlus size={15} />
                     Adicionar fotos
-                    <input accept="image/*" multiple onChange={handlePhotoUpload} type="file" />
+                    <input accept={ACCEPTED_PROPERTY_IMAGE_TYPES.join(",")} multiple onChange={handlePhotoUpload} type="file" />
                   </label>
                 </div>
 
@@ -828,6 +860,10 @@ export function PropertiesPage() {
 
               <fieldset className="checkbox-group form-span-2 image-ai-options">
                 <legend>Otimização de imagens com IA</legend>
+                <p className="field-help">
+                  O tratamento preserva arquitetura, móveis, objetos e proporções. Ele não adiciona,
+                  remove nem inventa elementos; aplica apenas ajustes visuais conservadores.
+                </p>
                 {imageOptimizationOptions.map((option) => (
                   <label key={option.id}>
                     <input

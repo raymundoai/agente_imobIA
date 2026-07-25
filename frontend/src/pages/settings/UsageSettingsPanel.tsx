@@ -11,6 +11,8 @@ export function UsageSettingsPanel() {
   const [items, setItems] = useState<UsageSummaryItem[]>([]);
   const [account, setAccount] = useState<CreditAccount | null>(null);
   const [ledger, setLedger] = useState<CreditLedgerItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void Promise.all([
@@ -22,16 +24,22 @@ export function UsageSettingsPanel() {
         setItems(usage);
         setAccount(credits);
         setLedger(transactions);
+        setError(null);
       })
-      .catch(() => {
+      .catch((reason) => {
         setItems([]);
         setAccount(null);
         setLedger([]);
-      });
+        setError(reason instanceof Error ? reason.message : "Falha ao carregar uso e créditos.");
+      })
+      .finally(() => setLoading(false));
   }, [token]);
 
   const total = items.reduce((sum, item) => sum + Number(item.estimated_cost || 0), 0);
   const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
+
+  if (loading) return <Card className="settings-panel-card"><div className="empty-state" aria-live="polite">Carregando uso e créditos...</div></Card>;
+  if (error) return <Card className="settings-panel-card"><div className="error-box" role="alert">{error}</div></Card>;
 
   return (
     <Card className="settings-panel-card">
@@ -46,6 +54,9 @@ export function UsageSettingsPanel() {
       </div>
 
       <div className="settings-grid">
+        {account && account.enforcement_mode === "enforce" && account.available_credits <= 0 ? (
+          <div className="error-box form-span-2" role="alert">Saldo indisponível. Atendimento por IA e tratamento de imagens podem ser bloqueados.</div>
+        ) : null}
         <div className="settings-summary">
           <span>Saldo total</span>
           <strong>{formatNumber(account?.balance_credits ?? 0)}</strong>

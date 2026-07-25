@@ -12,13 +12,23 @@ export function KnowledgeSettingsPanel() {
   const [file, setFile] = useState<File | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
 
   async function loadDocuments() {
-    setItems(await request<KnowledgeDocument[]>("/knowledge/documents", {}, token));
+    setListLoading(true);
+    try {
+      setItems(await request<KnowledgeDocument[]>("/knowledge/documents", {}, token));
+      setListError(null);
+    } catch (error) {
+      setListError(error instanceof Error ? error.message : "Falha ao carregar arquivos.");
+    } finally {
+      setListLoading(false);
+    }
   }
 
   useEffect(() => {
-    void loadDocuments().catch(() => setItems([]));
+    void loadDocuments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
@@ -54,6 +64,7 @@ export function KnowledgeSettingsPanel() {
   }
 
   async function deleteDocument(id: string) {
+    if (!window.confirm("Remover este arquivo da base de conhecimento?")) return;
     setMessage(null);
     try {
       await request<void>(`/knowledge/documents/${id}`, { method: "DELETE" }, token);
@@ -88,7 +99,9 @@ export function KnowledgeSettingsPanel() {
         </button>
       </div>
 
-      <DataTable
+      {listLoading ? <div className="empty-state" aria-live="polite">Carregando arquivos...</div> : null}
+      {listError ? <div className="error-box" role="alert">{listError}</div> : null}
+      {!listLoading && !listError ? <DataTable
         data={items}
         empty="Nenhum arquivo enviado."
         columns={[
@@ -114,7 +127,7 @@ export function KnowledgeSettingsPanel() {
             ),
           },
         ]}
-      />
+      /> : null}
     </Card>
   );
 }

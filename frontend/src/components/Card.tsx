@@ -1,11 +1,9 @@
-import type { ReactNode } from "react";
+import type { ComponentPropsWithoutRef } from "react";
 
 export function Card({
   children,
   className = "",
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
-  return <article className={`card ${className}`}>{children}</article>;
+  ...props
+}: ComponentPropsWithoutRef<"article">) {
+  return <article className={`card ${className}`} {...props}>{children}</article>;
 }

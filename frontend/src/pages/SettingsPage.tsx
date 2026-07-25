@@ -25,28 +25,45 @@ type SettingsTab = (typeof tabs)[number]["key"];
 export function SettingsPage() {
   const { token } = useAuth();
   const claims = useMemo(() => getTokenClaims(token), [token]);
-  const [activeTab, setActiveTab] = useState<SettingsTab>("company");
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => settingsTabFromUrl());
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!claims?.tenantId) {
       setMessage("Empresa não identificada no acesso atual.");
+      setLoading(false);
       return;
     }
     void request<Tenant>(`/tenants/${claims.tenantId}`, {}, token)
       .then((nextTenant) => {
         setTenant(nextTenant);
         setMessage(null);
+        setLoading(false);
       })
-      .catch((error) => setMessage(error instanceof Error ? error.message : "Falha ao carregar empresa."));
+      .catch((error) => { setMessage(error instanceof Error ? error.message : "Falha ao carregar empresa."); setLoading(false); });
   }, [claims?.tenantId, token]);
+
+  useEffect(() => {
+    const sync = () => setActiveTab(settingsTabFromUrl());
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+
+  function selectTab(tab: SettingsTab) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("aba", tab);
+    window.history.pushState({}, "", `${url.pathname}${url.search}`);
+    setActiveTab(tab);
+  }
 
   return (
     <section className="settings-page">
       {message ? <div className="error-box">{message}</div> : null}
+      {loading ? <div className="empty-state large" aria-live="polite">Carregando configurações...</div> : null}
 
-      <div className="settings-layout">
+      {!loading && !message ? <div className="settings-layout">
         <aside className="settings-tabs">
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -54,7 +71,8 @@ export function SettingsPage() {
               <button
                 className={activeTab === tab.key ? "settings-tab active" : "settings-tab"}
                 key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
+                aria-current={activeTab === tab.key ? "page" : undefined}
+                onClick={() => selectTab(tab.key)}
                 type="button"
               >
                 <Icon size={16} />
@@ -78,7 +96,12 @@ export function SettingsPage() {
           {activeTab === "users" ? <UsersSettingsPanel /> : null}
           {activeTab === "usage" ? <UsageSettingsPanel /> : null}
         </div>
-      </div>
+      </div> : null}
     </section>
   );
+}
+
+function settingsTabFromUrl(): SettingsTab {
+  const requested = new URLSearchParams(window.location.search).get("aba");
+  return tabs.some((tab) => tab.key === requested) ? requested as SettingsTab : "company";
 }
