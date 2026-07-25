@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     property_image_max_files: int = Field(default=12, gt=0, le=50)
     ai_auto_reply_enabled: bool = False
     ai_auto_send_to_channel: bool = False
+    message_job_max_attempts: int = Field(default=5, ge=1, le=20)
+    message_job_backoff_seconds: int = Field(default=5, ge=1, le=3600)
+    message_job_stale_seconds: int = Field(default=300, ge=30, le=86400)
+    integration_secret_key: SecretStr | None = None
+    integration_secret_key_version: int = Field(default=1, ge=1, le=1000)
+    integration_secret_previous_keys: list[SecretStr] = Field(default_factory=list)
     platform_bootstrap_token: SecretStr | None = None
 
     @field_validator("jwt_secret")

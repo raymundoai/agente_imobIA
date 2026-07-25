@@ -5,13 +5,7 @@ from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
-from app.modules.ai.adapters.repositories import (
-    SqlAlchemyAiAuditLogRepository,
-    SqlAlchemyKnowledgeRepository,
-)
-from app.modules.ai.application.use_cases import GenerateAiReplyUseCase
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
-from app.modules.billing_usage.service import CreditLedgerService
 from app.modules.contacts.service import ContactUpsertService
 from app.modules.conversations.adapters.repositories import SqlAlchemyConversationRepository
 from app.modules.conversations.api.schemas import (
@@ -28,9 +22,6 @@ from app.modules.conversations.application.use_cases import (
     HandleIncomingWhatsappWebhookUseCase,
     SendHumanMessageUseCase,
 )
-from app.modules.leads.adapters.repositories import SqlAlchemyLeadDemandRepository
-from app.modules.leads.application.use_cases import LeadQualificationService
-from app.modules.properties.adapters.repositories import SqlAlchemyPropertyRepository
 from app.modules.tenants.adapters.repositories import SqlAlchemyTenantRepository
 from app.shared.errors.exceptions import NotFoundError
 
@@ -43,7 +34,6 @@ def whatsapp_webhook(
     tenant_slug: str,
     payload: dict[str, Any],
     webhook_secret_header: Annotated[str | None, Header(alias="X-ImobIA-Webhook-Secret")] = None,
-    webhook_secret_query: Annotated[str | None, Query(alias="token")] = None,
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
 ) -> WebhookResponse:
@@ -54,54 +44,19 @@ def whatsapp_webhook(
         container.message_channel,
         container.event_bus,
         ContactUpsertService(session),
-    ).execute(tenant_slug, webhook_secret_header or webhook_secret_query, payload)
-    ai_response = None
-    ai_error = None
-    if (
-        outcome.status == "processed"
-        and outcome.conversation_id is not None
-        and container.settings.ai_auto_reply_enabled
-    ):
-        if container.ai_provider is None:
-            ai_error = "OpenAI integration is not configured"
-        else:
-            try:
-                tenant = SqlAlchemyTenantRepository(session).get_by_slug(tenant_slug)
-                if tenant is None:
-                    raise NotFoundError("Webhook tenant not found")
-                CreditLedgerService(session).ensure_available(tenant.id, resource="ai_message")
-                result = GenerateAiReplyUseCase(
-                    SqlAlchemyTenantRepository(session),
-                    SqlAlchemyConversationRepository(session),
-                    container.ai_provider,
-                    SqlAlchemyKnowledgeRepository(session),
-                    SqlAlchemyAiAuditLogRepository(session),
-                    container.channel_credentials,
-                    container.message_channel,
-                    container.event_bus,
-                    LeadQualificationService(
-                        SqlAlchemyTenantRepository(session),
-                        SqlAlchemyLeadDemandRepository(session),
-                        container.crm_credentials,
-                        container.crm,
-                        container.event_bus,
-                        ContactUpsertService(session),
-                    ),
-                    properties=SqlAlchemyPropertyRepository(session),
-                ).execute(
-                    tenant.id,
-                    outcome.conversation_id,
-                    send_to_channel=container.settings.ai_auto_send_to_channel,
-                )
-                ai_response = result.response_text
-            except Exception as exc:
-                ai_error = str(exc)
+    ).execute(
+        tenant_slug,
+        webhook_secret_header,
+        payload,
+        auto_reply_enabled=container.settings.ai_auto_reply_enabled,
+        send_to_channel=container.settings.ai_auto_send_to_channel,
+        max_attempts=container.settings.message_job_max_attempts,
+    )
     return WebhookResponse(
         status=outcome.status,
         conversation_id=outcome.conversation_id,
         message_id=outcome.message_id,
-        ai_response=ai_response,
-        ai_error=ai_error,
+        job_id=outcome.job_id,
     )
 
 
@@ -120,50 +75,19 @@ def telegram_webhook(
         container.telegram_channel,
         container.event_bus,
         ContactUpsertService(session),
-    ).execute(tenant_slug, webhook_secret, payload)
-    ai_response = None
-    ai_error = None
-    if (
-        outcome.status == "processed"
-        and outcome.conversation_id is not None
-        and container.settings.telegram_auto_reply_enabled
-    ):
-        if container.ai_provider is None:
-            ai_error = "OpenAI integration is not configured"
-        else:
-            try:
-                tenant = SqlAlchemyTenantRepository(session).get_by_slug(tenant_slug)
-                if tenant is None:
-                    raise NotFoundError("Webhook tenant not found")
-                CreditLedgerService(session).ensure_available(tenant.id, resource="ai_message")
-                result = GenerateAiReplyUseCase(
-                    SqlAlchemyTenantRepository(session),
-                    SqlAlchemyConversationRepository(session),
-                    container.ai_provider,
-                    SqlAlchemyKnowledgeRepository(session),
-                    SqlAlchemyAiAuditLogRepository(session),
-                    container.telegram_credentials,
-                    container.telegram_channel,
-                    container.event_bus,
-                    LeadQualificationService(
-                        SqlAlchemyTenantRepository(session),
-                        SqlAlchemyLeadDemandRepository(session),
-                        container.crm_credentials,
-                        container.crm,
-                        container.event_bus,
-                        ContactUpsertService(session),
-                    ),
-                    properties=SqlAlchemyPropertyRepository(session),
-                ).execute(tenant.id, outcome.conversation_id, send_to_channel=True)
-                ai_response = result.response_text
-            except Exception as exc:
-                ai_error = str(exc)
+    ).execute(
+        tenant_slug,
+        webhook_secret,
+        payload,
+        auto_reply_enabled=container.settings.telegram_auto_reply_enabled,
+        send_to_channel=True,
+        max_attempts=container.settings.message_job_max_attempts,
+    )
     return WebhookResponse(
         status=outcome.status,
         conversation_id=outcome.conversation_id,
         message_id=outcome.message_id,
-        ai_response=ai_response,
-        ai_error=ai_error,
+        job_id=outcome.job_id,
     )
 
 

@@ -36,6 +36,17 @@ class WebhookOutcome:
     status: str
     conversation_id: UUID | None = None
     message_id: UUID | None = None
+    job_id: UUID | None = None
+
+
+def lead_agent_is_active(settings: Mapping[str, Any]) -> bool:
+    agents = settings.get("agents", {})
+    if not isinstance(agents, Mapping):
+        return True
+    leads = agents.get("leads", {})
+    if not isinstance(leads, Mapping):
+        return True
+    return str(leads.get("status", "active")).lower() != "inactive"
 
 
 class HandleIncomingWhatsappWebhookUseCase:
@@ -56,7 +67,14 @@ class HandleIncomingWhatsappWebhookUseCase:
         self._contacts = contacts
 
     def execute(
-        self, tenant_slug: str, webhook_secret: str | None, payload: Mapping[str, Any]
+        self,
+        tenant_slug: str,
+        webhook_secret: str | None,
+        payload: Mapping[str, Any],
+        *,
+        auto_reply_enabled: bool = False,
+        send_to_channel: bool = True,
+        max_attempts: int = 5,
     ) -> WebhookOutcome:
         tenant = self._tenants.get_by_slug(tenant_slug)
         if tenant is None or tenant.status is not TenantStatus.ACTIVE:
@@ -95,6 +113,9 @@ class HandleIncomingWhatsappWebhookUseCase:
                 customer_name=incoming.customer_name,
                 contact_id=contact.id,
                 attachments=incoming.attachments,
+                enqueue_auto_reply=auto_reply_enabled and lead_agent_is_active(tenant.settings),
+                send_to_channel=send_to_channel,
+                max_attempts=max_attempts,
             ),
         )
         if not result.created:
@@ -125,6 +146,7 @@ class HandleIncomingWhatsappWebhookUseCase:
             status="processed",
             conversation_id=result.conversation.id,
             message_id=result.message.id,
+            job_id=result.job_id,
         )
 
 
@@ -146,7 +168,14 @@ class HandleIncomingTelegramWebhookUseCase:
         self._contacts = contacts
 
     def execute(
-        self, tenant_slug: str, webhook_secret: str | None, payload: Mapping[str, Any]
+        self,
+        tenant_slug: str,
+        webhook_secret: str | None,
+        payload: Mapping[str, Any],
+        *,
+        auto_reply_enabled: bool = False,
+        send_to_channel: bool = True,
+        max_attempts: int = 5,
     ) -> WebhookOutcome:
         tenant = self._tenants.get_by_slug(tenant_slug)
         if tenant is None or tenant.status is not TenantStatus.ACTIVE:
@@ -178,6 +207,9 @@ class HandleIncomingTelegramWebhookUseCase:
                 customer_name=incoming.customer_name,
                 contact_id=contact.id,
                 attachments=incoming.attachments,
+                enqueue_auto_reply=auto_reply_enabled and lead_agent_is_active(tenant.settings),
+                send_to_channel=send_to_channel,
+                max_attempts=max_attempts,
             ),
         )
         if not result.created:
@@ -212,6 +244,7 @@ class HandleIncomingTelegramWebhookUseCase:
             status="processed",
             conversation_id=result.conversation.id,
             message_id=result.message.id,
+            job_id=result.job_id,
         )
 
 
@@ -276,7 +309,7 @@ class SendHumanMessageUseCase:
             raise ConflictError("Conversation must be in human mode")
         credentials = self._credentials.get(tenant.slug)
         if credentials is None:
-            raise ConfigurationError("WhatsApp integration is not configured for tenant")
+            raise ConfigurationError("Canal de mensagens não configurado para esta empresa")
 
         sent = self._channel.send_message(credentials, conversation.phone, text)
         message = Message(

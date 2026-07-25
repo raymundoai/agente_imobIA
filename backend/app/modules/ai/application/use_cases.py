@@ -1,8 +1,9 @@
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.modules.ai.application.guardrails import detect_restricted_intent
 from app.modules.ai.domain.entities import (
@@ -206,10 +207,15 @@ class GenerateAiReplyUseCase:
         input_text: str | None = None,
         *,
         send_to_channel: bool = False,
+        outbound_message_id: UUID | None = None,
+        side_effect_guard: Callable[[], None] | None = None,
     ) -> AiAgentResult:
         tenant = self._tenants.get_by_id(tenant_id)
         if tenant is None or tenant.status is not TenantStatus.ACTIVE:
             raise NotFoundError("Tenant not found")
+        leads_settings = (tenant.settings.get("agents") or {}).get("leads") or {}
+        if str(leads_settings.get("status", "active")).lower() == "inactive":
+            raise ConfigurationError("Agente de qualificação está inativo")
         conversation = self._conversations.get_by_id(tenant_id, conversation_id)
         if conversation is None:
             raise NotFoundError("Conversation not found")
@@ -232,6 +238,8 @@ class GenerateAiReplyUseCase:
                 tenant_slug=tenant.slug,
                 phone=conversation.phone,
                 channel=conversation.channel,
+                outbound_message_id=outbound_message_id,
+                side_effect_guard=side_effect_guard,
             )
         query_embedding = self._ai.get_embedding(user_text)
         chunks = self._knowledge.search_by_embedding(tenant_id, query_embedding, 5)
@@ -261,6 +269,8 @@ class GenerateAiReplyUseCase:
                 break
             tool_outputs: list[dict[str, str]] = []
             for call in response.tool_calls:
+                if side_effect_guard is not None:
+                    side_effect_guard()
                 output = self._execute_tool(call.name, call.arguments, tenant_id, conversation_id)
                 tools_called.append({"name": call.name, "arguments": call.arguments})
                 if call.name == "request_human_handoff":
@@ -286,6 +296,7 @@ class GenerateAiReplyUseCase:
             output_tokens += response.output_tokens
 
         outbound = Message(
+            id=outbound_message_id or uuid4(),
             tenant_id=tenant_id,
             conversation_id=conversation_id,
             direction=MessageDirection.OUTBOUND,
@@ -293,15 +304,37 @@ class GenerateAiReplyUseCase:
             text=response.text,
             channel=conversation.channel,
         )
+        if side_effect_guard is not None:
+            side_effect_guard()
+        if handoff_reason is not None:
+            self._conversations.update_mode(
+                tenant_id,
+                conversation_id,
+                ConversationMode.HUMAN,
+                None,
+                commit=False,
+            )
+            self._events.publish(
+                DomainEvent(
+                    name="HumanHandoffRequested",
+                    tenant_id=tenant_id,
+                    payload={
+                        "conversation_id": str(conversation_id),
+                        "reason": handoff_reason,
+                    },
+                )
+            )
         if send_to_channel:
             channel_credentials = self._credentials.get(tenant.slug)
             if channel_credentials is None:
-                raise ConfigurationError("WhatsApp integration is not configured for tenant")
+                raise ConfigurationError(
+                    "Canal de mensagens não configurado para esta empresa"
+                )
             sent = self._channel.send_message(
                 channel_credentials, conversation.phone, response.text
             )
             outbound.external_message_id = sent.external_message_id
-        self._conversations.record_outbound(tenant_id, outbound)
+        self._conversations.record_outbound(tenant_id, outbound, commit=False)
 
         audit = self._audit_logs.create(
             AiAuditLog(
@@ -351,16 +384,6 @@ class GenerateAiReplyUseCase:
             return {"results": [result.content for result in results]}
         if name == "request_human_handoff":
             reason = str(arguments.get("reason") or "ai_requested")
-            self._conversations.update_mode(
-                tenant_id, conversation_id, ConversationMode.HUMAN, None
-            )
-            self._events.publish(
-                DomainEvent(
-                    name="HumanHandoffRequested",
-                    tenant_id=tenant_id,
-                    payload={"conversation_id": str(conversation_id), "reason": reason},
-                )
-            )
             return {"status": "requested", "reason": reason}
         if name == "create_or_update_lead":
             if self._lead_qualification is None:
@@ -423,11 +446,15 @@ class GenerateAiReplyUseCase:
         tenant_slug: str,
         phone: str,
         channel: Any,
+        outbound_message_id: UUID | None,
+        side_effect_guard: Callable[[], None] | None,
     ) -> AiAgentResult:
         text = (
             "Esse assunto precisa ser tratado por um atendente humano. "
             "Vou encaminhar sua solicitação para a equipe responsável."
         )
+        if side_effect_guard is not None:
+            side_effect_guard()
         self._events.publish(
             DomainEvent(
                 name="HumanHandoffRequested",
@@ -435,8 +462,15 @@ class GenerateAiReplyUseCase:
                 payload={"conversation_id": str(conversation_id), "reason": reason},
             )
         )
-        self._conversations.update_mode(tenant_id, conversation_id, ConversationMode.HUMAN, None)
+        self._conversations.update_mode(
+            tenant_id,
+            conversation_id,
+            ConversationMode.HUMAN,
+            None,
+            commit=False,
+        )
         outbound = Message(
+            id=outbound_message_id or uuid4(),
             tenant_id=tenant_id,
             conversation_id=conversation_id,
             direction=MessageDirection.OUTBOUND,
@@ -447,10 +481,12 @@ class GenerateAiReplyUseCase:
         if send_to_channel:
             channel_credentials = self._credentials.get(tenant_slug)
             if channel_credentials is None:
-                raise ConfigurationError("WhatsApp integration is not configured for tenant")
+                raise ConfigurationError(
+                    "Canal de mensagens não configurado para esta empresa"
+                )
             sent = self._channel.send_message(channel_credentials, phone, text)
             outbound.external_message_id = sent.external_message_id
-        self._conversations.record_outbound(tenant_id, outbound)
+        self._conversations.record_outbound(tenant_id, outbound, commit=False)
         audit = self._audit_logs.create(
             AiAuditLog(
                 tenant_id=tenant_id,

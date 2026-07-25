@@ -53,7 +53,7 @@ class FakeConversations:
     def list_messages(self, tenant_id, conversation_id):
         return list(self.messages)
 
-    def record_outbound(self, tenant_id, message):
+    def record_outbound(self, tenant_id, message, *, commit=True):
         self.messages.append(message)
         return message
 

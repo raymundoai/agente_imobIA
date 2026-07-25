@@ -69,13 +69,12 @@ class EvolutionManagerClient:
     ) -> dict[str, Any] | None:
         if not self._backend_public_url:
             return None
-        webhook_url = (
-            f"{self._backend_public_url}/webhooks/whatsapp/{tenant_slug}?token={webhook_secret}"
-        )
+        webhook_url = f"{self._backend_public_url}/webhooks/whatsapp/{tenant_slug}"
         payload = {
             "webhook": {
                 "enabled": True,
                 "url": webhook_url,
+                "headers": {"X-ImobIA-Webhook-Secret": webhook_secret},
                 "webhookByEvents": False,
                 "webhookBase64": False,
                 "events": [
@@ -184,36 +183,33 @@ class EvolutionApiAdapter(MessageChannelPort):
         )
 
     def send_message(
-        self, credentials: ChannelCredentials, phone: str, text: str
+        self,
+        credentials: ChannelCredentials,
+        phone: str,
+        text: str,
+        *,
+        idempotency_key: str | None = None,
     ) -> SentChannelMessage:
         url = f"{credentials.base_url}/message/sendText/{credentials.instance}"
-        last_error: Exception | None = None
-        for attempt in range(self._retry_attempts):
-            try:
-                response = self._client.post(
-                    url,
-                    headers={"apikey": credentials.api_key},
-                    json={"number": phone, "text": text},
-                )
-                if response.status_code < 500:
-                    response.raise_for_status()
-                    payload = response.json()
-                    external_id = payload.get("key", {}).get("id")
-                    if not isinstance(external_id, str) or not external_id:
-                        raise ExternalServiceError(
-                            "Evolution API response did not include a message id"
-                        )
-                    return SentChannelMessage(external_message_id=external_id)
-                last_error = ExternalServiceError(
-                    f"Evolution API returned status {response.status_code}"
-                )
-            except (httpx.TransportError, httpx.HTTPStatusError) as exc:
-                last_error = exc
-                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
-                    break
-            if attempt + 1 < self._retry_attempts:
-                self._sleep(self._retry_base_delay * (2**attempt))
-        raise ExternalServiceError("Evolution API message delivery failed") from last_error
+        try:
+            response = self._client.post(
+                url,
+                headers={
+                    "apikey": credentials.api_key,
+                    **({"Idempotency-Key": idempotency_key} if idempotency_key else {}),
+                },
+                json={"number": phone, "text": text},
+            )
+            response.raise_for_status()
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            # POST delivery is ambiguous after transport errors and 5xx responses.
+            # The queue records delivery_unknown and requires reconciliation.
+            raise ExternalServiceError("Evolution API message delivery is uncertain") from exc
+        payload = response.json()
+        external_id = payload.get("key", {}).get("id")
+        if not isinstance(external_id, str) or not external_id:
+            raise ExternalServiceError("Evolution API response did not include a message id")
+        return SentChannelMessage(external_message_id=external_id)
 
     @staticmethod
     def _extract_text(message: Mapping[str, Any]) -> str:

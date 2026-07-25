@@ -12,8 +12,8 @@ from app.modules.ai.domain.ports import DocumentParserPort
 from app.modules.auth.ports.security import PasswordHasherPort, TokenServicePort
 from app.modules.integrations.adapters.evolution_api import EvolutionApiAdapter
 from app.modules.integrations.adapters.hubspot import HubSpotCrmAdapter
-from app.modules.integrations.adapters.settings_credentials import (
-    SettingsChannelCredentialsProvider,
+from app.modules.integrations.adapters.persistent_credentials import (
+    PersistentEvolutionCredentialsProvider,
 )
 from app.modules.integrations.adapters.settings_crm_credentials import (
     SettingsCrmCredentialsProvider,
@@ -59,6 +59,7 @@ class Container:
     @classmethod
     def build(cls, settings: Settings) -> "Container":
         http_client = httpx.Client(timeout=settings.evolution_timeout_seconds)
+        database = Database(settings.database_url)
         ai_provider = (
             OpenAiAdapter(
                 api_key=settings.openai_api_key.get_secret_value(),
@@ -72,7 +73,7 @@ class Container:
         )
         return cls(
             settings=settings,
-            database=Database(settings.database_url),
+            database=database,
             password_hasher=Argon2PasswordHasher(),
             token_service=JwtTokenService(
                 secret=settings.jwt_secret.get_secret_value(),
@@ -81,8 +82,8 @@ class Container:
                 refresh_ttl_days=settings.refresh_token_ttl_days,
             ),
             event_bus=InMemoryEventBus(),
-            channel_credentials=SettingsChannelCredentialsProvider(
-                settings.evolution_tenant_configs
+            channel_credentials=PersistentEvolutionCredentialsProvider(
+                database, settings
             ),
             message_channel=EvolutionApiAdapter(
                 http_client,

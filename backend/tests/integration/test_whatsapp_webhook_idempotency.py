@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
 from app.modules.ai.domain.ports import AiProviderPort, AiProviderResponse
+from app.modules.messaging.processor import MessageJobProcessor
 from tests.conftest import TEST_WEBHOOK_SECRET
 
 pytestmark = pytest.mark.integration
@@ -17,8 +18,10 @@ class FakeAutoReplyAi(AiProviderPort):
     def chat_completion(self, *, system_prompt, messages, tools):
         return AiProviderResponse(
             text="Olá! Para começar, você busca comprar ou alugar?",
-            model="fake-auto-reply",
+            model="gpt-5.4-mini",
             tokens_used=10,
+            input_tokens=6,
+            output_tokens=4,
             detected_intent="qualificacao_lead",
         )
 
@@ -64,10 +67,10 @@ def test_webhook_is_idempotent_for_message_and_usage(
     client: TestClient, migrated_database: str
 ) -> None:
     tenant, token = _provision(client, "tenant-a")
-    params = {"token": TEST_WEBHOOK_SECRET}
+    headers = {"X-ImobIA-Webhook-Secret": TEST_WEBHOOK_SECRET}
 
-    first = client.post("/webhooks/whatsapp/tenant-a", params=params, json=_payload())
-    duplicate = client.post("/webhooks/whatsapp/tenant-a", params=params, json=_payload())
+    first = client.post("/webhooks/whatsapp/tenant-a", headers=headers, json=_payload())
+    duplicate = client.post("/webhooks/whatsapp/tenant-a", headers=headers, json=_payload())
 
     assert first.status_code == 200, first.text
     assert first.json()["status"] == "processed"
@@ -133,7 +136,14 @@ def test_webhook_can_generate_local_ai_reply_without_sending_to_whatsapp(
     )
 
     assert response.status_code == 200, response.text
-    assert response.json()["ai_response"] == "Olá! Para começar, você busca comprar ou alugar?"
+    assert response.json()["job_id"] is not None
+    processed = MessageJobProcessor(client.app.state.container, "test-worker").process_next()
+    assert processed is not None
+    assert processed["status"] == "sent"
+    assert (
+        processed["response_text"]
+        == "Olá! Para começar, você busca comprar ou alugar?"
+    )
     detail = client.get(
         f"/conversations/{response.json()['conversation_id']}",
         headers={"Authorization": f"Bearer {token}"},
@@ -142,3 +152,90 @@ def test_webhook_can_generate_local_ai_reply_without_sending_to_whatsapp(
         "customer",
         "ai",
     ]
+
+
+def test_failed_async_reply_is_visible_and_can_be_retried(client: TestClient) -> None:
+    _, token = _provision(client, "tenant-a")
+    client.app.state.container.settings.ai_auto_reply_enabled = True
+    client.app.state.container.ai_provider = None
+
+    webhook = client.post(
+        "/webhooks/whatsapp/tenant-a",
+        headers={"X-ImobIA-Webhook-Secret": TEST_WEBHOOK_SECRET},
+        json=_payload("async-failure-1"),
+    )
+    assert webhook.status_code == 200
+    job_id = webhook.json()["job_id"]
+
+    processed = MessageJobProcessor(client.app.state.container, "test-worker").process_next()
+    assert processed is not None
+    assert processed["status"] == "retrying"
+    jobs = client.get(
+        "/message-jobs?status=retrying",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert jobs.json()[0]["id"] == job_id
+    assert "OpenAI" in jobs.json()[0]["last_error"]
+
+    retried = client.post(
+        f"/message-jobs/{job_id}/retry",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert retried.status_code == 200
+    assert retried.json()["attempts"] == 0
+
+
+def test_duplicate_webhook_creates_only_one_async_job(client: TestClient) -> None:
+    _, token = _provision(client, "tenant-a")
+    client.app.state.container.settings.ai_auto_reply_enabled = True
+    headers = {"X-ImobIA-Webhook-Secret": TEST_WEBHOOK_SECRET}
+
+    first = client.post(
+        "/webhooks/whatsapp/tenant-a",
+        headers=headers,
+        json=_payload("async-idempotent-1"),
+    )
+    duplicate = client.post(
+        "/webhooks/whatsapp/tenant-a",
+        headers=headers,
+        json=_payload("async-idempotent-1"),
+    )
+
+    assert first.json()["job_id"] is not None
+    assert duplicate.json()["status"] == "duplicate"
+    jobs = client.get(
+        "/message-jobs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert len(jobs.json()) == 1
+
+
+def test_inactive_lead_agent_does_not_enqueue_reply(
+    client: TestClient, migrated_database: str
+) -> None:
+    tenant, token = _provision(client, "tenant-a")
+    client.app.state.container.settings.ai_auto_reply_enabled = True
+    engine = create_engine(migrated_database)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE tenants SET settings = "
+                """'{"agents":{"leads":{"status":"inactive"}}}'::jsonb """
+                "WHERE id = :tenant_id"
+            ),
+            {"tenant_id": tenant["id"]},
+        )
+    engine.dispose()
+
+    webhook = client.post(
+        "/webhooks/whatsapp/tenant-a",
+        headers={"X-ImobIA-Webhook-Secret": TEST_WEBHOOK_SECRET},
+        json=_payload("inactive-agent-1"),
+    )
+    assert webhook.status_code == 200
+    assert webhook.json()["job_id"] is None
+    jobs = client.get(
+        "/message-jobs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert jobs.json() == []

@@ -15,6 +15,7 @@ from app.modules.conversations.api.routes import webhook_router
 from app.modules.dashboard.api import router as dashboard_router
 from app.modules.integrations.api import router as integrations_router
 from app.modules.leads.api import router as leads_router
+from app.modules.messaging.api import router as messaging_router
 from app.modules.platform.api import router as platform_router
 from app.modules.properties.api import router as properties_router
 from app.modules.tenants.api.routes import router as tenants_router
@@ -54,6 +55,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(knowledge_router, prefix=resolved.api_prefix)
     application.include_router(integrations_router, prefix=resolved.api_prefix)
     application.include_router(leads_router, prefix=resolved.api_prefix)
+    application.include_router(messaging_router, prefix=resolved.api_prefix)
     application.include_router(properties_router, prefix=resolved.api_prefix)
     application.include_router(platform_router, prefix=resolved.api_prefix)
     application.include_router(webhook_router, prefix=resolved.api_prefix)

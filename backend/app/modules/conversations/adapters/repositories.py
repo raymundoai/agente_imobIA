@@ -22,6 +22,7 @@ from app.modules.conversations.ports.repositories import (
     InboundRecordResult,
     IncomingMessageData,
 )
+from app.modules.messaging.models import MessageJobModel
 
 
 def _conversation_to_domain(model: ConversationModel) -> Conversation:
@@ -136,6 +137,24 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
         )
         self._session.add(self._message_model(message))
         self._session.add(self._usage_model(tenant_id, message.id))
+        job_id = None
+        if incoming.enqueue_auto_reply:
+            job_id = uuid4()
+            self._session.add(
+                MessageJobModel(
+                    id=job_id,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation.id,
+                    message_id=message.id,
+                    channel=incoming.channel.value,
+                    status="received",
+                    attempts=0,
+                    max_attempts=incoming.max_attempts,
+                    send_to_channel=incoming.send_to_channel,
+                    available_at=now,
+                    result={},
+                )
+            )
         self._session.commit()
         self._session.refresh(conversation)
         return InboundRecordResult(
@@ -143,9 +162,12 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
             message=message,
             created=True,
             conversation_created=conversation_created,
+            job_id=job_id,
         )
 
-    def record_outbound(self, tenant_id: UUID, message: Message) -> Message:
+    def record_outbound(
+        self, tenant_id: UUID, message: Message, *, commit: bool = True
+    ) -> Message:
         if message.tenant_id != tenant_id:
             raise ValueError("Message tenant does not match repository scope")
         conversation = self._session.scalar(
@@ -159,7 +181,10 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
         conversation.last_message_at = message.created_at
         self._session.add(self._message_model(message))
         self._session.add(self._usage_model(tenant_id, message.id))
-        self._session.commit()
+        if commit:
+            self._session.commit()
+        else:
+            self._session.flush()
         return message
 
     def list(self, tenant_id: UUID, *, limit: int, offset: int) -> list[Conversation]:
@@ -198,6 +223,8 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
         conversation_id: UUID,
         mode: ConversationMode,
         assigned_user_id: UUID | None,
+        *,
+        commit: bool = True,
     ) -> Conversation | None:
         model = self._session.scalar(
             select(ConversationModel).where(
@@ -214,8 +241,11 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
         else:
             model.status = ConversationStatus.OPEN.value
             model.assigned_user_id = None
-        self._session.commit()
-        self._session.refresh(model)
+        if commit:
+            self._session.commit()
+            self._session.refresh(model)
+        else:
+            self._session.flush()
         return _conversation_to_domain(model)
 
     def _advisory_lock(self, key: str) -> None:

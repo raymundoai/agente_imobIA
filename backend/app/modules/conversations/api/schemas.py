@@ -11,8 +11,7 @@ class WebhookResponse(BaseModel):
     status: str
     conversation_id: UUID | None = None
     message_id: UUID | None = None
-    ai_response: str | None = None
-    ai_error: str | None = None
+    job_id: UUID | None = None
 
 
 class ConversationResponse(BaseModel):

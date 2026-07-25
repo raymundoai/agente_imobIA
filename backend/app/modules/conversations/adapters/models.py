@@ -103,6 +103,7 @@ class MessageModel(Base):
             name="fk_messages_tenant_conversation",
             ondelete="CASCADE",
         ),
+        UniqueConstraint("tenant_id", "id", name="uq_messages_tenant_id_id"),
         Index("ix_messages_tenant_id", "tenant_id"),
         Index(
             "ix_messages_tenant_conversation_created",

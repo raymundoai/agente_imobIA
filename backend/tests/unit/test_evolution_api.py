@@ -1,4 +1,5 @@
 import httpx
+import pytest
 
 from app.modules.integrations.adapters.evolution_api import EvolutionApiAdapter
 from app.modules.integrations.domain.entities import ChannelCredentials
@@ -28,14 +29,12 @@ def test_receive_message_normalizes_evolution_payload() -> None:
     assert not message.from_me
 
 
-def test_send_message_uses_official_endpoint_and_retries_server_error() -> None:
+def test_send_message_does_not_retry_ambiguous_server_error() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        if len(requests) == 1:
-            return httpx.Response(503)
-        return httpx.Response(201, json={"key": {"id": "sent-1"}})
+        return httpx.Response(503)
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     adapter = EvolutionApiAdapter(client, retry_attempts=2, sleeper=lambda _: None)
@@ -46,12 +45,18 @@ def test_send_message_uses_official_endpoint_and_retries_server_error() -> None:
         webhook_secret="test-webhook-secret",
     )
 
-    sent = adapter.send_message(credentials, "5511999999999", "Resposta humana")
+    with pytest.raises(Exception, match="uncertain"):
+        adapter.send_message(
+            credentials,
+            "5511999999999",
+            "Resposta humana",
+            idempotency_key="job-123",
+        )
 
-    assert sent.external_message_id == "sent-1"
-    assert len(requests) == 2
+    assert len(requests) == 1
     assert requests[-1].url.path == "/message/sendText/tenant-a"
     assert requests[-1].headers["apikey"] == "test-api-key"
+    assert requests[-1].headers["idempotency-key"] == "job-123"
     assert requests[-1].read() == b'{"number":"5511999999999","text":"Resposta humana"}'
 
 
@@ -90,3 +95,28 @@ def test_manager_allows_existing_instance_before_connecting() -> None:
         "/instance/create",
         "/instance/connect/imobia-demo-whatsapp",
     ]
+
+
+def test_manager_places_webhook_secret_in_header_not_query() -> None:
+    from app.modules.integrations.adapters.evolution_api import EvolutionManagerClient
+
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    manager = EvolutionManagerClient(
+        client,
+        "https://evolution.example.com",
+        "api-key",
+        "https://api.imobia.example",
+    )
+    manager.configure_webhook("instance", "tenant-a", "top-secret")
+
+    request = captured[0]
+    payload = request.read().decode()
+    assert "?token=" not in payload
+    assert '"url":"https://api.imobia.example/webhooks/whatsapp/tenant-a"' in payload
+    assert '"X-ImobIA-Webhook-Secret":"top-secret"' in payload

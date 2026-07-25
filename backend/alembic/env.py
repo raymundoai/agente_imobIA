@@ -9,6 +9,7 @@ from app.modules.billing_usage.adapters import models as usage_models  # noqa: F
 from app.modules.contacts import models as contact_models  # noqa: F401
 from app.modules.conversations.adapters import models as conversation_models  # noqa: F401
 from app.modules.leads.adapters import models as lead_models  # noqa: F401
+from app.modules.messaging import models as messaging_models  # noqa: F401
 from app.modules.maintenance.adapters import models as maintenance_models  # noqa: F401
 from app.modules.platform import models as platform_models  # noqa: F401
 from app.modules.properties.adapters import models as property_models  # noqa: F401

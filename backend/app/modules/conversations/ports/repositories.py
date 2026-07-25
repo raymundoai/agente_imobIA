@@ -23,6 +23,9 @@ class IncomingMessageData:
     customer_name: str | None
     contact_id: UUID | None = None
     attachments: list[dict[str, Any]] = field(default_factory=list)
+    enqueue_auto_reply: bool = False
+    send_to_channel: bool = True
+    max_attempts: int = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +34,7 @@ class InboundRecordResult:
     message: Message
     created: bool
     conversation_created: bool = False
+    job_id: UUID | None = None
 
 
 class ConversationRepositoryPort(ABC):
@@ -40,7 +44,9 @@ class ConversationRepositoryPort(ABC):
     ) -> InboundRecordResult: ...
 
     @abstractmethod
-    def record_outbound(self, tenant_id: UUID, message: Message) -> Message: ...
+    def record_outbound(
+        self, tenant_id: UUID, message: Message, *, commit: bool = True
+    ) -> Message: ...
 
     @abstractmethod
     def list(self, tenant_id: UUID, *, limit: int, offset: int) -> list[Conversation]: ...
@@ -58,4 +64,6 @@ class ConversationRepositoryPort(ABC):
         conversation_id: UUID,
         mode: ConversationMode,
         assigned_user_id: UUID | None,
+        *,
+        commit: bool = True,
     ) -> Conversation | None: ...

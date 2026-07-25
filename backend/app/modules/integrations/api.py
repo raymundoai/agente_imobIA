@@ -8,10 +8,16 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.container import Container, get_container, get_db_session
-from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
+from app.modules.auth.api.dependencies import (
+    CurrentPrincipal,
+    get_current_principal,
+    require_roles,
+)
 from app.modules.integrations.adapters.evolution_api import EvolutionManagerClient
 from app.modules.tenants.adapters.repositories import SqlAlchemyTenantRepository
+from app.modules.users.domain.entities import UserRole
 from app.shared.errors.exceptions import ConfigurationError, ExternalServiceError, NotFoundError
+from app.shared.security.secrets import SecretCipher, integration_cipher
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
@@ -250,7 +256,9 @@ def test_tecimob_connection(
 
 @router.post("/evolution/whatsapp/connect", response_model=EvolutionWhatsappResponse)
 def connect_whatsapp(
-    principal: CurrentPrincipal = Depends(get_current_principal),
+    principal: CurrentPrincipal = Depends(
+        require_roles(UserRole.ADMIN, UserRole.GESTOR)
+    ),
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
     settings: Settings = Depends(get_settings),
@@ -263,7 +271,35 @@ def connect_whatsapp(
     manager = _build_manager(container, settings)
     integration = _get_whatsapp_integration(tenant.settings)
     instance = str(integration.get("instance") or _instance_name(tenant.slug))
-    webhook_secret = secrets.token_urlsafe(32)
+    dedicated = (
+        settings.integration_secret_key.get_secret_value()
+        if settings.integration_secret_key
+        else None
+    )
+    cipher = integration_cipher(settings.jwt_secret.get_secret_value(), dedicated)
+    legacy_cipher = SecretCipher(settings.jwt_secret.get_secret_value())
+    encrypted_secret = integration.get("webhook_secret_encrypted")
+    webhook_secret = (
+        (
+            cipher.decrypt(encrypted_secret)
+            or legacy_cipher.decrypt(encrypted_secret)
+            or next(
+                (
+                    value
+                    for key in settings.integration_secret_previous_keys
+                    if (
+                        value := SecretCipher(key.get_secret_value()).decrypt(
+                            encrypted_secret
+                        )
+                    )
+                    is not None
+                ),
+                None,
+            )
+        )
+        if isinstance(encrypted_secret, str)
+        else None
+    ) or secrets.token_urlsafe(32)
 
     manager.ensure_instance(instance, tenant.slug, webhook_secret)
     connection_payload = manager.connect_instance(instance)
@@ -282,6 +318,8 @@ def connect_whatsapp(
             "instance": instance,
             "status": status,
             "webhook_configured": bool(settings.backend_public_url),
+            "webhook_secret_encrypted": cipher.encrypt(webhook_secret),
+            "secret_key_version": settings.integration_secret_key_version,
             "connected_phone": _extract_first_string(
                 state_payload, ("number", "phone", "connectedPhone", "owner")
             ),

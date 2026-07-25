@@ -1,7 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from app.modules.messaging.processor import MessageJobProcessor
 from tests.conftest import TEST_WEBHOOK_SECRET
+from tests.integration.test_whatsapp_webhook_idempotency import FakeAutoReplyAi
 
 pytestmark = pytest.mark.integration
 
@@ -102,3 +104,20 @@ def test_telegram_webhook_is_secure_idempotent_and_visible_in_chat(client: TestC
         json={"phone": "5511999999999"},
     )
     assert patch_mismatch.status_code == 409
+
+
+def test_telegram_auto_reply_uses_persistent_queue(client: TestClient) -> None:
+    _provision(client)
+    client.app.state.container.settings.telegram_auto_reply_enabled = True
+    client.app.state.container.ai_provider = FakeAutoReplyAi()
+    response = client.post(
+        "/webhooks/telegram/tenant-a",
+        headers={"X-Telegram-Bot-Api-Secret-Token": TEST_WEBHOOK_SECRET},
+        json=_update(777),
+    )
+    assert response.status_code == 200
+    assert response.json()["job_id"] is not None
+    processed = MessageJobProcessor(
+        client.app.state.container, "telegram-worker"
+    ).process_next()
+    assert processed["status"] == "delivery_pending"

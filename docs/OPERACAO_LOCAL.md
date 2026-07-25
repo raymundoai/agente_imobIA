@@ -32,6 +32,8 @@ DATABASE_URL=postgresql+psycopg://USUARIO:SENHA@localhost:5432/BANCO
 JWT_SECRET=SEGREDO_COM_PELO_MENOS_32_CARACTERES
 OPENAI_API_KEY=SUA_CHAVE
 PLATFORM_BOOTSTRAP_TOKEN=OUTRO_SEGREDO_FORTE
+INTEGRATION_SECRET_KEY=SEGREDO_DEDICADO_COM_PELO_MENOS_32_CARACTERES
+INTEGRATION_SECRET_KEY_VERSION=1
 ```
 
 O `.env` não deve ser versionado.
@@ -58,23 +60,39 @@ cd ..
 
 ## 4. Subir a aplicação
 
-Terminal 1, banco:
+Forma recomendada (banco, API e worker persistente):
+
+```bash
+docker compose --env-file backend/.env up -d --build postgres backend message-worker
+docker compose --env-file backend/.env ps
+docker compose --env-file backend/.env logs -f message-worker
+```
+
+Para desenvolvimento fora do Docker, suba o banco e execute API e worker em terminais
+separados:
 
 ```bash
 docker compose --env-file backend/.env up -d postgres
-docker compose --env-file backend/.env ps
-```
-
-Terminal 2, backend:
-
-```bash
 cd backend
 source .venv/bin/activate
 alembic upgrade head
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Terminal 3, painel da imobiliária:
+```bash
+cd backend
+source .venv/bin/activate
+python -m app.modules.messaging.worker
+```
+
+O worker recebe `SIGTERM`, termina o ciclo atual e encerra. Nunca opere resposta automática sem
+ao menos uma instância do worker.
+
+O handoff, a mensagem de saída, o log da IA e o débito de créditos são confirmados numa única
+transação PostgreSQL. O envio Evolution é tentado apenas uma vez: respostas 5xx e falhas de
+transporte são ambíguas e levam o job a `delivery_unknown`, sem um segundo POST automático.
+
+Terminal seguinte, painel da imobiliária:
 
 ```bash
 cd frontend
@@ -151,8 +169,13 @@ AI_AUTO_REPLY_ENABLED=true
 AI_AUTO_SEND_TO_CHANNEL=false
 ```
 
-Com `AI_AUTO_SEND_TO_CHANNEL=false`, a resposta pode ser gerada e persistida sem ser enviada
-ao WhatsApp. Isso é útil no teste de webhook simulado.
+O webhook apenas valida, persiste e enfileira. A resposta HTTP contém `job_id`; a OpenAI não é
+chamada durante o webhook. O worker gera, cobra e persiste a resposta numa primeira etapa e só
+depois realiza a entrega. Reinícios não regeneram nem cobram novamente uma resposta já
+persistida. Uma queda durante entrega resulta em `delivery_unknown`, pois o Telegram não
+oferece idempotência; um administrador ou gestor deve verificar o canal antes de usar o retry.
+
+Com `AI_AUTO_SEND_TO_CHANNEL=false`, o worker gera e persiste sem enviar ao canal.
 
 A mesma chave pode autorizar chat, embeddings e edição de imagens, conforme os modelos
 habilitados na conta. Sem opções de otimização, as imagens são apenas validadas e armazenadas
@@ -192,8 +215,21 @@ curl -X POST 'http://127.0.0.1:8000/webhooks/whatsapp/SLUG' \
   }'
 ```
 
-A resposta esperada contém `status: "processed"`. Se a IA estiver configurada, também poderá
-conter `ai_response`. Use outro `data.key.id` a cada mensagem; IDs repetidos são ignorados.
+A resposta esperada contém `status: "processed"` e, quando a resposta automática estiver
+habilitada, um `job_id`. Use outro `data.key.id` a cada mensagem; IDs repetidos são ignorados.
+
+Somente usuários `admin` e `gestor` podem consultar `GET /message-jobs` ou solicitar retry em
+`POST /message-jobs/{job_id}/retry`. O processamento não possui endpoint HTTP: é exclusivo do
+worker. A conexão ou reconfiguração do WhatsApp por QR também exige um desses dois perfis.
+
+### Limite conhecido dos tools externos
+
+O job torna idempotentes a geração, a cobrança e a persistência local. A qualificação local
+faz upsert por telefone. Entretanto, uma queda exatamente entre a criação de um negócio no CRM
+externo e a gravação do respectivo ID local não pode ser desfeita pelo PostgreSQL. Enquanto o
+provedor CRM não aceitar uma chave de idempotência por operação, mantenha a criação automática
+de negócios externos desabilitada ou faça reconciliação por telefone antes de reprocessar um
+job. O worker nunca reprocessa automaticamente uma entrega `delivery_unknown`.
 
 Para conexão real pelo fluxo gerenciado:
 
@@ -202,9 +238,17 @@ EVOLUTION_BASE_URL=https://SUA_EVOLUTION
 EVOLUTION_API_KEY=SUA_CHAVE_GLOBAL
 EVOLUTION_VERSION=VERSAO_COMPATIVEL
 BACKEND_PUBLIC_URL=https://SUA_API_PUBLICA
+INTEGRATION_SECRET_KEY=SEGREDO_DEDICADO
+INTEGRATION_SECRET_KEY_VERSION=1
 ```
 
 Conecte o canal pelo QR Code em `Configurações > Canais`.
+
+O segredo do webhook da Evolution é enviado na configuração como header
+`X-ImobIA-Webhook-Secret`, nunca na query string, e fica criptografado no PostgreSQL. Para
+rotacionar a chave, incremente a versão, mova temporariamente a chave anterior para
+`INTEGRATION_SECRET_PREVIOUS_KEYS=["CHAVE_ANTERIOR"]` e reconecte o WhatsApp; a gravação será
+migrada para a chave atual.
 
 ## 8. Testar Telegram
 

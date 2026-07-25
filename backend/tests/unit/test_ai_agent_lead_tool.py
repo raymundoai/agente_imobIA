@@ -89,11 +89,13 @@ class FakeConversations:
     def list_messages(self, tenant_id, conversation_id):
         return self.messages
 
-    def record_outbound(self, tenant_id, message):
+    def record_outbound(self, tenant_id, message, *, commit=True):
         self.messages.append(message)
         return message
 
-    def update_mode(self, tenant_id, conversation_id, mode, assigned_user_id):
+    def update_mode(
+        self, tenant_id, conversation_id, mode, assigned_user_id, *, commit=True
+    ):
         self.conversation.mode = mode
         return self.conversation
 

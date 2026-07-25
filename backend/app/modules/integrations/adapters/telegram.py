@@ -67,7 +67,12 @@ class TelegramApiAdapter(MessageChannelPort):
         )
 
     def send_message(
-        self, credentials: ChannelCredentials, phone: str, text: str
+        self,
+        credentials: ChannelCredentials,
+        phone: str,
+        text: str,
+        *,
+        idempotency_key: str | None = None,
     ) -> SentChannelMessage:
         chat_id = phone.removeprefix("telegram:")
         response = self._client.post(
