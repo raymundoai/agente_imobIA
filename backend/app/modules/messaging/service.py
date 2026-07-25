@@ -196,11 +196,17 @@ class MessageJobRepository:
         self.session.commit()
 
     def fail_generation(
-        self, job_id: UUID, token: UUID, error: str, backoff_seconds: int
+        self,
+        job_id: UUID,
+        token: UUID,
+        error: str,
+        backoff_seconds: int,
+        *,
+        permanent: bool = False,
     ) -> str:
         job = self._leased(job_id, token)
         now = datetime.now(UTC)
-        exhausted = job.attempts >= job.max_attempts
+        exhausted = permanent or job.attempts >= job.max_attempts
         job.status = "failed" if exhausted else "retrying"
         job.available_at = now + timedelta(
             seconds=backoff_seconds * (2 ** max(job.attempts - 1, 0))

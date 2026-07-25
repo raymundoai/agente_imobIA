@@ -41,14 +41,22 @@ export function UsageSettingsPanel() {
           <p>Acompanhe volume de atendimento, automações e custo estimado da IA.</p>
         </div>
         <span className="settings-status">
-          {formatNumber(account?.balance_credits ?? 0)} créditos
+          {formatNumber(account?.available_credits ?? 0)} créditos disponíveis
         </span>
       </div>
 
       <div className="settings-grid">
         <div className="settings-summary">
-          <span>Créditos disponíveis</span>
+          <span>Saldo total</span>
           <strong>{formatNumber(account?.balance_credits ?? 0)}</strong>
+        </div>
+        <div className="settings-summary">
+          <span>Créditos reservados</span>
+          <strong>{formatNumber(account?.reserved_credits ?? 0)}</strong>
+        </div>
+        <div className="settings-summary">
+          <span>Créditos disponíveis</span>
+          <strong>{formatNumber(account?.available_credits ?? 0)}</strong>
         </div>
         <div className="settings-summary">
           <span>Custo OpenAI estimado</span>

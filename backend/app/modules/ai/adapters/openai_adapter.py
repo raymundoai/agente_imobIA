@@ -3,9 +3,15 @@ import json
 from io import BytesIO
 from typing import Any
 
-from openai import OpenAI
+from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
-from app.modules.ai.domain.ports import AiProviderPort, AiProviderResponse, AiToolCall
+from app.modules.ai.domain.ports import (
+    AiProviderDispatchUncertainError,
+    AiProviderPort,
+    AiProviderRejectedError,
+    AiProviderResponse,
+    AiToolCall,
+)
 from app.modules.properties.media import ImageEditResult
 
 
@@ -20,7 +26,7 @@ class OpenAiAdapter(AiProviderPort):
         image_model: str = "gpt-image-2",
         client: OpenAI | None = None,
     ) -> None:
-        self._client = client or OpenAI(api_key=api_key)
+        self._client = client or OpenAI(api_key=api_key, max_retries=0)
         self._chat_model = chat_model
         self._embedding_model = embedding_model
         self._embedding_dimensions = embedding_dimensions
@@ -29,13 +35,20 @@ class OpenAiAdapter(AiProviderPort):
     def edit_image(self, content: bytes, *, filename: str, prompt: str) -> ImageEditResult:
         image = BytesIO(content)
         image.name = filename
-        response = self._client.images.edit(
-            model=self._image_model,
-            image=image,
-            prompt=prompt,
-            quality="medium",
-            size="1024x1024",
-        )
+        try:
+            response = self._client.images.edit(
+                model=self._image_model,
+                image=image,
+                prompt=prompt,
+                quality="medium",
+                size="1024x1024",
+            )
+        except (APIConnectionError, APITimeoutError) as exc:
+            raise AiProviderDispatchUncertainError("OpenAI image dispatch is uncertain") from exc
+        except APIStatusError as exc:
+            if exc.status_code < 500:
+                raise AiProviderRejectedError("OpenAI rejected the image request") from exc
+            raise AiProviderDispatchUncertainError("OpenAI image dispatch is uncertain") from exc
         data = response.data[0]
         encoded = getattr(data, "b64_json", None)
         if not encoded:
@@ -58,12 +71,23 @@ class OpenAiAdapter(AiProviderPort):
         normalized = text.replace("\n", " ").strip()
         if not normalized:
             normalized = " "
-        response = self._client.embeddings.create(
-            model=self._embedding_model,
-            input=normalized,
-            dimensions=self._embedding_dimensions,
-            encoding_format="float",
-        )
+        try:
+            response = self._client.embeddings.create(
+                model=self._embedding_model,
+                input=normalized,
+                dimensions=self._embedding_dimensions,
+                encoding_format="float",
+            )
+        except (APIConnectionError, APITimeoutError) as exc:
+            raise AiProviderDispatchUncertainError(
+                "OpenAI embedding dispatch is uncertain"
+            ) from exc
+        except APIStatusError as exc:
+            if exc.status_code < 500:
+                raise AiProviderRejectedError("OpenAI rejected the embedding request") from exc
+            raise AiProviderDispatchUncertainError(
+                "OpenAI embedding dispatch is uncertain"
+            ) from exc
         return list(response.data[0].embedding)
 
     def chat_completion(
@@ -73,13 +97,21 @@ class OpenAiAdapter(AiProviderPort):
         messages: list[dict[str, str]],
         tools: list[dict[str, Any]],
     ) -> AiProviderResponse:
-        response = self._client.responses.create(
-            model=self._chat_model,
-            instructions=system_prompt,
-            input=self._responses_input(messages),
-            tools=tools,
-            parallel_tool_calls=False,
-        )
+        try:
+            response = self._client.responses.create(
+                model=self._chat_model,
+                instructions=system_prompt,
+                input=self._responses_input(messages),
+                tools=tools,
+                parallel_tool_calls=False,
+                max_output_tokens=2_000,
+            )
+        except (APIConnectionError, APITimeoutError) as exc:
+            raise AiProviderDispatchUncertainError("OpenAI chat dispatch is uncertain") from exc
+        except APIStatusError as exc:
+            if exc.status_code < 500:
+                raise AiProviderRejectedError("OpenAI rejected the chat request") from exc
+            raise AiProviderDispatchUncertainError("OpenAI chat dispatch is uncertain") from exc
         return AiProviderResponse(
             text=getattr(response, "output_text", "") or self._extract_text(response),
             model=getattr(response, "model", self._chat_model),

@@ -64,6 +64,9 @@ class CreditAccountModel(Base):
     balance_credits: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
+    reserved_credits: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
     enforcement_mode: Mapped[str] = mapped_column(
         Text, nullable=False, default="meter_only", server_default="meter_only"
     )
@@ -109,3 +112,39 @@ class CreditLedgerModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class CreditReservationModel(Base):
+    __tablename__ = "credit_reservations"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "idempotency_key",
+            name="uq_credit_reservations_tenant_idempotency",
+        ),
+        CheckConstraint(
+            "status IN ('reserved', 'started', 'settled', 'released')",
+            name="credit_reservations_status",
+        ),
+        Index("ix_credit_reservations_status_expires", "status", "expires_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    resource: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="reserved")
+    reserved_credits: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    actual_credits: Mapped[int | None] = mapped_column(BigInteger)
+    reference_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    extra: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

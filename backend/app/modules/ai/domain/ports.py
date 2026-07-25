@@ -13,6 +13,14 @@ from app.modules.ai.domain.entities import (
 )
 
 
+class AiProviderRejectedError(RuntimeError):
+    """The provider definitively rejected the request before billable acceptance."""
+
+
+class AiProviderDispatchUncertainError(RuntimeError):
+    """The request may have reached the provider and requires reconciliation."""
+
+
 @dataclass(frozen=True, slots=True)
 class AiToolCall:
     name: str

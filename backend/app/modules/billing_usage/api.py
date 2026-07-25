@@ -16,6 +16,7 @@ from app.modules.billing_usage.service import (
     CREDIT_VALUE_USD,
     DEFAULT_MARKUP_MULTIPLIER,
     IMAGE_TOKEN_RATES_USD_PER_MILLION,
+    PRICING_CATALOG_VERSION,
     CreditLedgerService,
 )
 
@@ -32,6 +33,8 @@ class UsageSummaryItem(BaseModel):
 class CreditAccountResponse(BaseModel):
     tenant_id: UUID
     balance_credits: int
+    reserved_credits: int
+    available_credits: int
     enforcement_mode: str
     unlimited_messages: bool
     credit_value_usd: Decimal = CREDIT_VALUE_USD
@@ -56,6 +59,7 @@ class CreditLedgerItem(BaseModel):
 
 
 class PricingCatalogResponse(BaseModel):
+    version: str
     credit_value_usd: Decimal
     markup_multiplier: Decimal
     chat_usd_per_million: dict[str, list[Decimal]]
@@ -107,6 +111,8 @@ def credit_account(
     return CreditAccountResponse(
         tenant_id=account.tenant_id,
         balance_credits=account.balance_credits,
+        reserved_credits=account.reserved_credits,
+        available_credits=account.balance_credits - account.reserved_credits,
         enforcement_mode=account.enforcement_mode,
         unlimited_messages=account.unlimited_messages,
     )
@@ -132,6 +138,7 @@ def pricing_catalog(
     _: CurrentPrincipal = Depends(get_current_principal),
 ) -> PricingCatalogResponse:
     return PricingCatalogResponse(
+        version=PRICING_CATALOG_VERSION,
         credit_value_usd=CREDIT_VALUE_USD,
         markup_multiplier=DEFAULT_MARKUP_MULTIPLIER,
         chat_usd_per_million={

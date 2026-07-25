@@ -1,16 +1,26 @@
+import hashlib
 import json
+import threading
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
+from app.modules.ai.domain.ports import (
+    AiProviderDispatchUncertainError,
+    AiProviderRejectedError,
+)
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
-from app.modules.billing_usage.service import CreditLedgerService, image_token_charge
+from app.modules.billing_usage.service import (
+    CreditLedgerService,
+    estimated_image_charge,
+    image_token_charge,
+)
 from app.modules.properties.adapters.repositories import SqlAlchemyPropertyRepository
 from app.modules.properties.application.use_cases import ListPropertiesUseCase
 from app.modules.properties.domain.entities import Property, PropertyPurpose
@@ -188,9 +198,6 @@ async def upload_property_images(
             detail="O tratamento por OpenAI foi solicitado, mas a integração não está configurada.",
         )
     ledger = CreditLedgerService(session)
-    if should_optimize:
-        ledger.ensure_available(principal.tenant_id, resource="image_edit")
-
     prepared: list[PropertyImageUpload] = []
     for file in files:
         content = await file.read(container.settings.property_image_max_bytes + 1)
@@ -207,9 +214,67 @@ async def upload_property_images(
 
     if should_optimize:
         prompt = optimization_prompt(requested, note)
+        reservation_keys = [
+            "image-edit:"
+            + hashlib.sha256(
+                f"{principal.tenant_id}:{index}:{prompt}:".encode() + upload.content
+            ).hexdigest()
+            for index, upload in enumerate(prepared)
+        ]
+        reserved_keys: list[str] = []
+        try:
+            for reservation_key in reservation_keys:
+                reservation = ledger.reserve(
+                    principal.tenant_id,
+                    resource="image_edit",
+                    model=container.settings.openai_image_model,
+                    estimate=estimated_image_charge(
+                        container.settings.openai_image_model
+                    ),
+                    idempotency_key=reservation_key,
+                    reference_id=None,
+                )
+                if reservation.status == "settled":
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Este tratamento de imagem já foi processado.",
+                    )
+                if reservation.status == "started":
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Este tratamento possui uma chamada anterior em reconciliação."
+                        ),
+                    )
+                reserved_keys.append(reservation_key)
+        except Exception:
+            for key in reserved_keys:
+                ledger.release_reservation(principal.tenant_id, key)
+            raise
         processed: list[PropertyImageUpload] = []
         for index, upload in enumerate(prepared):
+            reservation_key = reservation_keys[index]
+            provider_started = False
+            heartbeat_stopped = threading.Event()
+            heartbeat_thread: threading.Thread | None = None
             try:
+                ledger.start_reservation(principal.tenant_id, reservation_key)
+                provider_started = True
+
+                def renew_reservation(
+                    stopped: threading.Event = heartbeat_stopped,
+                    key: str = reservation_key,
+                ) -> None:
+                    while not stopped.wait(60):
+                        with container.database.session_factory() as heartbeat_session:
+                            CreditLedgerService(heartbeat_session).touch_reservation(
+                                principal.tenant_id, key
+                            )
+
+                heartbeat_thread = threading.Thread(
+                    target=renew_reservation, daemon=True
+                )
+                heartbeat_thread.start()
                 edit_result = container.ai_provider.edit_image(
                     upload.content,
                     filename=upload.original_name,
@@ -223,7 +288,26 @@ async def upload_property_images(
                 validate_property_image(
                     output, max_bytes=container.settings.property_image_max_bytes
                 )
+            except AiProviderRejectedError as exc:
+                for key in reservation_keys[index:]:
+                    ledger.release_reservation(principal.tenant_id, key)
+                raise HTTPException(
+                    status_code=502,
+                    detail="A OpenAI rejeitou definitivamente o tratamento solicitado.",
+                ) from exc
+            except AiProviderDispatchUncertainError as exc:
+                for key in reservation_keys[index + 1 :]:
+                    ledger.release_reservation(principal.tenant_id, key)
+                raise HTTPException(
+                    status_code=502,
+                    detail="O resultado da chamada OpenAI é incerto e requer reconciliação.",
+                ) from exc
+            except HTTPException:
+                raise
             except Exception as exc:
+                release_from = index + 1 if provider_started else index
+                for key in reservation_keys[release_from:]:
+                    ledger.release_reservation(principal.tenant_id, key)
                 raise HTTPException(
                     status_code=502,
                     detail=(
@@ -231,6 +315,10 @@ async def upload_property_images(
                         "nenhuma imagem deste envio foi salva."
                     ),
                 ) from exc
+            finally:
+                heartbeat_stopped.set()
+                if heartbeat_thread is not None:
+                    heartbeat_thread.join(timeout=2)
             processed.append(output)
             charge = image_token_charge(
                 container.settings.openai_image_model,
@@ -238,12 +326,11 @@ async def upload_property_images(
                 input_text_tokens=edit_result.input_text_tokens,
                 output_image_tokens=edit_result.output_image_tokens,
             )
-            ledger.consume(
+            ledger.settle_reservation(
                 principal.tenant_id,
-                resource="image_edit",
-                model=container.settings.openai_image_model,
+                idempotency_key=reservation_key,
                 charge=charge,
-                idempotency_key=f"image:{principal.tenant_id}:{uuid4()}:{index}",
+                model=container.settings.openai_image_model,
                 reference_id=None,
                 extra={
                     "quality": "medium",

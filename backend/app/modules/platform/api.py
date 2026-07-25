@@ -76,6 +76,8 @@ class PlatformTenantSummary(BaseModel):
     ai_calls: int
     estimated_ai_cost: Decimal
     credit_balance: int
+    credit_reserved: int
+    credit_available: int
     credit_enforcement: str
     unlimited_messages: bool
     integrations: dict[str, str]
@@ -406,6 +408,10 @@ def _tenant_summary(session: Session, tenant: TenantModel) -> PlatformTenantSumm
         ai_calls=ai_calls,
         estimated_ai_cost=cost,
         credit_balance=account.balance_credits if account else 0,
+        credit_reserved=account.reserved_credits if account else 0,
+        credit_available=(
+            account.balance_credits - account.reserved_credits if account else 0
+        ),
         credit_enforcement=account.enforcement_mode if account else "meter_only",
         unlimited_messages=account.unlimited_messages if account else False,
         integrations=safe_integrations,

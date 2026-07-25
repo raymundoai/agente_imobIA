@@ -209,8 +209,11 @@ class SqlAlchemyKnowledgeRepository(KnowledgeDocumentRepositoryPort, KnowledgeSe
 
 
 class SqlAlchemyAiAuditLogRepository(AiAuditLogRepositoryPort):
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self, session: Session, *, credit_reservation_key: str | None = None
+    ) -> None:
         self._session = session
+        self._credit_reservation_key = credit_reservation_key
 
     def create(self, audit_log: AiAuditLog) -> AiAuditLog:
         try:
@@ -221,6 +224,15 @@ class SqlAlchemyAiAuditLogRepository(AiAuditLogRepositoryPort):
                 output_tokens=audit_log.output_tokens,
             )
         except ValueError:
+            if self._credit_reservation_key is not None:
+                if audit_log.model == "guardrail":
+                    CreditLedgerService(self._session).release_reservation(
+                        audit_log.tenant_id,
+                        self._credit_reservation_key,
+                        commit=False,
+                    )
+                else:
+                    raise
             charge = None
         if charge is not None:
             audit_log.estimated_cost = float(charge.provider_cost_usd)
@@ -253,7 +265,20 @@ class SqlAlchemyAiAuditLogRepository(AiAuditLogRepositoryPort):
                 estimated_cost=audit_log.estimated_cost,
             )
         )
-        if charge is not None:
+        if charge is not None and self._credit_reservation_key is not None:
+            CreditLedgerService(self._session).settle_reservation(
+                audit_log.tenant_id,
+                idempotency_key=self._credit_reservation_key,
+                model=audit_log.model,
+                charge=charge,
+                reference_id=audit_log.id,
+                extra={
+                    "input_tokens": audit_log.input_tokens,
+                    "cached_input_tokens": audit_log.cached_input_tokens,
+                    "output_tokens": audit_log.output_tokens,
+                },
+            )
+        elif charge is not None:
             CreditLedgerService(self._session).consume(
                 audit_log.tenant_id,
                 resource="ai_message",

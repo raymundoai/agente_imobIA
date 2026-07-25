@@ -115,6 +115,8 @@ export type UsageSummaryItem = {
 export type CreditAccount = {
   tenant_id: string;
   balance_credits: number;
+  reserved_credits: number;
+  available_credits: number;
   enforcement_mode: "meter_only" | "enforce";
   unlimited_messages: boolean;
   credit_value_usd: string;

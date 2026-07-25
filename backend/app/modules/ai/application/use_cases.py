@@ -15,6 +15,7 @@ from app.modules.ai.domain.entities import (
 from app.modules.ai.domain.ports import (
     AiAuditLogRepositoryPort,
     AiProviderPort,
+    AiProviderResponse,
     DocumentParserPort,
     KnowledgeDocumentRepositoryPort,
     KnowledgeJobQueuePort,
@@ -209,6 +210,8 @@ class GenerateAiReplyUseCase:
         send_to_channel: bool = False,
         outbound_message_id: UUID | None = None,
         side_effect_guard: Callable[[], None] | None = None,
+        dispatch_guard: Callable[[], None] | None = None,
+        usage_observer: Callable[[AiProviderResponse], None] | None = None,
     ) -> AiAgentResult:
         tenant = self._tenants.get_by_id(tenant_id)
         if tenant is None or tenant.status is not TenantStatus.ACTIVE:
@@ -252,11 +255,15 @@ class GenerateAiReplyUseCase:
             }
             for chunk in chunks
         ]
+        if dispatch_guard is not None:
+            dispatch_guard()
         response = self._ai.chat_completion(
             system_prompt=self._system_prompt(tenant.settings, agent_key, agent_settings, chunks),
             messages=self._messages_from_history(history),
             tools=self._tool_definitions(agent_key),
         )
+        if usage_observer is not None:
+            usage_observer(response)
         tools_called: list[dict[str, Any]] = []
         handoff_reason: str | None = None
         tool_context: list[dict[str, str]] = []
@@ -283,6 +290,8 @@ class GenerateAiReplyUseCase:
                     }
                 )
             tool_context.extend(tool_outputs)
+            if dispatch_guard is not None:
+                dispatch_guard()
             response = self._ai.chat_completion(
                 system_prompt=self._system_prompt(
                     tenant.settings, agent_key, agent_settings, chunks
@@ -290,6 +299,8 @@ class GenerateAiReplyUseCase:
                 messages=[*self._messages_from_history(history), *tool_context],
                 tools=self._tool_definitions(agent_key),
             )
+            if usage_observer is not None:
+                usage_observer(response)
             total_tokens += response.tokens_used
             input_tokens += response.input_tokens
             cached_input_tokens += response.cached_input_tokens
