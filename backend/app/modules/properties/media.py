@@ -14,7 +14,15 @@ ALLOWED_IMAGE_TYPES = {
 
 
 class PropertyImageProcessor(Protocol):
-    def edit_image(self, content: bytes, *, filename: str, prompt: str) -> bytes: ...
+    def edit_image(self, content: bytes, *, filename: str, prompt: str) -> ImageEditResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ImageEditResult:
+    content: bytes
+    input_image_tokens: int
+    input_text_tokens: int
+    output_image_tokens: int
 
 
 @dataclass(frozen=True, slots=True)

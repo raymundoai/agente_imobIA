@@ -49,10 +49,46 @@ def test_platform_admin_can_manage_tenants_and_read_global_dashboard(
     )
     assert created.status_code == 201, created.text
     tenant_id = created.json()["id"]
+    assert created.json()["credit_balance"] == 0
+    grant = client.post(
+        f"/platform/tenants/{tenant_id}/credits/grants",
+        headers=auth,
+        json={
+            "credits": 10000,
+            "description": "Créditos do piloto",
+            "idempotency_key": "pilot-initial-grant",
+        },
+    )
+    assert grant.status_code == 201, grant.text
+    assert grant.json()["balance_after"] == 10000
+    repeated = client.post(
+        f"/platform/tenants/{tenant_id}/credits/grants",
+        headers=auth,
+        json={
+            "credits": 10000,
+            "description": "Créditos do piloto",
+            "idempotency_key": "pilot-initial-grant",
+        },
+    )
+    assert repeated.status_code == 201
+    assert repeated.json()["id"] == grant.json()["id"]
+    policy = client.patch(
+        f"/platform/tenants/{tenant_id}/credits/settings",
+        headers=auth,
+        json={"enforcement_mode": "enforce", "unlimited_messages": True},
+    )
+    assert policy.status_code == 200
+    assert policy.json()["credit_balance"] == 10000
+    assert policy.json()["credit_enforcement"] == "enforce"
+    assert policy.json()["unlimited_messages"] is True
+    ledger = client.get(f"/platform/tenants/{tenant_id}/credits/ledger", headers=auth)
+    assert ledger.status_code == 200
+    assert len(ledger.json()) == 1
     dashboard = client.get("/platform/dashboard", headers=auth)
     assert dashboard.status_code == 200
     assert dashboard.json()["active_clients"] == 1
     assert dashboard.json()["total_users"] == 1
+    assert dashboard.json()["credits_outstanding"] == 10000
 
     suspended = client.patch(
         f"/platform/tenants/{tenant_id}/status",

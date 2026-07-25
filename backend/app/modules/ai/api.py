@@ -22,6 +22,7 @@ from app.modules.ai.application.use_cases import (
 )
 from app.modules.ai.domain.entities import KnowledgeDocument
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
+from app.modules.billing_usage.service import CreditLedgerService
 from app.modules.conversations.adapters.repositories import SqlAlchemyConversationRepository
 from app.modules.leads.adapters.repositories import SqlAlchemyLeadDemandRepository
 from app.modules.leads.application.use_cases import LeadQualificationService
@@ -197,6 +198,7 @@ def generate_ai_reply(
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
 ) -> AiReplyResponse:
+    CreditLedgerService(session).ensure_available(principal.tenant_id, resource="ai_message")
     result = GenerateAiReplyUseCase(
         SqlAlchemyTenantRepository(session),
         SqlAlchemyConversationRepository(session),

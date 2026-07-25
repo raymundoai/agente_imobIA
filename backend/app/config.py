@@ -58,10 +58,10 @@ class Settings(BaseSettings):
     telegram_tenant_configs: dict[str, TelegramTenantSettings] = Field(default_factory=dict)
     telegram_auto_reply_enabled: bool = True
     openai_api_key: SecretStr | None = None
-    openai_chat_model: str = "gpt-5.5"
+    openai_chat_model: str = "gpt-5.4-mini"
     openai_embedding_model: str = "text-embedding-3-small"
     openai_embedding_dimensions: int = Field(default=1536, gt=0, le=2048)
-    openai_image_model: str = "gpt-image-1"
+    openai_image_model: str = "gpt-image-2"
     property_media_root: Path = Path("storage/property-images")
     property_image_max_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
     property_image_max_files: int = Field(default=12, gt=0, le=50)

@@ -6,6 +6,7 @@ from typing import Any
 from openai import OpenAI
 
 from app.modules.ai.domain.ports import AiProviderPort, AiProviderResponse, AiToolCall
+from app.modules.properties.media import ImageEditResult
 
 
 class OpenAiAdapter(AiProviderPort):
@@ -16,7 +17,7 @@ class OpenAiAdapter(AiProviderPort):
         chat_model: str,
         embedding_model: str,
         embedding_dimensions: int = 1536,
-        image_model: str = "gpt-image-1",
+        image_model: str = "gpt-image-2",
         client: OpenAI | None = None,
     ) -> None:
         self._client = client or OpenAI(api_key=api_key)
@@ -25,19 +26,33 @@ class OpenAiAdapter(AiProviderPort):
         self._embedding_dimensions = embedding_dimensions
         self._image_model = image_model
 
-    def edit_image(self, content: bytes, *, filename: str, prompt: str) -> bytes:
+    def edit_image(self, content: bytes, *, filename: str, prompt: str) -> ImageEditResult:
         image = BytesIO(content)
         image.name = filename
         response = self._client.images.edit(
             model=self._image_model,
             image=image,
             prompt=prompt,
+            quality="medium",
+            size="1024x1024",
         )
         data = response.data[0]
         encoded = getattr(data, "b64_json", None)
         if not encoded:
             raise RuntimeError("OpenAI did not return the processed image content")
-        return base64.b64decode(encoded)
+        usage = getattr(response, "usage", None)
+        input_details = getattr(usage, "input_tokens_details", None)
+        input_image_tokens = int(getattr(input_details, "image_tokens", 0) or 0)
+        input_text_tokens = int(getattr(input_details, "text_tokens", 0) or 0)
+        output_image_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+        if input_image_tokens + input_text_tokens + output_image_tokens <= 0:
+            raise RuntimeError("OpenAI did not return image token usage")
+        return ImageEditResult(
+            content=base64.b64decode(encoded),
+            input_image_tokens=input_image_tokens,
+            input_text_tokens=input_text_tokens,
+            output_image_tokens=output_image_tokens,
+        )
 
     def get_embedding(self, text: str) -> list[float]:
         normalized = text.replace("\n", " ").strip()
@@ -69,6 +84,9 @@ class OpenAiAdapter(AiProviderPort):
             text=getattr(response, "output_text", "") or self._extract_text(response),
             model=getattr(response, "model", self._chat_model),
             tokens_used=self._tokens_used(response),
+            input_tokens=self._usage_value(response, "input_tokens"),
+            cached_input_tokens=self._cached_input_tokens(response),
+            output_tokens=self._usage_value(response, "output_tokens"),
             tool_calls=self._tool_calls(response),
         )
 
@@ -130,3 +148,14 @@ class OpenAiAdapter(AiProviderPort):
             getattr(usage, "total_tokens", 0)
             or (getattr(usage, "input_tokens", 0) + getattr(usage, "output_tokens", 0))
         )
+
+    @staticmethod
+    def _usage_value(response: Any, name: str) -> int:
+        usage = getattr(response, "usage", None)
+        return int(getattr(usage, name, 0) or 0) if usage is not None else 0
+
+    @staticmethod
+    def _cached_input_tokens(response: Any) -> int:
+        usage = getattr(response, "usage", None)
+        details = getattr(usage, "input_tokens_details", None) if usage is not None else None
+        return int(getattr(details, "cached_tokens", 0) or 0) if details is not None else 0

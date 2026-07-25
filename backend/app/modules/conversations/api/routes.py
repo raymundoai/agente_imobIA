@@ -11,6 +11,7 @@ from app.modules.ai.adapters.repositories import (
 )
 from app.modules.ai.application.use_cases import GenerateAiReplyUseCase
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
+from app.modules.billing_usage.service import CreditLedgerService
 from app.modules.conversations.adapters.repositories import SqlAlchemyConversationRepository
 from app.modules.conversations.api.schemas import (
     ConversationDetailResponse,
@@ -66,6 +67,7 @@ def whatsapp_webhook(
                 tenant = SqlAlchemyTenantRepository(session).get_by_slug(tenant_slug)
                 if tenant is None:
                     raise NotFoundError("Webhook tenant not found")
+                CreditLedgerService(session).ensure_available(tenant.id, resource="ai_message")
                 result = GenerateAiReplyUseCase(
                     SqlAlchemyTenantRepository(session),
                     SqlAlchemyConversationRepository(session),
@@ -129,6 +131,7 @@ def telegram_webhook(
                 tenant = SqlAlchemyTenantRepository(session).get_by_slug(tenant_slug)
                 if tenant is None:
                     raise NotFoundError("Webhook tenant not found")
+                CreditLedgerService(session).ensure_available(tenant.id, resource="ai_message")
                 result = GenerateAiReplyUseCase(
                     SqlAlchemyTenantRepository(session),
                     SqlAlchemyConversationRepository(session),

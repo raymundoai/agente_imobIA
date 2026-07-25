@@ -65,7 +65,8 @@ def clean_database(request: pytest.FixtureRequest) -> Generator[None, None, None
                 "TRUNCATE TABLE ai_audit_logs, knowledge_chunks, knowledge_documents, "
                 "property_demand_matches, properties, contacts, maintenance_tickets, lead_demands, "
                 "messages, conversations, "
-                "usage_records, platform_users, users, tenants CASCADE"
+                "credit_ledger, credit_accounts, usage_records, platform_users, users, "
+                "tenants CASCADE"
             )
         )
     yield
@@ -75,7 +76,8 @@ def clean_database(request: pytest.FixtureRequest) -> Generator[None, None, None
                 "TRUNCATE TABLE ai_audit_logs, knowledge_chunks, knowledge_documents, "
                 "property_demand_matches, properties, contacts, maintenance_tickets, lead_demands, "
                 "messages, conversations, "
-                "usage_records, platform_users, users, tenants CASCADE"
+                "credit_ledger, credit_accounts, usage_records, platform_users, users, "
+                "tenants CASCADE"
             )
         )
     engine.dispose()
@@ -94,6 +96,7 @@ def client(migrated_database: str, tmp_path: Path) -> Generator[TestClient, None
         platform_bootstrap_token=TEST_PLATFORM_BOOTSTRAP_TOKEN,
         telegram_auto_reply_enabled=False,
         property_media_root=tmp_path / "property-images",
+        openai_api_key=None,
         telegram_tenant_configs={
             "tenant-a": {
                 "bot_token": "test-telegram-token-a",

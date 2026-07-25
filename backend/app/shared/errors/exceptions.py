@@ -31,3 +31,8 @@ class ExternalServiceError(ApplicationError):
 class ConfigurationError(ApplicationError):
     status_code = 503
     code = "configuration_error"
+
+
+class PaymentRequiredError(ApplicationError):
+    status_code = 402
+    code = "credits_required"

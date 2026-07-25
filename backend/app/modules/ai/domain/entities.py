@@ -58,6 +58,9 @@ class AiAuditLog:
     response_text: str
     model: str
     tokens_used: int
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
     estimated_cost: float | None = None
     handoff_reason: str | None = None
     error: str | None = None

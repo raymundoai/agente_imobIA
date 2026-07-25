@@ -18,7 +18,11 @@ class _Responses:
         return SimpleNamespace(
             model="gpt-5.5",
             output_text="",
-            usage=SimpleNamespace(input_tokens=7, output_tokens=5),
+            usage=SimpleNamespace(
+                input_tokens=7,
+                output_tokens=5,
+                input_tokens_details=SimpleNamespace(cached_tokens=2),
+            ),
             output=[
                 SimpleNamespace(
                     type="function_call",
@@ -39,7 +43,11 @@ class _Images:
     def edit(self, **kwargs):
         assert kwargs["model"] == "test-image"
         return SimpleNamespace(
-            data=[SimpleNamespace(b64_json=base64.b64encode(b"\x89PNG\r\n\x1a\nedited").decode())]
+            data=[SimpleNamespace(b64_json=base64.b64encode(b"\x89PNG\r\n\x1a\nedited").decode())],
+            usage=SimpleNamespace(
+                input_tokens_details=SimpleNamespace(image_tokens=100, text_tokens=10),
+                output_tokens=200,
+            ),
         )
 
 
@@ -57,6 +65,9 @@ def test_openai_adapter_get_embedding_and_function_calls() -> None:
     )
 
     assert response.tokens_used == 12
+    assert response.input_tokens == 7
+    assert response.cached_input_tokens == 2
+    assert response.output_tokens == 5
     assert response.tool_calls is not None
     assert response.tool_calls[0].name == "search_knowledge_base"
     assert response.tool_calls[0].arguments == {"query": "boleto"}
@@ -73,4 +84,7 @@ def test_openai_adapter_returns_edited_image_bytes() -> None:
     )
 
     edited = adapter.edit_image(b"\x89PNG\r\n\x1a\ninput", filename="input.png", prompt="melhore")
-    assert edited == b"\x89PNG\r\n\x1a\nedited"
+    assert edited.content == b"\x89PNG\r\n\x1a\nedited"
+    assert edited.input_image_tokens == 100
+    assert edited.input_text_tokens == 10
+    assert edited.output_image_tokens == 200

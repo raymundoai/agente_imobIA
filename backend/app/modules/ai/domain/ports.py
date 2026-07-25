@@ -25,6 +25,9 @@ class AiProviderResponse:
     text: str
     model: str
     tokens_used: int
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
     detected_intent: str | None = None
     tool_calls: list[AiToolCall] | None = None
 

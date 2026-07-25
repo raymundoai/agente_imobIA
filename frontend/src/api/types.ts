@@ -109,6 +109,28 @@ export type UsageSummaryItem = {
   estimated_cost: string;
 };
 
+export type CreditAccount = {
+  tenant_id: string;
+  balance_credits: number;
+  enforcement_mode: "meter_only" | "enforce";
+  unlimited_messages: boolean;
+  credit_value_usd: string;
+  markup_multiplier: string;
+};
+
+export type CreditLedgerItem = {
+  id: string;
+  delta_credits: number;
+  balance_after: number;
+  kind: string;
+  resource: string | null;
+  model: string | null;
+  provider_cost_usd: string;
+  retail_cost_usd: string;
+  description: string | null;
+  created_at: string;
+};
+
 export type Tenant = {
   id: string;
   name: string;

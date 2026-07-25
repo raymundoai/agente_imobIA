@@ -25,6 +25,7 @@ from app.modules.ai.domain.ports import (
     KnowledgeSearchPort,
 )
 from app.modules.billing_usage.adapters.models import UsageRecordModel
+from app.modules.billing_usage.service import CreditLedgerService, chat_charge
 
 
 def _vector_literal(values: list[float]) -> str:
@@ -212,6 +213,17 @@ class SqlAlchemyAiAuditLogRepository(AiAuditLogRepositoryPort):
         self._session = session
 
     def create(self, audit_log: AiAuditLog) -> AiAuditLog:
+        try:
+            charge = chat_charge(
+                audit_log.model,
+                input_tokens=audit_log.input_tokens,
+                cached_input_tokens=audit_log.cached_input_tokens,
+                output_tokens=audit_log.output_tokens,
+            )
+        except ValueError:
+            charge = None
+        if charge is not None:
+            audit_log.estimated_cost = float(charge.provider_cost_usd)
         model = AiAuditLogModel(
             id=audit_log.id,
             tenant_id=audit_log.tenant_id,
@@ -241,6 +253,20 @@ class SqlAlchemyAiAuditLogRepository(AiAuditLogRepositoryPort):
                 estimated_cost=audit_log.estimated_cost,
             )
         )
+        if charge is not None:
+            CreditLedgerService(self._session).consume(
+                audit_log.tenant_id,
+                resource="ai_message",
+                model=audit_log.model,
+                charge=charge,
+                idempotency_key=f"ai:{audit_log.id}",
+                reference_id=audit_log.id,
+                extra={
+                    "input_tokens": audit_log.input_tokens,
+                    "cached_input_tokens": audit_log.cached_input_tokens,
+                    "output_tokens": audit_log.output_tokens,
+                },
+            )
         self._session.commit()
         self._session.refresh(model)
         return _audit_to_domain(model)

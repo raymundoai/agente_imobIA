@@ -253,6 +253,9 @@ class GenerateAiReplyUseCase:
         handoff_reason: str | None = None
         tool_context: list[dict[str, str]] = []
         total_tokens = response.tokens_used
+        input_tokens = response.input_tokens
+        cached_input_tokens = response.cached_input_tokens
+        output_tokens = response.output_tokens
         for _ in range(4):
             if not response.tool_calls:
                 break
@@ -278,6 +281,9 @@ class GenerateAiReplyUseCase:
                 tools=self._tool_definitions(agent_key),
             )
             total_tokens += response.tokens_used
+            input_tokens += response.input_tokens
+            cached_input_tokens += response.cached_input_tokens
+            output_tokens += response.output_tokens
 
         outbound = Message(
             tenant_id=tenant_id,
@@ -308,6 +314,9 @@ class GenerateAiReplyUseCase:
                 response_text=response.text,
                 model=response.model,
                 tokens_used=total_tokens,
+                input_tokens=input_tokens,
+                cached_input_tokens=cached_input_tokens,
+                output_tokens=output_tokens,
                 handoff_reason=handoff_reason,
                 agent_key=agent_key,
             )

@@ -2,7 +2,7 @@ import json
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field, model_validator
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
+from app.modules.billing_usage.service import CreditLedgerService, image_token_charge
 from app.modules.properties.adapters.repositories import SqlAlchemyPropertyRepository
 from app.modules.properties.application.use_cases import ListPropertiesUseCase
 from app.modules.properties.domain.entities import Property, PropertyPurpose
@@ -170,6 +171,7 @@ async def upload_property_images(
     note: Annotated[str | None, Form(max_length=1000)] = None,
     principal: CurrentPrincipal = Depends(get_current_principal),
     container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
 ) -> list[PropertyImageResponse]:
     if not files:
         raise HTTPException(status_code=422, detail="Envie pelo menos uma imagem.")
@@ -185,6 +187,9 @@ async def upload_property_images(
             status_code=503,
             detail="O tratamento por OpenAI foi solicitado, mas a integração não está configurada.",
         )
+    ledger = CreditLedgerService(session)
+    if should_optimize:
+        ledger.ensure_available(principal.tenant_id, resource="image_edit")
 
     prepared: list[PropertyImageUpload] = []
     for file in files:
@@ -203,9 +208,9 @@ async def upload_property_images(
     if should_optimize:
         prompt = optimization_prompt(requested, note)
         processed: list[PropertyImageUpload] = []
-        for upload in prepared:
+        for index, upload in enumerate(prepared):
             try:
-                content = container.ai_provider.edit_image(
+                edit_result = container.ai_provider.edit_image(
                     upload.content,
                     filename=upload.original_name,
                     prompt=prompt,
@@ -213,7 +218,7 @@ async def upload_property_images(
                 output = PropertyImageUpload(
                     original_name=upload.original_name,
                     content_type="image/png",
-                    content=content,
+                    content=edit_result.content,
                 )
                 validate_property_image(
                     output, max_bytes=container.settings.property_image_max_bytes
@@ -227,16 +232,39 @@ async def upload_property_images(
                     ),
                 ) from exc
             processed.append(output)
+            charge = image_token_charge(
+                container.settings.openai_image_model,
+                input_image_tokens=edit_result.input_image_tokens,
+                input_text_tokens=edit_result.input_text_tokens,
+                output_image_tokens=edit_result.output_image_tokens,
+            )
+            ledger.consume(
+                principal.tenant_id,
+                resource="image_edit",
+                model=container.settings.openai_image_model,
+                charge=charge,
+                idempotency_key=f"image:{principal.tenant_id}:{uuid4()}:{index}",
+                reference_id=None,
+                extra={
+                    "quality": "medium",
+                    "size": "1024x1024",
+                    "input_image_tokens": edit_result.input_image_tokens,
+                    "input_text_tokens": edit_result.input_text_tokens,
+                    "output_image_tokens": edit_result.output_image_tokens,
+                },
+            )
         prepared = processed
 
     storage = LocalPropertyImageStorage(container.settings.property_media_root)
-    return [
+    response = [
         PropertyImageResponse.model_validate(
             storage.save(principal.tenant_id, upload, optimized=should_optimize),
             from_attributes=True,
         )
         for upload in prepared
     ]
+    session.commit()
+    return response
 
 
 def _parse_optimizations(raw: str) -> list[str]:
