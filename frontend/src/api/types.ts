@@ -13,6 +13,7 @@ export type DashboardStats = {
 
 export type Conversation = {
   id: string;
+  contact_id: string | null;
   phone: string;
   customer_name: string | null;
   status: string;
@@ -46,6 +47,8 @@ export type ConversationDetail = Conversation & { messages: Message[] };
 export type LeadDemand = {
   id: string;
   tenant_id: string;
+  contact_id: string | null;
+  conversation_id: string | null;
   lead_name: string;
   phone: string;
   purpose: string | null;

@@ -381,6 +381,7 @@ export function ConversationsPage() {
         </article>
       </div>
       <DemandModal
+        conversationId={selected?.id}
         initialLeadName={selected?.customer_name}
         initialPhone={selected?.phone}
         isOpen={demandModalOpen}

@@ -23,6 +23,7 @@ from app.modules.ai.application.use_cases import (
 from app.modules.ai.domain.entities import KnowledgeDocument
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
 from app.modules.billing_usage.service import CreditLedgerService
+from app.modules.contacts.service import ContactUpsertService
 from app.modules.conversations.adapters.repositories import SqlAlchemyConversationRepository
 from app.modules.leads.adapters.repositories import SqlAlchemyLeadDemandRepository
 from app.modules.leads.application.use_cases import LeadQualificationService
@@ -214,6 +215,7 @@ def generate_ai_reply(
             container.crm_credentials,
             container.crm,
             container.event_bus,
+            ContactUpsertService(session),
         ),
         properties=SqlAlchemyPropertyRepository(session),
     ).execute(

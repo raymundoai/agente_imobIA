@@ -3,13 +3,16 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query, status
-from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import or_, select
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
 from app.container import get_db_session
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
 from app.modules.contacts.models import ContactModel
+from app.modules.contacts.phone import normalize_contact_phone
+from app.modules.conversations.adapters.models import ConversationModel
+from app.modules.leads.adapters.models import LeadDemandModel
 from app.shared.errors.exceptions import ConflictError, NotFoundError
 
 router = APIRouter(prefix="/contacts", tags=["contacts"])
@@ -24,6 +27,11 @@ class ContactPayload(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=50)
     interest: str | None = Field(default=None, max_length=1000)
     notes: str | None = Field(default=None, max_length=10000)
+
+    @field_validator("phone")
+    @classmethod
+    def normalize_phone(cls, value: str) -> str:
+        return normalize_contact_phone(value)
 
 
 class ContactResponse(ContactPayload):
@@ -67,10 +75,15 @@ def create_contact(
     principal: CurrentPrincipal = Depends(get_current_principal),
     session: Session = Depends(get_db_session),
 ) -> ContactResponse:
+    normalized_phone = normalize_contact_phone(payload.phone)
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"contact:{principal.tenant_id}:{normalized_phone}"},
+    )
     existing = session.scalar(
         select(ContactModel).where(
             ContactModel.tenant_id == principal.tenant_id,
-            ContactModel.phone == payload.phone,
+            ContactModel.phone == normalized_phone,
         )
     )
     if existing:
@@ -79,7 +92,7 @@ def create_contact(
     model = ContactModel(
         id=uuid4(),
         tenant_id=principal.tenant_id,
-        **payload.model_dump(),
+        **{**payload.model_dump(), "phone": normalized_phone},
         created_at=now,
         updated_at=now,
     )
@@ -103,7 +116,41 @@ def update_contact(
     )
     if model is None:
         raise NotFoundError("Contact not found")
-    for field, value in payload.model_dump().items():
+    values = payload.model_dump()
+    values["phone"] = normalize_contact_phone(payload.phone)
+    if values["phone"] != model.phone:
+        linked = session.scalar(
+            select(ConversationModel.id)
+            .where(
+                ConversationModel.tenant_id == principal.tenant_id,
+                ConversationModel.contact_id == contact_id,
+            )
+            .union(
+                select(LeadDemandModel.id).where(
+                    LeadDemandModel.tenant_id == principal.tenant_id,
+                    LeadDemandModel.contact_id == contact_id,
+                )
+            )
+            .limit(1)
+        )
+        if linked is not None:
+            raise ConflictError(
+                "O telefone de um contato vinculado não pode ser alterado; crie outro contato."
+            )
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"contact:{principal.tenant_id}:{values['phone']}"},
+        )
+    duplicate = session.scalar(
+        select(ContactModel).where(
+            ContactModel.tenant_id == principal.tenant_id,
+            ContactModel.phone == values["phone"],
+            ContactModel.id != contact_id,
+        )
+    )
+    if duplicate:
+        raise ConflictError("A contact with this phone already exists")
+    for field, value in values.items():
         setattr(model, field, value)
     model.updated_at = datetime.now(UTC)
     session.commit()

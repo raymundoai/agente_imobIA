@@ -8,6 +8,10 @@ from app.modules.leads.domain.entities import LeadDemand
 
 class LeadDemandRepositoryPort(ABC):
     @abstractmethod
+    def lock_phone(self, tenant_id: UUID, phone: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def create(self, tenant_id: UUID, lead: LeadDemand) -> LeadDemand:
         raise NotImplementedError
 

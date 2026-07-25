@@ -78,6 +78,17 @@ def test_webhook_is_idempotent_for_message_and_usage(
     conversations = client.get("/conversations", headers={"Authorization": f"Bearer {token}"})
     assert conversations.status_code == 200
     assert len(conversations.json()) == 1
+    contacts = client.get("/contacts", headers={"Authorization": f"Bearer {token}"})
+    assert contacts.status_code == 200
+    assert len(contacts.json()) == 1
+    assert contacts.json()[0]["phone"] == "5511999999999"
+    assert conversations.json()[0]["contact_id"] == contacts.json()[0]["id"]
+    patch = client.patch(
+        f"/contacts/{contacts.json()[0]['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={**contacts.json()[0], "phone": "5511888888888"},
+    )
+    assert patch.status_code == 409
 
     engine = create_engine(migrated_database)
     with engine.connect() as connection:

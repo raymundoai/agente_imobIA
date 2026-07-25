@@ -21,6 +21,7 @@ class IncomingMessageData:
     phone: str
     text: str
     customer_name: str | None
+    contact_id: UUID | None = None
     attachments: list[dict[str, Any]] = field(default_factory=list)
 
 

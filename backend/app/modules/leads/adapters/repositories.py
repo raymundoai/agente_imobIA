@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.modules.leads.adapters.models import LeadDemandModel
@@ -12,6 +12,8 @@ def _to_domain(model: LeadDemandModel) -> LeadDemand:
     return LeadDemand(
         id=model.id,
         tenant_id=model.tenant_id,
+        contact_id=model.contact_id,
+        conversation_id=model.conversation_id,
         lead_name=model.lead_name,
         phone=model.phone,
         purpose=LeadPurpose(model.purpose) if model.purpose else None,
@@ -36,6 +38,12 @@ def _to_domain(model: LeadDemandModel) -> LeadDemand:
 class SqlAlchemyLeadDemandRepository(LeadDemandRepositoryPort):
     def __init__(self, session: Session) -> None:
         self._session = session
+
+    def lock_phone(self, tenant_id: UUID, phone: str) -> None:
+        self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"lead-demand:{tenant_id}:{phone}"},
+        )
 
     def create(self, tenant_id: UUID, lead: LeadDemand) -> LeadDemand:
         if lead.tenant_id != tenant_id:
@@ -75,6 +83,8 @@ class SqlAlchemyLeadDemandRepository(LeadDemandRepositoryPort):
         if model is None:
             raise ValueError("Lead does not exist in tenant scope")
         model.lead_name = lead.lead_name
+        model.contact_id = lead.contact_id
+        model.conversation_id = lead.conversation_id
         model.phone = lead.phone
         model.purpose = lead.purpose.value if lead.purpose else None
         model.property_type = lead.property_type

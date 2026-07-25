@@ -38,6 +38,7 @@ class Conversation:
     tenant_id: UUID
     phone: str
     id: UUID = field(default_factory=uuid4)
+    contact_id: UUID | None = None
     channel: ConversationChannel = ConversationChannel.WHATSAPP
     external_contact_id: str | None = None
     customer_name: str | None = None

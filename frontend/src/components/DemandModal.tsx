@@ -3,6 +3,10 @@ import { useEffect, useState } from "react";
 import { request } from "../api/client";
 import type { LeadDemand } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import {
+  isValidContactIdentity,
+  normalizeContactIdentity,
+} from "../lib/contactIdentity";
 
 type DemandForm = {
   lead_name: string;
@@ -20,6 +24,7 @@ type DemandForm = {
 };
 
 type DemandModalProps = {
+  conversationId?: string | null;
   initialLeadName?: string | null;
   initialPhone?: string | null;
   isOpen: boolean;
@@ -50,7 +55,11 @@ const brlFormatter = new Intl.NumberFormat("pt-BR", {
 });
 
 function formatPhoneInput(value: string) {
-  const digits = value.replace(/\D/g, "").slice(0, 11);
+  if (value.trim().toLowerCase().startsWith("telegram:")) {
+    return value;
+  }
+  const digits = value.replace(/\D/g, "").slice(0, 15);
+  if (digits.length > 11) return `+${digits}`;
   if (digits.length <= 2) return digits ? `(${digits}` : "";
   if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
@@ -67,6 +76,7 @@ function parseCurrencyInput(value: string) {
 }
 
 export function DemandModal({
+  conversationId,
   initialLeadName,
   initialPhone,
   isOpen,
@@ -94,13 +104,13 @@ export function DemandModal({
     return null;
   }
 
-  const phoneDigits = form.phone.replace(/\D/g, "");
+  const contactIdentity = normalizeContactIdentity(form.phone);
   const priceMin = parseCurrencyInput(form.price_min);
   const priceMax = parseCurrencyInput(form.price_max);
   const priceRangeValid = !priceMin || !priceMax || Number(priceMin) <= Number(priceMax);
   const isFormValid = Boolean(
     form.lead_name.trim() &&
-      phoneDigits.length === 11 &&
+      isValidContactIdentity(form.phone) &&
       form.purpose &&
       form.property_type.trim() &&
       form.city.trim() &&
@@ -119,7 +129,8 @@ export function DemandModal({
           method: "POST",
           body: JSON.stringify({
             lead_name: form.lead_name,
-            phone: phoneDigits,
+            phone: contactIdentity,
+            conversation_id: conversationId ?? null,
             purpose: form.purpose || null,
             property_type: form.property_type || null,
             city: form.city || null,
@@ -174,15 +185,17 @@ export function DemandModal({
             Telefone *
             <input
               inputMode="tel"
-              maxLength={15}
-              placeholder="(00) 00000-0000"
+              maxLength={30}
+              placeholder="Telefone ou identidade Telegram"
               required
               value={form.phone}
               onChange={(event) =>
                 setForm((current) => ({ ...current, phone: formatPhoneInput(event.target.value) }))
               }
             />
-            {form.phone && phoneDigits.length < 11 ? <small>Informe DDD e celular com 9 dígitos.</small> : null}
+            {form.phone && !isValidContactIdentity(form.phone) ? (
+              <small>Informe 10–15 dígitos ou uma identidade telegram:id.</small>
+            ) : null}
           </label>
           <label>
             Finalidade *

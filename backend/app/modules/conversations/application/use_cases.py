@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from app.modules.contacts.ports import ContactUpsertPort
 from app.modules.conversations.domain.entities import (
     Conversation,
     ConversationChannel,
@@ -45,12 +46,14 @@ class HandleIncomingWhatsappWebhookUseCase:
         credentials: ChannelCredentialsPort,
         channel: MessageChannelPort,
         events: EventBusPort,
+        contacts: ContactUpsertPort,
     ) -> None:
         self._tenants = tenants
         self._conversations = conversations
         self._credentials = credentials
         self._channel = channel
         self._events = events
+        self._contacts = contacts
 
     def execute(
         self, tenant_slug: str, webhook_secret: str | None, payload: Mapping[str, Any]
@@ -75,15 +78,22 @@ class HandleIncomingWhatsappWebhookUseCase:
         if incoming.is_group:
             return WebhookOutcome(status="ignored_group")
 
+        contact = self._contacts.upsert(
+            tenant.id,
+            phone=incoming.phone,
+            name=incoming.customer_name,
+            source="whatsapp",
+        )
         result = self._conversations.record_inbound(
             tenant.id,
             IncomingMessageData(
                 channel=ConversationChannel.WHATSAPP,
                 external_message_id=incoming.external_message_id,
                 external_contact_id=incoming.external_contact_id,
-                phone=incoming.phone,
+                phone=contact.phone,
                 text=incoming.text,
                 customer_name=incoming.customer_name,
+                contact_id=contact.id,
                 attachments=incoming.attachments,
             ),
         )
@@ -126,12 +136,14 @@ class HandleIncomingTelegramWebhookUseCase:
         credentials: ChannelCredentialsPort,
         channel: MessageChannelPort,
         events: EventBusPort,
+        contacts: ContactUpsertPort,
     ) -> None:
         self._tenants = tenants
         self._conversations = conversations
         self._credentials = credentials
         self._channel = channel
         self._events = events
+        self._contacts = contacts
 
     def execute(
         self, tenant_slug: str, webhook_secret: str | None, payload: Mapping[str, Any]
@@ -149,15 +161,22 @@ class HandleIncomingTelegramWebhookUseCase:
         incoming = self._channel.receive_message(payload)
         if incoming.is_group:
             return WebhookOutcome(status="ignored_group")
+        contact = self._contacts.upsert(
+            tenant.id,
+            phone=incoming.phone,
+            name=incoming.customer_name,
+            source="telegram",
+        )
         result = self._conversations.record_inbound(
             tenant.id,
             IncomingMessageData(
                 channel=ConversationChannel.TELEGRAM,
                 external_message_id=incoming.external_message_id,
                 external_contact_id=incoming.external_contact_id,
-                phone=incoming.phone,
+                phone=contact.phone,
                 text=incoming.text,
                 customer_name=incoming.customer_name,
+                contact_id=contact.id,
                 attachments=incoming.attachments,
             ),
         )

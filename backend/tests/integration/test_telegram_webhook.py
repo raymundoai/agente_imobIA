@@ -58,8 +58,47 @@ def test_telegram_webhook_is_secure_idempotent_and_visible_in_chat(client: TestC
         "/conversations", headers={"Authorization": f"Bearer {token}"}
     ).json()
     assert conversations[0]["channel"] == "telegram"
+    contacts = client.get("/contacts", headers={"Authorization": f"Bearer {token}"}).json()
+    assert len(contacts) == 1
+    assert contacts[0]["phone"] == "telegram:321"
+    assert conversations[0]["contact_id"] == contacts[0]["id"]
     detail = client.get(
         f"/conversations/{conversations[0]['id']}",
         headers={"Authorization": f"Bearer {token}"},
     ).json()
     assert detail["messages"][0]["text"] == "Quero comprar um apartamento"
+    mismatch = client.post(
+        "/leads/demands",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "lead_name": "Identidade errada",
+            "phone": "5511999999999",
+            "conversation_id": conversations[0]["id"],
+            "purpose": "buy",
+        },
+    )
+    assert mismatch.status_code == 409
+
+    demand = client.post(
+        "/leads/demands",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "lead_name": "Cliente Telegram",
+            "phone": "telegram:321",
+            "conversation_id": conversations[0]["id"],
+            "purpose": "buy",
+            "property_type": "apartamento",
+            "city": "São Paulo",
+            "neighborhoods": ["Centro"],
+            "price_max": 800000,
+        },
+    )
+    assert demand.status_code == 201, demand.text
+    assert demand.json()["conversation_id"] == conversations[0]["id"]
+    assert demand.json()["contact_id"] == contacts[0]["id"]
+    patch_mismatch = client.patch(
+        f"/leads/demands/{demand.json()['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"phone": "5511999999999"},
+    )
+    assert patch_mismatch.status_code == 409

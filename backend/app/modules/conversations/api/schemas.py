@@ -18,6 +18,7 @@ class WebhookResponse(BaseModel):
 class ConversationResponse(BaseModel):
     id: UUID
     tenant_id: UUID
+    contact_id: UUID | None
     channel: str
     phone: str
     customer_name: str | None
@@ -34,6 +35,7 @@ class ConversationResponse(BaseModel):
         return cls(
             id=conversation.id,
             tenant_id=conversation.tenant_id,
+            contact_id=conversation.contact_id,
             channel=conversation.channel.value,
             phone=conversation.phone,
             customer_name=conversation.customer_name,

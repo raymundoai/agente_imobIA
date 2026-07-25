@@ -12,6 +12,7 @@ from app.modules.ai.adapters.repositories import (
 from app.modules.ai.application.use_cases import GenerateAiReplyUseCase
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
 from app.modules.billing_usage.service import CreditLedgerService
+from app.modules.contacts.service import ContactUpsertService
 from app.modules.conversations.adapters.repositories import SqlAlchemyConversationRepository
 from app.modules.conversations.api.schemas import (
     ConversationDetailResponse,
@@ -52,6 +53,7 @@ def whatsapp_webhook(
         container.channel_credentials,
         container.message_channel,
         container.event_bus,
+        ContactUpsertService(session),
     ).execute(tenant_slug, webhook_secret_header or webhook_secret_query, payload)
     ai_response = None
     ai_error = None
@@ -83,6 +85,7 @@ def whatsapp_webhook(
                         container.crm_credentials,
                         container.crm,
                         container.event_bus,
+                        ContactUpsertService(session),
                     ),
                     properties=SqlAlchemyPropertyRepository(session),
                 ).execute(
@@ -116,6 +119,7 @@ def telegram_webhook(
         container.telegram_credentials,
         container.telegram_channel,
         container.event_bus,
+        ContactUpsertService(session),
     ).execute(tenant_slug, webhook_secret, payload)
     ai_response = None
     ai_error = None
@@ -147,6 +151,7 @@ def telegram_webhook(
                         container.crm_credentials,
                         container.crm,
                         container.event_bus,
+                        ContactUpsertService(session),
                     ),
                     properties=SqlAlchemyPropertyRepository(session),
                 ).execute(tenant.id, outcome.conversation_id, send_to_channel=True)

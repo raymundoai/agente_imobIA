@@ -36,9 +36,21 @@ class LeadDemandModel(Base):
             ["users.tenant_id", "users.id"],
             name="fk_lead_demands_tenant_responsible_user",
         ),
+        ForeignKeyConstraint(
+            ["tenant_id", "contact_id"],
+            ["contacts.tenant_id", "contacts.id"],
+            name="fk_lead_demands_tenant_contact",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "conversation_id"],
+            ["conversations.tenant_id", "conversations.id"],
+            name="fk_lead_demands_tenant_conversation",
+        ),
         UniqueConstraint("tenant_id", "id", name="uq_lead_demands_tenant_id_id"),
         Index("ix_lead_demands_tenant_status", "tenant_id", "status"),
         Index("ix_lead_demands_tenant_phone", "tenant_id", "phone"),
+        Index("ix_lead_demands_tenant_contact", "tenant_id", "contact_id"),
+        Index("ix_lead_demands_tenant_conversation", "tenant_id", "conversation_id"),
         Index(
             "ix_lead_demands_tenant_created",
             "tenant_id",
@@ -65,6 +77,8 @@ class LeadDemandModel(Base):
         ForeignKey("tenants.id", name="fk_lead_demands_tenant_id", ondelete="CASCADE"),
         nullable=False,
     )
+    contact_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    conversation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     lead_name: Mapped[str] = mapped_column(Text, nullable=False)
     phone: Mapped[str] = mapped_column(Text, nullable=False)
     purpose: Mapped[str | None] = mapped_column(Text)
@@ -95,6 +109,8 @@ class LeadDemandModel(Base):
         return cls(
             id=lead.id,
             tenant_id=lead.tenant_id,
+            contact_id=lead.contact_id,
+            conversation_id=lead.conversation_id,
             lead_name=lead.lead_name,
             phone=lead.phone,
             purpose=lead.purpose.value if lead.purpose else None,

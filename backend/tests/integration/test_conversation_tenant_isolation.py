@@ -83,6 +83,17 @@ def test_conversations_handoff_and_messages_are_tenant_isolated(
     auth_a = {"Authorization": f"Bearer {token_a}"}
     auth_b = {"Authorization": f"Bearer {token_b}"}
     assert client.get(f"/conversations/{conversation_a}", headers=auth_b).status_code == 404
+    cross_tenant_demand = client.post(
+        "/leads/demands",
+        headers=auth_b,
+        json={
+            "lead_name": "Tentativa cruzada",
+            "phone": "5511888888888",
+            "conversation_id": conversation_a,
+            "purpose": "buy",
+        },
+    )
+    assert cross_tenant_demand.status_code == 404
     assert (
         client.patch(
             f"/conversations/{conversation_a}/mode", headers=auth_b, json={"mode": "human"}

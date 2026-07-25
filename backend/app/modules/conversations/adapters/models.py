@@ -33,6 +33,11 @@ class ConversationModel(Base):
             ["users.tenant_id", "users.id"],
             name="fk_conversations_tenant_assigned_user",
         ),
+        ForeignKeyConstraint(
+            ["tenant_id", "contact_id"],
+            ["contacts.tenant_id", "contacts.id"],
+            name="fk_conversations_tenant_contact",
+        ),
         UniqueConstraint("tenant_id", "id", name="uq_conversations_tenant_id_id"),
         Index("ix_conversations_tenant_id", "tenant_id"),
         Index(
@@ -55,6 +60,7 @@ class ConversationModel(Base):
             "assigned_user_id",
             postgresql_where=sql_text("assigned_user_id IS NOT NULL"),
         ),
+        Index("ix_conversations_tenant_contact", "tenant_id", "contact_id"),
     )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
@@ -63,6 +69,7 @@ class ConversationModel(Base):
         ForeignKey("tenants.id", name="fk_conversations_tenant_id", ondelete="CASCADE"),
         nullable=False,
     )
+    contact_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     channel: Mapped[str] = mapped_column(
         Text, nullable=False, default="whatsapp", server_default="whatsapp"
     )

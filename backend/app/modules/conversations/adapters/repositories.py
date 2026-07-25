@@ -28,6 +28,7 @@ def _conversation_to_domain(model: ConversationModel) -> Conversation:
     return Conversation(
         id=model.id,
         tenant_id=model.tenant_id,
+        contact_id=model.contact_id,
         channel=ConversationChannel(model.channel),
         external_contact_id=model.external_contact_id,
         phone=model.phone,
@@ -102,6 +103,7 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
             conversation = ConversationModel(
                 id=uuid4(),
                 tenant_id=tenant_id,
+                contact_id=incoming.contact_id,
                 channel=incoming.channel.value,
                 external_contact_id=incoming.external_contact_id,
                 phone=incoming.phone,
@@ -116,6 +118,7 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
             self._session.flush()
         else:
             conversation.last_message_at = now
+            conversation.contact_id = incoming.contact_id or conversation.contact_id
             conversation.external_contact_id = incoming.external_contact_id
             if incoming.customer_name:
                 conversation.customer_name = incoming.customer_name

@@ -164,12 +164,25 @@ def test_ai_lead_qualification_syncs_hubspot_and_persists_lead(
     with engine.connect() as connection:
         row = connection.execute(
             text(
-                "SELECT lead_name, crm_contact_id, crm_deal_id FROM lead_demands "
+                "SELECT lead_name, crm_contact_id, crm_deal_id, contact_id, conversation_id "
+                "FROM lead_demands "
                 "WHERE tenant_id = :tenant_id"
             ),
             {"tenant_id": tenant_id},
+        ).one()
+        contact = connection.execute(
+            text(
+                "SELECT name, phone, interest, notes FROM contacts "
+                "WHERE tenant_id = :tenant_id AND id = :contact_id"
+            ),
+            {"tenant_id": tenant_id, "contact_id": row.contact_id},
         ).one()
     engine.dispose()
     assert row.crm_contact_id == "contact-1"
     assert row.crm_deal_id == "deal-1"
     assert row.lead_name == "Maria Silva"
+    assert str(row.conversation_id) == conversation_id
+    assert contact.name == "Maria Silva"
+    assert contact.phone == "5511888888888"
+    assert "apartamento" in contact.interest
+    assert contact.notes == "Lead pronto"

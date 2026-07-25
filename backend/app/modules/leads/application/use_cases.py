@@ -5,6 +5,8 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
+from app.modules.contacts.phone import normalize_contact_phone
+from app.modules.contacts.ports import ContactUpsertPort
 from app.modules.integrations.ports.crm import (
     CreateDealData,
     CreateNoteData,
@@ -31,12 +33,14 @@ class LeadQualificationService(LeadQualificationPort):
         crm_credentials: CrmCredentialsPort,
         crm: CrmPort,
         events: EventBusPort,
+        contacts: ContactUpsertPort,
     ) -> None:
         self._tenants = tenants
         self._leads = leads
         self._crm_credentials = crm_credentials
         self._crm = crm
         self._events = events
+        self._contacts = contacts
 
     def create_or_update_lead(
         self,
@@ -49,9 +53,11 @@ class LeadQualificationService(LeadQualificationPort):
         tenant = self._tenants.get_by_id(tenant_id)
         if tenant is None or tenant.status is not TenantStatus.ACTIVE:
             raise NotFoundError("Tenant not found")
-        phone = _as_str(data.get("phone"))
-        if not phone:
+        raw_phone = _as_str(data.get("phone"))
+        if not raw_phone:
             raise ValueError("Lead phone is required")
+        phone = normalize_contact_phone(raw_phone)
+        self._leads.lock_phone(tenant_id, phone)
         lead = self._leads.get_open_by_phone(tenant_id, phone)
         if lead is None:
             lead = LeadDemand(
@@ -60,6 +66,18 @@ class LeadQualificationService(LeadQualificationPort):
                 phone=phone,
             )
         self._apply_data(lead, data)
+        contact = self._contacts.upsert(
+            tenant_id,
+            phone=phone,
+            name=lead.lead_name,
+            email=_as_optional_str(data.get("email")),
+            interest=self._interest_summary(lead),
+            notes=lead.notes,
+            source="qualification",
+        )
+        lead.phone = contact.phone
+        lead.contact_id = contact.id
+        lead.conversation_id = conversation_id
         lead.status = LeadDemandStatus.QUALIFIED
 
         credentials = self._crm_credentials.get(tenant.slug)
@@ -175,6 +193,16 @@ class LeadQualificationService(LeadQualificationPort):
             "imobos_property_type": lead.property_type,
             "imobos_bedrooms": str(lead.bedrooms) if lead.bedrooms is not None else None,
         }
+
+    @staticmethod
+    def _interest_summary(lead: LeadDemand) -> str:
+        criteria = [
+            lead.purpose.value if lead.purpose else None,
+            lead.property_type,
+            lead.city,
+            ", ".join(lead.neighborhoods) if lead.neighborhoods else None,
+        ]
+        return " | ".join(item for item in criteria if item) or "Interesse imobiliário"
 
     @staticmethod
     def _summary(lead: LeadDemand, conversation_id: UUID | None) -> str:

@@ -8,6 +8,7 @@
     "dev:platform": "vite --config vite.platform.config.ts --host 0.0.0.0",
     "build": "tsc && vite build",
     "build:platform": "tsc && vite build --config vite.platform.config.ts",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {

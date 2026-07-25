@@ -23,6 +23,8 @@ class LeadDemand:
     lead_name: str
     phone: str
     id: UUID = field(default_factory=uuid4)
+    contact_id: UUID | None = None
+    conversation_id: UUID | None = None
     purpose: LeadPurpose | None = None
     property_type: str | None = None
     city: str | None = None
