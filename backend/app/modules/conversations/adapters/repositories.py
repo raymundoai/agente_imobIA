@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
 from app.modules.billing_usage.adapters.models import UsageRecordModel
@@ -42,6 +42,8 @@ def _conversation_to_domain(model: ConversationModel) -> Conversation:
         started_at=model.started_at,
         last_message_at=model.last_message_at,
         closed_at=model.closed_at,
+        is_group=model.is_group,
+        group_name=model.group_name,
     )
 
 
@@ -57,6 +59,8 @@ def _message_to_domain(model: MessageModel) -> Message:
         attachments=model.attachments,
         external_message_id=model.external_message_id,
         created_at=model.created_at,
+        sender_external_id=model.sender_external_id,
+        sender_name=model.sender_name,
     )
 
 
@@ -90,11 +94,19 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
                 created=False,
             )
 
+        identity_conditions = [
+            ConversationModel.external_contact_id == incoming.external_contact_id
+        ]
+        if not incoming.is_group:
+            identity_conditions.append(
+                (ConversationModel.phone == incoming.phone)
+                & (ConversationModel.is_group.is_(False))
+            )
         conversation = self._session.scalar(
             select(ConversationModel).where(
                 ConversationModel.tenant_id == tenant_id,
                 ConversationModel.channel == incoming.channel.value,
-                ConversationModel.phone == incoming.phone,
+                or_(*identity_conditions),
                 ConversationModel.status != ConversationStatus.CLOSED.value,
             )
         )
@@ -109,9 +121,19 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
                 external_contact_id=incoming.external_contact_id,
                 phone=incoming.phone,
                 customer_name=incoming.customer_name,
-                status=ConversationStatus.OPEN.value,
-                mode=ConversationMode.AI.value,
+                status=(
+                    ConversationStatus.WAITING_HUMAN.value
+                    if incoming.is_group
+                    else ConversationStatus.OPEN.value
+                ),
+                mode=(
+                    ConversationMode.HUMAN.value
+                    if incoming.is_group
+                    else ConversationMode.AI.value
+                ),
                 current_agent="leads",
+                is_group=incoming.is_group,
+                group_name=incoming.group_name,
                 started_at=now,
                 last_message_at=now,
             )
@@ -123,25 +145,53 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
             conversation.external_contact_id = incoming.external_contact_id
             if incoming.customer_name:
                 conversation.customer_name = incoming.customer_name
+            if incoming.group_name:
+                conversation.group_name = incoming.group_name
+            if (
+                incoming.direction is MessageDirection.OUTBOUND
+                and incoming.author_type is MessageAuthor.HUMAN
+                and not incoming.is_group
+            ):
+                conversation.mode = ConversationMode.HUMAN.value
+                conversation.status = ConversationStatus.WAITING_HUMAN.value
 
         message = Message(
             tenant_id=tenant_id,
             conversation_id=conversation.id,
-            direction=MessageDirection.INBOUND,
-            author_type=MessageAuthor.CUSTOMER,
+            direction=incoming.direction,
+            author_type=incoming.author_type,
             text=incoming.text,
             attachments=incoming.attachments,
             external_message_id=incoming.external_message_id,
             channel=incoming.channel,
             created_at=now,
+            sender_external_id=incoming.sender_external_id,
+            sender_name=incoming.sender_name,
         )
         self._session.add(self._message_model(message))
-        self._session.add(self._usage_model(tenant_id, message.id))
+        if incoming.record_usage:
+            self._session.add(self._usage_model(tenant_id, message.id))
         job_id = None
         if incoming.enqueue_auto_reply:
-            job_id = uuid4()
-            self._session.add(
-                MessageJobModel(
+            pending_job = self._session.scalar(
+                select(MessageJobModel).where(
+                    MessageJobModel.tenant_id == tenant_id,
+                    MessageJobModel.conversation_id == conversation.id,
+                    MessageJobModel.status == "received",
+                    MessageJobModel.stage == "generation",
+                )
+            )
+            available_at = now + timedelta(seconds=incoming.debounce_seconds)
+            if pending_job is not None:
+                pending_job.message_id = message.id
+                pending_job.available_at = available_at
+                pending_job.max_attempts = incoming.max_attempts
+                pending_job.send_to_channel = incoming.send_to_channel
+                pending_job.updated_at = now
+                job_id = pending_job.id
+            else:
+                job_id = uuid4()
+                self._session.add(MessageJobModel(
                     id=job_id,
                     tenant_id=tenant_id,
                     conversation_id=conversation.id,
@@ -151,10 +201,9 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
                     attempts=0,
                     max_attempts=incoming.max_attempts,
                     send_to_channel=incoming.send_to_channel,
-                    available_at=now,
+                    available_at=available_at,
                     result={},
-                )
-            )
+                ))
         self._session.commit()
         self._session.refresh(conversation)
         return InboundRecordResult(
@@ -195,7 +244,32 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
             .limit(limit)
             .offset(offset)
         ).all()
-        return [_conversation_to_domain(model) for model in models]
+        conversations = [_conversation_to_domain(model) for model in models]
+        if not conversations:
+            return conversations
+        latest_messages = self._session.scalars(
+            select(MessageModel)
+            .where(
+                MessageModel.tenant_id == tenant_id,
+                MessageModel.conversation_id.in_([item.id for item in conversations]),
+            )
+            .distinct(MessageModel.conversation_id)
+            .order_by(
+                MessageModel.conversation_id,
+                MessageModel.created_at.desc(),
+                MessageModel.id.desc(),
+            )
+        ).all()
+        latest_by_conversation = {
+            message.conversation_id: message for message in latest_messages
+        }
+        for conversation in conversations:
+            latest = latest_by_conversation.get(conversation.id)
+            if latest is not None:
+                conversation.last_message_text = latest.text
+                conversation.last_message_attachments = latest.attachments
+                conversation.last_message_direction = MessageDirection(latest.direction)
+        return conversations
 
     def get_by_id(self, tenant_id: UUID, conversation_id: UUID) -> Conversation | None:
         model = self._session.scalar(
@@ -267,6 +341,8 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
             attachments=message.attachments,
             external_message_id=message.external_message_id,
             created_at=message.created_at,
+            sender_external_id=message.sender_external_id,
+            sender_name=message.sender_name,
         )
 
     @staticmethod

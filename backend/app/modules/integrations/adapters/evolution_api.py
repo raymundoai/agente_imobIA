@@ -1,3 +1,4 @@
+import base64
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -64,12 +65,27 @@ class EvolutionManagerClient:
             )
         return self._safe_json(response)
 
+    def instance_info(self, instance_name: str) -> dict[str, Any]:
+        response = self._request(
+            "GET", "/instance/fetchInstances", params={"instanceName": instance_name}
+        )
+        if response.status_code >= 400:
+            raise ExternalServiceError(
+                f"Evolution API retornou status {response.status_code} ao consultar instância"
+            )
+        return self._safe_json(response)
+
+    def webhook_url(self, tenant_slug: str) -> str | None:
+        if not self._backend_public_url:
+            return None
+        return f"{self._backend_public_url}/webhooks/whatsapp/{tenant_slug}"
+
     def configure_webhook(
         self, instance_name: str, tenant_slug: str, webhook_secret: str
     ) -> dict[str, Any] | None:
-        if not self._backend_public_url:
+        webhook_url = self.webhook_url(tenant_slug)
+        if webhook_url is None:
             return None
-        webhook_url = f"{self._backend_public_url}/webhooks/whatsapp/{tenant_slug}"
         payload = {
             "webhook": {
                 "enabled": True,
@@ -88,6 +104,14 @@ class EvolutionManagerClient:
         if response.status_code >= 400:
             raise ExternalServiceError(
                 f"Evolution API retornou status {response.status_code} ao configurar webhook"
+            )
+        return self._safe_json(response)
+
+    def webhook_info(self, instance_name: str) -> dict[str, Any]:
+        response = self._request("GET", f"/webhook/find/{instance_name}")
+        if response.status_code >= 400:
+            raise ExternalServiceError(
+                f"Evolution API retornou status {response.status_code} ao consultar webhook"
             )
         return self._safe_json(response)
 
@@ -143,6 +167,7 @@ class EvolutionApiAdapter(MessageChannelPort):
         self._retry_attempts = retry_attempts
         self._retry_base_delay = retry_base_delay_seconds
         self._sleep = sleeper
+        self._group_names: dict[tuple[str, str], tuple[float, str]] = {}
 
     def receive_message(self, payload: Mapping[str, Any]) -> InboundChannelMessage:
         data = payload.get("data")
@@ -165,22 +190,137 @@ class EvolutionApiAdapter(MessageChannelPort):
         if not text and not attachments:
             raise ApplicationError("Evolution message has no supported content")
 
-        phone = "".join(
-            character for character in remote_jid.split("@", 1)[0] if character.isdigit()
-        )
+        is_group = remote_jid.endswith("@g.us")
+        canonical_jid = self._canonical_conversation_jid(key, remote_jid, is_group)
+        phone = self._jid_digits(canonical_jid)
         if not phone:
             raise ApplicationError("Evolution contact phone is invalid")
         customer_name = data.get("pushName")
+        sender_jid = self._sender_jid(key, is_group)
+        group_name = self._first_string(
+            data.get("groupName"),
+            data.get("subject"),
+            payload.get("groupName"),
+        )
         return InboundChannelMessage(
             external_message_id=external_id,
-            external_contact_id=remote_jid,
+            external_contact_id=canonical_jid,
             phone=phone,
             text=text,
-            customer_name=customer_name if isinstance(customer_name, str) else None,
+            customer_name=(
+                group_name
+                if is_group
+                else customer_name if isinstance(customer_name, str) else None
+            ),
             attachments=attachments,
             from_me=bool(key.get("fromMe", False)),
-            is_group=remote_jid.endswith("@g.us"),
+            is_group=is_group,
+            conversation_name=group_name,
+            sender_external_id=sender_jid,
+            sender_name=customer_name if isinstance(customer_name, str) else None,
         )
+
+    def resolve_group_name(
+        self,
+        credentials: ChannelCredentials,
+        group_jid: str,
+        *,
+        cache_ttl_seconds: float = 300,
+    ) -> str | None:
+        cache_key = (credentials.instance, group_jid)
+        now = time.monotonic()
+        cached = self._group_names.get(cache_key)
+        if cached is not None and now - cached[0] < cache_ttl_seconds:
+            return cached[1]
+        try:
+            response = self._client.get(
+                f"{credentials.base_url}/group/fetchAllGroups/{credentials.instance}",
+                headers={"apikey": credentials.api_key},
+                params={"getParticipants": "false"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.TransportError, httpx.HTTPStatusError, ValueError):
+            return None
+        groups = (
+            payload
+            if isinstance(payload, list)
+            else payload.get("data", payload.get("groups", []))
+            if isinstance(payload, Mapping)
+            else []
+        )
+        if not isinstance(groups, list):
+            return None
+        for group in groups:
+            if not isinstance(group, Mapping):
+                continue
+            jid = group.get("id")
+            subject = group.get("subject")
+            if isinstance(jid, str) and isinstance(subject, str) and subject.strip():
+                self._group_names[(credentials.instance, jid)] = (now, subject.strip())
+        resolved = self._group_names.get(cache_key)
+        return resolved[1] if resolved is not None else None
+
+    def profile_picture_url(
+        self, credentials: ChannelCredentials, phone: str
+    ) -> str | None:
+        try:
+            response = self._client.post(
+                f"{credentials.base_url}/chat/fetchProfilePictureUrl/{credentials.instance}",
+                headers={"apikey": credentials.api_key},
+                json={"number": phone},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.TransportError, httpx.HTTPStatusError, ValueError):
+            return None
+        url = payload.get("profilePictureUrl") if isinstance(payload, Mapping) else None
+        return url if isinstance(url, str) and url.startswith(("https://", "http://")) else None
+
+    @classmethod
+    def _canonical_conversation_jid(
+        cls, key: Mapping[str, Any], remote_jid: str, is_group: bool
+    ) -> str:
+        if is_group:
+            return remote_jid
+        candidates = (
+            remote_jid,
+            key.get("remoteJidAlt"),
+            key.get("senderPn"),
+        )
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate.endswith("@s.whatsapp.net"):
+                return candidate
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate:
+                return candidate
+        return remote_jid
+
+    @classmethod
+    def _sender_jid(cls, key: Mapping[str, Any], is_group: bool) -> str | None:
+        if not is_group:
+            return None
+        candidates = (
+            key.get("participant"),
+            key.get("participantAlt"),
+            key.get("participantPn"),
+            key.get("senderPn"),
+        )
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate.endswith("@s.whatsapp.net"):
+                return candidate
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate:
+                return candidate
+        return None
+
+    @staticmethod
+    def _jid_digits(jid: str) -> str:
+        return "".join(character for character in jid.split("@", 1)[0] if character.isdigit())
+
+    @staticmethod
+    def _first_string(*values: Any) -> str | None:
+        return next((value for value in values if isinstance(value, str) and value.strip()), None)
 
     def send_message(
         self,
@@ -211,6 +351,100 @@ class EvolutionApiAdapter(MessageChannelPort):
             raise ExternalServiceError("Evolution API response did not include a message id")
         return SentChannelMessage(external_message_id=external_id)
 
+    def send_presence(
+        self,
+        credentials: ChannelCredentials,
+        phone: str,
+        *,
+        delay_ms: int,
+    ) -> None:
+        try:
+            response = self._client.post(
+                f"{credentials.base_url}/chat/sendPresence/{credentials.instance}",
+                headers={"apikey": credentials.api_key},
+                json={
+                    "number": phone,
+                    "presence": "composing",
+                    "delay": max(0, delay_ms),
+                },
+            )
+            response.raise_for_status()
+        except (httpx.TransportError, httpx.HTTPStatusError):
+            # Presença é apenas cosmética e nunca deve impedir a entrega da mensagem.
+            return None
+
+    def send_media(
+        self,
+        credentials: ChannelCredentials,
+        phone: str,
+        *,
+        content: bytes,
+        media_type: str,
+        mimetype: str,
+        filename: str,
+        caption: str = "",
+    ) -> SentChannelMessage:
+        encoded = base64.b64encode(content).decode("ascii")
+        if media_type == "audio":
+            path = f"/message/sendWhatsAppAudio/{credentials.instance}"
+            body: dict[str, Any] = {
+                "number": phone,
+                "audio": encoded,
+                "encoding": True,
+            }
+        else:
+            path = f"/message/sendMedia/{credentials.instance}"
+            body = {
+                "number": phone,
+                "mediatype": media_type,
+                "mimetype": mimetype,
+                "media": encoded,
+                "fileName": filename,
+                "caption": caption,
+            }
+        try:
+            response = self._client.post(
+                f"{credentials.base_url}{path}",
+                headers={"apikey": credentials.api_key},
+                json=body,
+            )
+            response.raise_for_status()
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            raise ExternalServiceError("Evolution API media delivery is uncertain") from exc
+        payload = response.json()
+        external_id = payload.get("key", {}).get("id")
+        if not isinstance(external_id, str) or not external_id:
+            raise ExternalServiceError("Evolution API response did not include a media message id")
+        return SentChannelMessage(external_message_id=external_id)
+
+    def download_media(
+        self,
+        credentials: ChannelCredentials,
+        payload: Mapping[str, Any],
+    ) -> tuple[bytes, str] | None:
+        data = payload.get("data")
+        if not isinstance(data, Mapping):
+            return None
+        response = self._client.post(
+            f"{credentials.base_url}/chat/getBase64FromMediaMessage/{credentials.instance}",
+            headers={"apikey": credentials.api_key},
+            json={"message": dict(data), "convertToMp4": False},
+        )
+        if response.status_code >= 400:
+            return None
+        result = response.json()
+        encoded = result.get("base64")
+        if not isinstance(encoded, str) or not encoded:
+            return None
+        if "," in encoded and encoded.startswith("data:"):
+            encoded = encoded.split(",", 1)[1]
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError):
+            return None
+        mimetype = result.get("mimetype")
+        return content, str(mimetype) if mimetype else "application/octet-stream"
+
     @staticmethod
     def _extract_text(message: Mapping[str, Any]) -> str:
         conversation = message.get("conversation")
@@ -237,12 +471,28 @@ class EvolutionApiAdapter(MessageChannelPort):
     @staticmethod
     def _extract_attachments(message: Mapping[str, Any]) -> list[dict[str, Any]]:
         attachments: list[dict[str, Any]] = []
-        for media_type in ("imageMessage", "videoMessage", "audioMessage", "documentMessage"):
+        for media_type in (
+            "imageMessage",
+            "videoMessage",
+            "audioMessage",
+            "documentMessage",
+            "stickerMessage",
+        ):
             value = message.get(media_type)
             if not isinstance(value, Mapping):
                 continue
             attachment: dict[str, Any] = {"type": media_type.removesuffix("Message")}
-            for key in ("mimetype", "fileName", "url", "fileLength"):
+            for key in (
+                "mimetype",
+                "fileName",
+                "url",
+                "fileLength",
+                "seconds",
+                "ptt",
+                "isAnimated",
+                "mediaKey",
+                "directPath",
+            ):
                 if key in value:
                     attachment[key] = value[key]
             attachments.append(attachment)

@@ -145,15 +145,21 @@ class SqlAlchemyPropertyRepository(PropertyRepositoryPort):
         return [_to_domain(model) for model in models]
 
     def search_matching(
-        self, tenant_id: UUID, demand: LeadDemand, limit: int = 50
+        self,
+        tenant_id: UUID,
+        demand: LeadDemand,
+        limit: int = 50,
+        *,
+        internal_only: bool = False,
     ) -> list[Property]:
+        statement = select(PropertyModel).where(
+            PropertyModel.tenant_id == tenant_id,
+            PropertyModel.status == "active",
+        )
+        if internal_only:
+            statement = statement.where(PropertyModel.source == "manual")
         models = self._session.scalars(
-            select(PropertyModel)
-            .where(
-                PropertyModel.tenant_id == tenant_id,
-                PropertyModel.status == "active",
-            )
-            .order_by(PropertyModel.created_at.desc(), PropertyModel.id)
+            statement.order_by(PropertyModel.created_at.desc(), PropertyModel.id)
         ).all()
         matches = [calculate_property_match(_to_domain(model), demand) for model in models]
         matches = [match for match in matches if match.score >= 50]
@@ -172,6 +178,7 @@ class SqlAlchemyPropertyRepository(PropertyRepositoryPort):
         price_max: Decimal | None = None,
         bedrooms: int | None = None,
         parking_spaces: int | None = None,
+        internal_only: bool = False,
         limit: int = 5,
     ) -> list[Property]:
         demand = LeadDemand(
@@ -187,7 +194,12 @@ class SqlAlchemyPropertyRepository(PropertyRepositoryPort):
             bedrooms=bedrooms,
             parking_spaces=parking_spaces,
         )
-        return self.search_matching(tenant_id, demand, limit=limit)
+        return self.search_matching(
+            tenant_id,
+            demand,
+            limit=limit,
+            internal_only=internal_only,
+        )
 
     def _find_duplicate(self, tenant_id: UUID, property: Property) -> PropertyModel | None:
         if property.source_url:

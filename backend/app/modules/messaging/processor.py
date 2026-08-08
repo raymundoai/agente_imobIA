@@ -3,9 +3,12 @@ from __future__ import annotations
 import os
 import socket
 import threading
+import time
 from contextlib import contextmanager
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
+
+from sqlalchemy import select
 
 from app.container import Container
 from app.modules.ai.adapters.repositories import (
@@ -23,9 +26,11 @@ from app.modules.billing_usage.service import (
     estimated_chat_charge,
 )
 from app.modules.contacts.service import ContactUpsertService
+from app.modules.conversations.adapters.models import MessageModel
 from app.modules.conversations.adapters.repositories import SqlAlchemyConversationRepository
 from app.modules.conversations.application.use_cases import lead_agent_is_active
 from app.modules.conversations.domain.entities import ConversationMode
+from app.modules.conversations.media import media_path
 from app.modules.integrations.ports.credentials import ChannelCredentialsPort
 from app.modules.integrations.ports.message_channel import MessageChannelPort
 from app.modules.leads.adapters.repositories import SqlAlchemyLeadDemandRepository
@@ -111,7 +116,7 @@ class MessageJobProcessor:
             tenant = tenants.get_by_id(job["tenant_id"])
             if tenant is None:
                 raise RuntimeError("Tenant not found")
-            if not lead_agent_is_active(tenant.settings):
+            if not lead_agent_is_active(tenant.settings, str(job["channel"])):
                 return {"response_text": "", "skipped": "agent_inactive"}
             conversations = SqlAlchemyConversationRepository(session)
             conversation = conversations.get_by_id(job["tenant_id"], job["conversation_id"])
@@ -119,6 +124,7 @@ class MessageJobProcessor:
                 raise RuntimeError("Conversation not found")
             if conversation.mode is not ConversationMode.AI:
                 return {"response_text": "", "skipped": "human_handoff"}
+            self._enrich_media_context(session, job)
             ledger = CreditLedgerService(session)
             reservation = ledger.reserve(
                 job["tenant_id"],
@@ -161,6 +167,7 @@ class MessageJobProcessor:
                         ContactUpsertService(session),
                     ),
                     properties=SqlAlchemyPropertyRepository(session),
+                    lead_demands=SqlAlchemyLeadDemandRepository(session),
                 ).execute(
                     job["tenant_id"],
                     job["conversation_id"],
@@ -195,9 +202,90 @@ class MessageJobProcessor:
                 raise SafeAiFailure("Falha definitiva antes do dispatch da IA") from exc
             return {
                 "response_text": result.response_text,
+                "response_parts": result.response_parts,
                 "model": result.model,
                 "tokens_used": result.tokens_used,
             }
+
+    def _enrich_media_context(self, session: Any, job: dict[str, Any]) -> None:
+        provider = self.container.ai_provider
+        if provider is None:
+            return
+        messages = session.scalars(
+            select(MessageModel)
+            .where(
+                MessageModel.tenant_id == job["tenant_id"],
+                MessageModel.conversation_id == job["conversation_id"],
+                MessageModel.direction == "inbound",
+                MessageModel.author_type == "customer",
+            )
+            .order_by(MessageModel.created_at.desc(), MessageModel.id.desc())
+            .limit(25)
+        ).all()
+        changed = False
+        for message in messages:
+            enriched: list[dict[str, Any]] = []
+            message_changed = False
+            for original in message.attachments:
+                attachment = dict(original)
+                media_type = str(attachment.get("type") or "")
+                storage_key = str(attachment.get("storage_key") or "")
+                if (
+                    media_type not in {"audio", "image"}
+                    or not storage_key
+                    or attachment.get("ai_status") in {"completed", "failed"}
+                ):
+                    enriched.append(attachment)
+                    continue
+                try:
+                    content = media_path(
+                        self.container.settings.conversation_media_root, storage_key
+                    ).read_bytes()
+                    content_type = str(
+                        attachment.get("mimetype") or "application/octet-stream"
+                    )
+                    if media_type == "audio":
+                        text = provider.transcribe_audio(
+                            content,
+                            filename=str(attachment.get("fileName") or "audio.ogg"),
+                            content_type=content_type,
+                        )
+                        attachment["ai_text"] = (
+                            f"[Áudio transcrito]\n{text}"
+                            if text
+                            else "[Áudio recebido sem fala reconhecível]"
+                        )
+                        attachment["ai_model"] = (
+                            self.container.settings.openai_transcription_model
+                        )
+                    else:
+                        text = provider.describe_image(content, content_type=content_type)
+                        attachment["ai_text"] = (
+                            f"[Descrição da imagem]\n{text}"
+                            if text
+                            else "[Imagem recebida sem descrição disponível]"
+                        )
+                        attachment["ai_model"] = (
+                            self.container.settings.openai_vision_model
+                            or self.container.settings.openai_chat_model
+                        )
+                    attachment["ai_status"] = "completed"
+                except Exception:
+                    attachment["ai_status"] = "failed"
+                    attachment["ai_text"] = (
+                        "[Áudio recebido, mas a transcrição não ficou disponível. "
+                        "Peça ao cliente que escreva ou reenvie a mensagem.]"
+                        if media_type == "audio"
+                        else "[Imagem recebida, mas a descrição não ficou disponível. "
+                        "Peça ao cliente que explique o que deseja mostrar.]"
+                    )
+                enriched.append(attachment)
+                message_changed = True
+            if message_changed:
+                message.attachments = enriched
+                changed = True
+        if changed:
+            session.commit()
 
     def _deliver(self, job: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -216,22 +304,61 @@ class MessageJobProcessor:
                     raise RuntimeError("Canal de mensagens não configurado")
                 self._assert_lease(job)
                 with self._heartbeat(job):
-                    sent = channel.send_message(
-                        credentials,
-                        conversation.phone,
-                        job["response_text"],
-                        idempotency_key=(
-                            str(job["id"]) if job["channel"] == "whatsapp" else None
-                        ),
-                    )
+                    parts = list(job["result"].get("response_parts") or [])
+                    if not parts:
+                        parts = [job["response_text"]]
+                    delivered = dict(job["result"].get("delivered_parts") or {})
+                    external_ids: list[str] = []
+                    for index, part in enumerate(parts):
+                        if str(index) in delivered:
+                            external_ids.append(str(delivered[str(index)]))
+                            continue
+                        delay_ms = min(
+                            max(
+                                len(part)
+                                * self.container.settings.ai_typing_delay_ms_per_character,
+                                self.container.settings.ai_typing_delay_min_ms,
+                            ),
+                            self.container.settings.ai_typing_delay_max_ms,
+                        )
+                        channel.send_presence(
+                            credentials,
+                            conversation.phone,
+                            delay_ms=delay_ms,
+                        )
+                        if delay_ms:
+                            time.sleep(delay_ms / 1000)
+                        sent = channel.send_message(
+                            credentials,
+                            conversation.phone,
+                            part,
+                            idempotency_key=(
+                                f"{job['id']}:{index}"
+                                if job["channel"] == "whatsapp"
+                                else None
+                            ),
+                        )
+                        message_id = job["id"] if index == 0 else uuid5(job["id"], str(index))
+                        with self.container.database.session_factory() as part_session:
+                            MessageJobRepository(part_session).mark_delivery_part(
+                                job["id"],
+                                job["lease_token"],
+                                message_id,
+                                index,
+                                sent.external_message_id,
+                            )
+                        external_ids.append(sent.external_message_id)
+                        if index < len(parts) - 1:
+                            time.sleep(
+                                self.container.settings.ai_message_part_pause_ms / 1000
+                            )
             with self.container.database.session_factory() as session:
-                MessageJobRepository(session).delivery_completed(
-                    job["id"], job["lease_token"], sent.external_message_id
-                )
+                MessageJobRepository(session).finish_delivery(job["id"], job["lease_token"])
             return {
                 "id": str(job["id"]),
                 "status": "sent",
-                "external_message_id": sent.external_message_id,
+                "external_message_id": external_ids[-1] if external_ids else None,
+                "external_message_ids": external_ids,
             }
         except Exception as exc:
             # The remote call may have succeeded before the connection failed. Never
@@ -263,6 +390,7 @@ class MessageJobProcessor:
             "stage": job.stage,
             "send_to_channel": job.send_to_channel,
             "response_text": job.response_text or "",
+            "result": dict(job.result or {}),
             "lease_token": job.lease_token,
         }
 

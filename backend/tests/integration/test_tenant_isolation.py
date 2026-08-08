@@ -105,3 +105,154 @@ def test_api_never_exposes_users_or_tenant_across_tenants(client: TestClient) ->
     )
     assert tenant_as_b.status_code == 404
     assert tenant_a["id"] != tenant_b["id"]
+
+
+def test_agent_settings_update_preserves_integrations_and_can_disable_agent(
+    client: TestClient,
+) -> None:
+    tenant, token = _provision(client, "agent-settings", "admin@agent-settings.example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    initial = client.patch(
+        f"/tenants/{tenant['id']}/settings",
+        headers=headers,
+        json={
+            "settings": {
+                "profile": {"display_name": "Imobiliária Teste"},
+                "agents": {"leads": {"status": "active"}},
+            }
+        },
+    )
+    assert initial.status_code == 200, initial.text
+
+    updated = client.patch(
+        f"/tenants/{tenant['id']}/settings/agents",
+        headers=headers,
+        json={
+            "agents": {
+                "leads": {
+                    "name": "Agente de Leads",
+                    "status": "inactive",
+                    "goal": "Atender leads",
+                }
+            }
+        },
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["settings"]["agents"]["leads"]["status"] == "inactive"
+    assert updated.json()["settings"]["profile"]["display_name"] == "Imobiliária Teste"
+
+
+def test_profile_settings_update_preserves_agents_and_integrations(client: TestClient) -> None:
+    tenant, token = _provision(client, "profile-settings", "admin@profile-settings.example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    initial = client.patch(
+        f"/tenants/{tenant['id']}/settings",
+        headers=headers,
+        json={
+            "settings": {
+                "agents": {"leads": {"status": "active"}},
+                "integrations": {"evolution": {"status": "connected"}},
+            }
+        },
+    )
+    assert initial.status_code == 200, initial.text
+
+    updated = client.patch(
+        f"/tenants/{tenant['id']}/settings/profile",
+        headers=headers,
+        json={
+            "profile": {
+                "display_name": "Imobiliária Teste",
+                "business_hours": {
+                    "timezone": "America/Sao_Paulo",
+                    "days": {"monday": {"enabled": True, "start": "08:30", "end": "18:00"}},
+                },
+            }
+        },
+    )
+
+    assert updated.status_code == 200, updated.text
+    settings = updated.json()["settings"]
+    assert settings["profile"]["business_hours"]["days"]["monday"]["start"] == "08:30"
+    assert settings["agents"]["leads"]["status"] == "active"
+    assert settings["integrations"]["evolution"]["status"] == "connected"
+
+
+def test_profile_settings_reject_invalid_document_and_business_hours(
+    client: TestClient,
+) -> None:
+    tenant, token = _provision(
+        client, "profile-validation", "admin@profile-validation.example.com"
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    invalid_document = client.patch(
+        f"/tenants/{tenant['id']}/settings/profile",
+        headers=headers,
+        json={"profile": {"document_type": "cpf", "document_number": "11111111111"}},
+    )
+    invalid_hours = client.patch(
+        f"/tenants/{tenant['id']}/settings/profile",
+        headers=headers,
+        json={
+            "profile": {
+                "business_hours": {
+                    "timezone": "America/Sao_Paulo",
+                    "days": {
+                        "monday": {"enabled": True, "start": "18:00", "end": "09:00"}
+                    },
+                }
+            }
+        },
+    )
+
+    assert invalid_document.status_code == 422, invalid_document.text
+    assert invalid_hours.status_code == 422, invalid_hours.text
+
+
+def test_channel_settings_use_dedicated_endpoint_and_preserve_integrations(
+    client: TestClient,
+) -> None:
+    tenant, token = _provision(client, "channel-settings", "admin@channels.example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    initial = client.patch(
+        f"/tenants/{tenant['id']}/settings",
+        headers=headers,
+        json={"settings": {"integrations": {"evolution": {"status": "connected"}}}},
+    )
+    assert initial.status_code == 200, initial.text
+
+    updated = client.patch(
+        f"/tenants/{tenant['id']}/settings/channels",
+        headers=headers,
+        json={
+            "channels": {
+                "whatsapp": {"status": "connected", "agents": []},
+                "telegram": {"status": "pending", "agents": ["leads"]},
+            }
+        },
+    )
+
+    assert updated.status_code == 200, updated.text
+    settings = updated.json()["settings"]
+    assert settings["channels"]["whatsapp"]["agents"] == []
+    assert settings["integrations"]["evolution"]["status"] == "connected"
+
+
+def test_last_active_admin_cannot_be_demoted_or_deactivated(client: TestClient) -> None:
+    _, token = _provision(client, "admin-guard", "admin@guard.example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    users = client.get("/users", headers=headers).json()
+    admin_id = users[0]["id"]
+
+    demote = client.patch(
+        f"/users/{admin_id}", headers=headers, json={"role": "gestor"}
+    )
+    deactivate = client.patch(
+        f"/users/{admin_id}", headers=headers, json={"status": "inactive"}
+    )
+
+    assert demote.status_code == 409, demote.text
+    assert deactivate.status_code == 409, deactivate.text
+    assert "administrador ativo" in demote.json()["detail"]

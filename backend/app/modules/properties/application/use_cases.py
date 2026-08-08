@@ -55,9 +55,14 @@ class GetCaptureMissionUseCase:
         demand = self._leads.get_by_id(tenant_id, demand_id)
         if demand is None:
             raise NotFoundError("Lead demand not found")
-        existing = self._properties.search_matching(tenant_id, demand, limit=20)
+        existing = [
+            item
+            for item in self._properties.list(tenant_id, demand_id=demand_id, limit=50)
+            if item.source != "manual"
+        ][:20]
         matches = [calculate_property_match(item, demand) for item in existing]
         from app.modules.capture.portals import build_portal_searches
+        from app.modules.capture.sources import build_federated_sources
 
         return {
             "demand": _demand_payload(demand),
@@ -92,9 +97,12 @@ class GetCaptureMissionUseCase:
                     "url": portal.url,
                     "applied_filters": portal.applied_filters,
                     "pending_filters": portal.pending_filters,
+                    "discovery_mode": portal.discovery_mode,
+                    "status_message": portal.status_message,
                 }
                 for portal in build_portal_searches(demand)
             ],
+            "federated_sources": build_federated_sources(demand),
         }
 
 

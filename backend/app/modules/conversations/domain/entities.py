@@ -50,6 +50,11 @@ class Conversation:
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_message_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     closed_at: datetime | None = None
+    is_group: bool = False
+    group_name: str | None = None
+    last_message_text: str | None = None
+    last_message_attachments: list[dict[str, Any]] = field(default_factory=list)
+    last_message_direction: MessageDirection | None = None
 
 
 @dataclass(slots=True)
@@ -64,3 +69,5 @@ class Message:
     attachments: list[dict[str, Any]] = field(default_factory=list)
     external_message_id: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    sender_external_id: str | None = None
+    sender_name: str | None = None

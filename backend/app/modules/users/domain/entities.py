@@ -14,6 +14,7 @@ class UserRole(StrEnum):
 class UserStatus(StrEnum):
     ACTIVE = "active"
     INACTIVE = "inactive"
+    INVITED = "invited"
 
 
 @dataclass(slots=True)
@@ -25,4 +26,22 @@ class User:
     role: UserRole
     id: UUID = field(default_factory=uuid4)
     status: UserStatus = UserStatus.ACTIVE
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    session_version: int = 0
+    is_master: bool = False
+    must_change_password: bool = False
+    invitation_expires_at: datetime | None = None
+    invited_at: datetime | None = None
+    last_login_at: datetime | None = None
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(slots=True)
+class UserAuditLog:
+    tenant_id: UUID
+    action: str
+    changes: dict[str, object]
+    actor_user_id: UUID | None = None
+    target_user_id: UUID | None = None
+    id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

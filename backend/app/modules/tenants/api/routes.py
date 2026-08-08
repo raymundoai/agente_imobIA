@@ -9,6 +9,9 @@ from app.modules.tenants.adapters.repositories import SqlAlchemyTenantRepository
 from app.modules.tenants.api.schemas import (
     CreateTenantRequest,
     TenantResponse,
+    UpdateTenantAgentsRequest,
+    UpdateTenantChannelsRequest,
+    UpdateTenantProfileRequest,
     UpdateTenantSettingsRequest,
 )
 from app.modules.tenants.application.use_cases import (
@@ -66,4 +69,61 @@ def update_settings(
     tenant = UpdateTenantSettingsUseCase(SqlAlchemyTenantRepository(session)).execute(
         principal.tenant_id, payload.settings
     )
+    return TenantResponse.from_domain(tenant)
+
+
+@router.patch("/{tenant_id}/settings/agents", response_model=TenantResponse)
+def update_agents_settings(
+    tenant_id: UUID,
+    payload: UpdateTenantAgentsRequest,
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN)),
+    session: Session = Depends(get_db_session),
+) -> TenantResponse:
+    if tenant_id != principal.tenant_id:
+        raise NotFoundError("Tenant not found")
+    repository = SqlAlchemyTenantRepository(session)
+    current = repository.get_by_id(principal.tenant_id)
+    if current is None:
+        raise NotFoundError("Tenant not found")
+    settings = {**current.settings, "agents": payload.agents.model_dump()}
+    tenant = UpdateTenantSettingsUseCase(repository).execute(principal.tenant_id, settings)
+    return TenantResponse.from_domain(tenant)
+
+
+@router.patch("/{tenant_id}/settings/channels", response_model=TenantResponse)
+def update_channels_settings(
+    tenant_id: UUID,
+    payload: UpdateTenantChannelsRequest,
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN)),
+    session: Session = Depends(get_db_session),
+) -> TenantResponse:
+    if tenant_id != principal.tenant_id:
+        raise NotFoundError("Tenant not found")
+    repository = SqlAlchemyTenantRepository(session)
+    current = repository.get_by_id(principal.tenant_id)
+    if current is None:
+        raise NotFoundError("Tenant not found")
+    settings = {**current.settings, "channels": payload.channels.model_dump()}
+    tenant = UpdateTenantSettingsUseCase(repository).execute(principal.tenant_id, settings)
+    return TenantResponse.from_domain(tenant)
+
+
+@router.patch("/{tenant_id}/settings/profile", response_model=TenantResponse)
+def update_profile_settings(
+    tenant_id: UUID,
+    payload: UpdateTenantProfileRequest,
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN)),
+    session: Session = Depends(get_db_session),
+) -> TenantResponse:
+    if tenant_id != principal.tenant_id:
+        raise NotFoundError("Tenant not found")
+    repository = SqlAlchemyTenantRepository(session)
+    current = repository.get_by_id(principal.tenant_id)
+    if current is None:
+        raise NotFoundError("Tenant not found")
+    settings = {
+        **current.settings,
+        "profile": payload.profile.model_dump(exclude_unset=True),
+    }
+    tenant = UpdateTenantSettingsUseCase(repository).execute(principal.tenant_id, settings)
     return TenantResponse.from_domain(tenant)

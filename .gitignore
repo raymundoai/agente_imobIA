@@ -1,4 +1,6 @@
 .env
+.playwright-mcp/
+*:Zone.Identifier
 .venv/
 node_modules/
 __pycache__/

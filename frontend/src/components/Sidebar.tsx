@@ -6,6 +6,7 @@ import {
   Hexagon,
   Home,
   MessageSquare,
+  Search,
   Settings,
   UserRoundCog,
 } from "lucide-react";
@@ -18,6 +19,7 @@ export const navigationItems = [
   { key: "conversations", label: "Conversas", icon: MessageSquare },
   { key: "contacts", label: "Contatos", icon: UserRoundCog },
   { key: "properties", label: "Imóveis", icon: Home },
+  { key: "propertySearch", label: "Buscador de imóveis", icon: Search },
   { key: "settings", label: "Configurações", icon: Settings },
 ] as const;
 

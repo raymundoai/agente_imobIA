@@ -4,7 +4,7 @@ from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import AnyHttpUrl, BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/capture", tags=["capture"])
 class CapturePropertyRequest(BaseModel):
     demand_id: UUID | None = None
     source: str = Field(min_length=1)
-    source_url: str | None = None
+    source_url: AnyHttpUrl | None = None
     title: str = Field(min_length=1)
     city: str = Field(min_length=1)
     neighborhood: str | None = None
@@ -56,6 +56,7 @@ class CaptureMissionResponse(BaseModel):
     search_filters: dict[str, Any]
     existing_matches: list[dict[str, Any]]
     portal_searches: list[dict[str, Any]]
+    federated_sources: list[dict[str, Any]]
 
 
 class DiscoverMissionRequest(BaseModel):

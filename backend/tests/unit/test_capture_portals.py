@@ -32,6 +32,25 @@ def test_builds_search_links_for_main_portals_including_lello() -> None:
     assert "pinheiros-sao_paulo-bairros" in searches[-1].url
     assert "de-500000-ate-900000-r$" in searches[-1].url
     assert "#ordenar-por-maior-valor/de-60-metros/1-vagas/" in searches[-1].url
+    assert searches[2].status_message
+    assert searches[-1].discovery_mode == "assisted"
+
+
+def test_lello_price_route_never_uses_decimal_notation() -> None:
+    demand = LeadDemand(
+        tenant_id=uuid4(),
+        lead_name="Bruna",
+        phone="1",
+        purpose=LeadPurpose.RENT,
+        city="São Paulo",
+        price_min=Decimal("3001.00"),
+        price_max=Decimal("5000.00"),
+    )
+
+    lello = build_portal_searches(demand)[-1]
+
+    assert "de-3001-ate-5000-r$" in lello.url
+    assert ".00" not in lello.url
 
 
 def test_unknown_neighborhood_is_explicitly_left_pending() -> None:

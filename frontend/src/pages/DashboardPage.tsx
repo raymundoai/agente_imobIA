@@ -122,7 +122,7 @@ export function DashboardPage() {
       ) : (
         <Card className="health-card">
           <CheckCircle2 size={18} />
-          <span>Nenhum alerta foi retornado pelas APIs consultadas.</span>
+          <span>Nenhum alerta foi encontrado nas verificações realizadas.</span>
           <Badge variant="success">Sem alertas detectados</Badge>
         </Card>
       )}

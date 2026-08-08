@@ -34,6 +34,33 @@ class FakeAi(AiProviderPort):
         return AiProviderResponse(text="Resposta final", model="fake-model", tokens_used=15)
 
 
+class EmptyThenAnswerAi(AiProviderPort):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def get_embedding(self, text: str) -> list[float]:
+        return [1.0] * 1536
+
+    def chat_completion(self, *, system_prompt, messages, tools):
+        self.calls += 1
+        if self.calls == 1:
+            return AiProviderResponse(
+                text="",
+                model="fake-model",
+                tokens_used=20,
+                input_tokens=12,
+                output_tokens=8,
+            )
+        assert "retorne obrigatoriamente uma resposta final em texto" in system_prompt
+        return AiProviderResponse(
+            text="Resposta recuperada",
+            model="fake-model",
+            tokens_used=9,
+            input_tokens=6,
+            output_tokens=3,
+        )
+
+
 class FakeTenants:
     def __init__(self, tenant: Tenant) -> None:
         self.tenant = tenant
@@ -123,3 +150,34 @@ def test_ai_agent_executes_tool_and_records_audit_log() -> None:
     assert result.tools_called == [{"name": "search_knowledge_base", "arguments": {"query": "faq"}}]
     assert audit.logs[0].tenant_id == tenant.id
     assert audit.logs[0].chunks_used
+
+
+def test_ai_agent_retries_one_empty_provider_response_and_aggregates_usage() -> None:
+    tenant = Tenant(name="Tenant", slug="tenant-a")
+    conversation = Conversation(tenant_id=tenant.id, phone="5511999999999")
+    inbound = Message(
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        direction=MessageDirection.INBOUND,
+        author_type=MessageAuthor.CUSTOMER,
+        text="Qual o horário?",
+    )
+    ai = EmptyThenAnswerAi()
+    audit = FakeAudit()
+
+    result = GenerateAiReplyUseCase(
+        FakeTenants(tenant),
+        FakeConversations(conversation, inbound),
+        ai,
+        FakeKnowledge(),
+        audit,
+        EmptyCredentials(),
+        EmptyChannel(),
+        InMemoryEventBus(),
+    ).execute(tenant.id, conversation.id)
+
+    assert ai.calls == 2
+    assert result.response_text == "Resposta recuperada"
+    assert result.tokens_used == 29
+    assert audit.logs[0].input_tokens == 18
+    assert audit.logs[0].output_tokens == 11

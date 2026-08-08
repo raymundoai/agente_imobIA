@@ -34,3 +34,16 @@ def test_image_charge_applies_configured_margin() -> None:
 def test_unknown_model_must_not_be_billed_silently() -> None:
     with pytest.raises(ValueError, match="sem tarifa"):
         chat_charge("modelo-desconhecido", input_tokens=1, cached_input_tokens=0, output_tokens=1)
+
+
+def test_gpt_5_6_luna_uses_current_api_rates() -> None:
+    charge = chat_charge(
+        "gpt-5.6-luna",
+        input_tokens=1_000,
+        cached_input_tokens=200,
+        output_tokens=500,
+    )
+
+    assert charge.provider_cost_usd == Decimal("0.000764")
+    assert charge.retail_cost_usd == Decimal("0.0015280")
+    assert charge.credits == 2

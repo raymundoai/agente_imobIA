@@ -12,6 +12,17 @@ ALLOWED_IMAGE_TYPES = {
     "image/webp": (".webp", (b"RIFF",)),
 }
 
+ALLOWED_VIDEO_TYPES = {
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/webm": ".webm",
+}
+
+ALLOWED_MEDIA_TYPES = {
+    **{content_type: extension for content_type, (extension, _) in ALLOWED_IMAGE_TYPES.items()},
+    **ALLOWED_VIDEO_TYPES,
+}
+
 
 class PropertyImageProcessor(Protocol):
     def edit_image(self, content: bytes, *, filename: str, prompt: str) -> ImageEditResult: ...
@@ -58,7 +69,7 @@ class LocalPropertyImageStorage:
         variant: str,
         content_type: str,
     ) -> str:
-        extension = ALLOWED_IMAGE_TYPES[content_type][0]
+        extension = ALLOWED_MEDIA_TYPES[content_type]
         return f"{tenant_id}/{property_id}/{image_id}/{variant}{extension}"
 
     def _path(self, tenant_id: UUID, key: str) -> Path:
@@ -72,8 +83,8 @@ class LocalPropertyImageStorage:
         return target
 
     def put(self, tenant_id: UUID, key: str, content: bytes, content_type: str) -> None:
-        if content_type not in ALLOWED_IMAGE_TYPES:
-            raise ValueError("Unsupported image type")
+        if content_type not in ALLOWED_MEDIA_TYPES:
+            raise ValueError("Unsupported property media type")
         target = self._path(tenant_id, key)
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary = target.with_suffix(f"{target.suffix}.{uuid4().hex}.tmp")
@@ -170,12 +181,75 @@ def validate_property_image(upload: PropertyImageUpload, *, max_bytes: int) -> N
         raise ValueError("O conteúdo do arquivo não é uma imagem WebP válida.")
 
 
+def validate_property_media(
+    upload: PropertyImageUpload,
+    *,
+    max_image_bytes: int,
+    max_video_bytes: int,
+) -> None:
+    if upload.content_type in ALLOWED_IMAGE_TYPES:
+        validate_property_image(upload, max_bytes=max_image_bytes)
+        return
+    if upload.content_type not in ALLOWED_VIDEO_TYPES:
+        raise ValueError(
+            "Formato não permitido. Envie imagens JPEG, PNG ou WebP, ou vídeos MP4, MOV ou WebM."
+        )
+    if not upload.content:
+        raise ValueError("O vídeo enviado está vazio.")
+    if len(upload.content) > max_video_bytes:
+        raise ValueError(f"O vídeo excede o limite de {max_video_bytes} bytes.")
+    if upload.content_type == "video/webm":
+        valid = upload.content.startswith(b"\x1aE\xdf\xa3")
+    else:
+        valid = len(upload.content) >= 12 and upload.content[4:8] == b"ftyp"
+    if not valid:
+        raise ValueError("O conteúdo do arquivo não corresponde ao formato de vídeo informado.")
+
+
+OPTIMIZATION_INSTRUCTIONS = {
+    "lighting": "melhorar a iluminação de forma natural",
+    "straighten": "corrigir o enquadramento e a perspectiva",
+    "visual_organization": "organizar visualmente o ambiente sem remover elementos",
+    "walls": "suavizar marcas e pequenas imperfeições nas paredes",
+    "windows": "realçar a vista e as janelas sem substituir a paisagem",
+    "sharpen": "aumentar a nitidez com aparência natural",
+    "remove_furniture": "remover a mobília e deixar o ambiente vazio",
+    "add_furniture": "adicionar mobília virtual coerente com o ambiente",
+}
+
+
 def optimization_prompt(optimizations: list[str], note: str | None) -> str:
-    requested = ", ".join(item.strip() for item in optimizations if item.strip())
+    requested = ", ".join(
+        OPTIMIZATION_INSTRUCTIONS.get(item.strip(), item.strip())
+        for item in optimizations
+        if item.strip()
+    )
     instructions = requested or "melhoria geral de iluminação e nitidez"
-    complement = f" Observação do usuário: {note.strip()}." if note and note.strip() else ""
+    user_request = note.strip() if note and note.strip() else ""
+    complement = (
+        f" Pedido adicional do usuário (execute-o como parte obrigatória da edição): {user_request}."
+        if user_request
+        else ""
+    )
+    normalized_request = user_request.casefold()
+    mentions_furniture = any(
+        term in normalized_request for term in ("móvel", "móveis", "mobilia", "mobília")
+    )
+    requests_furniture_change = mentions_furniture and any(
+        action in normalized_request
+        for action in ("remov", "retir", "elimin", "adicion", "inclu", "coloc")
+    )
+    furniture_change_requested = bool(
+        {"remove_furniture", "add_furniture"}.intersection(optimizations)
+        or requests_furniture_change
+    )
+    element_constraint = (
+        "A alteração de mobília foi solicitada; altere somente a mobília, sem modificar elementos estruturais."
+        if furniture_change_requested
+        else "Não adicione, remova nem invente elementos e preserve a mobília existente."
+    )
     return (
         "Edite esta fotografia imobiliária preservando fielmente o imóvel, sua arquitetura, "
-        "móveis e proporções. Não adicione, remova nem invente elementos. Aplique somente: "
+        f"materiais fixos e proporções. {element_constraint} Aplique somente: "
         f"{instructions}.{complement}"
     )

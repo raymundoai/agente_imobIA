@@ -1,8 +1,9 @@
 import threading
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, BinaryIO
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
@@ -27,6 +28,7 @@ from app.modules.properties.adapters.models import (
     PropertyImageModel,
     PropertyImageOperationModel,
     PropertyMediaCleanupModel,
+    PropertyMediaStagingModel,
     PropertyModel,
 )
 from app.modules.properties.adapters.repositories import (
@@ -36,13 +38,23 @@ from app.modules.properties.adapters.repositories import (
 from app.modules.properties.application.use_cases import ListPropertiesUseCase
 from app.modules.properties.domain.entities import Property, PropertyPurpose
 from app.modules.properties.media import (
+    ALLOWED_IMAGE_TYPES,
     LocalPropertyImageStorage,
     PropertyImageUpload,
     optimization_prompt,
     validate_property_image,
+    validate_property_media,
 )
 
 router = APIRouter(prefix="/properties", tags=["properties"])
+
+
+def _stream_file(stream: BinaryIO, *, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+    try:
+        while chunk := stream.read(chunk_size):
+            yield chunk
+    finally:
+        stream.close()
 
 
 class PropertyResponse(BaseModel):
@@ -182,6 +194,8 @@ class LinkedPropertyImageResponse(BaseModel):
     is_primary: bool
     sort_order: int
     original_size: int
+    original_content_type: str
+    media_type: str
     derived_size: int | None
     original_url: str
     display_url: str
@@ -220,6 +234,23 @@ class ReprocessImageRequest(BaseModel):
     operation_id: UUID = Field(default_factory=uuid4)
     optimizations: list[str] = Field(default_factory=list, max_length=10)
     note: str | None = Field(default=None, max_length=1000)
+
+
+class StagedPropertyMediaResponse(BaseModel):
+    id: UUID
+    original_name: str
+    content_type: str
+    size: int
+
+
+class CommitStagedPropertyMediaRequest(BaseModel):
+    staging_ids: list[UUID] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def validate_unique_ids(self) -> "CommitStagedPropertyMediaRequest":
+        if len(self.staging_ids) != len(set(self.staging_ids)):
+            raise ValueError("staging ids must be unique")
+        return self
 
 
 
@@ -316,6 +347,8 @@ def _linked_image_response(image: PropertyImageModel) -> LinkedPropertyImageResp
         is_primary=image.is_primary,
         sort_order=image.sort_order,
         original_size=image.original_size,
+        original_content_type=image.original_content_type,
+        media_type=("image" if image.original_content_type.startswith("image/") else "video"),
         derived_size=image.derived_size,
         original_url=f"{base}?variant=original",
         display_url=f"{base}?variant=display",
@@ -445,9 +478,198 @@ def list_property_images(
             PropertyImageModel.tenant_id == principal.tenant_id,
             PropertyImageModel.property_id == property_id,
         )
-        .order_by(PropertyImageModel.is_primary.desc(), PropertyImageModel.sort_order)
+        .order_by(PropertyImageModel.sort_order, PropertyImageModel.created_at)
     ).all()
     return [_linked_image_response(image) for image in images]
+
+
+@router.post(
+    "/media/staging",
+    response_model=StagedPropertyMediaResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def stage_property_media(
+    file: Annotated[UploadFile, File(description="Mídia temporária do imóvel")],
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> StagedPropertyMediaResponse:
+    content_type = (file.content_type or "").lower()
+    max_bytes = (
+        container.settings.property_video_max_bytes
+        if content_type.startswith("video/")
+        else container.settings.property_image_max_bytes
+    )
+    upload = PropertyImageUpload(
+        original_name=Path(file.filename or "midia").name,
+        content_type=content_type,
+        content=await file.read(max_bytes + 1),
+    )
+    try:
+        validate_property_media(
+            upload,
+            max_image_bytes=container.settings.property_image_max_bytes,
+            max_video_bytes=container.settings.property_video_max_bytes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    staging_id = uuid4()
+    key = LocalPropertyImageStorage.build_key(
+        principal.tenant_id, staging_id, staging_id, "staging", upload.content_type
+    )
+    container.property_image_storage.put(
+        principal.tenant_id, key, upload.content, upload.content_type
+    )
+    staged = PropertyMediaStagingModel(
+        id=staging_id,
+        tenant_id=principal.tenant_id,
+        storage_key=key,
+        original_name=upload.original_name,
+        content_type=upload.content_type,
+        size=len(upload.content),
+    )
+    try:
+        session.add(staged)
+        session.commit()
+    except Exception:
+        session.rollback()
+        container.property_image_storage.delete(principal.tenant_id, key)
+        raise
+    return StagedPropertyMediaResponse(
+        id=staged.id,
+        original_name=staged.original_name,
+        content_type=staged.content_type,
+        size=staged.size,
+    )
+
+
+@router.delete("/media/staging/{staging_id}", status_code=status.HTTP_204_NO_CONTENT)
+def discard_staged_property_media(
+    staging_id: UUID,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> None:
+    staged = session.scalar(
+        select(PropertyMediaStagingModel).where(
+            PropertyMediaStagingModel.tenant_id == principal.tenant_id,
+            PropertyMediaStagingModel.id == staging_id,
+        )
+    )
+    if staged is None:
+        return
+    container.property_image_storage.delete(principal.tenant_id, staged.storage_key)
+    session.delete(staged)
+    session.commit()
+
+
+@router.post(
+    "/{property_id}/images/commit",
+    response_model=list[LinkedPropertyImageResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+def commit_staged_property_media(
+    property_id: UUID,
+    payload: CommitStagedPropertyMediaRequest,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> list[LinkedPropertyImageResponse]:
+    property_model = _property_model(session, principal.tenant_id, property_id)
+    session.execute(
+        select(PropertyModel.id)
+        .where(PropertyModel.id == property_model.id)
+        .with_for_update()
+    )
+    staged_by_id = {
+        item.id: item
+        for item in session.scalars(
+            select(PropertyMediaStagingModel)
+            .where(
+                PropertyMediaStagingModel.tenant_id == principal.tenant_id,
+                PropertyMediaStagingModel.id.in_(payload.staging_ids),
+            )
+            .with_for_update()
+        ).all()
+    }
+    if len(staged_by_id) != len(payload.staging_ids):
+        raise HTTPException(status_code=404, detail="Uma ou mais mídias temporárias expiraram.")
+    current_count = session.scalar(
+        select(func.count()).select_from(PropertyImageModel).where(
+            PropertyImageModel.tenant_id == principal.tenant_id,
+            PropertyImageModel.property_id == property_id,
+        )
+    ) or 0
+    max_sort_order = session.scalar(
+        select(func.max(PropertyImageModel.sort_order)).where(
+            PropertyImageModel.tenant_id == principal.tenant_id,
+            PropertyImageModel.property_id == property_id,
+        )
+    )
+    next_sort_order = (max_sort_order if max_sort_order is not None else -1) + 1
+    if current_count + len(payload.staging_ids) > container.settings.property_image_max_files:
+        raise HTTPException(status_code=422, detail="O imóvel excederia o limite de mídias.")
+    has_primary_image = bool(
+        session.scalar(
+            select(PropertyImageModel.id).where(
+                PropertyImageModel.tenant_id == principal.tenant_id,
+                PropertyImageModel.property_id == property_id,
+                PropertyImageModel.is_primary.is_(True),
+            )
+        )
+    )
+    created: list[PropertyImageModel] = []
+    new_keys: list[str] = []
+    try:
+        for index, staging_id in enumerate(payload.staging_ids):
+            staged = staged_by_id[staging_id]
+            image_id = uuid4()
+            new_key = LocalPropertyImageStorage.build_key(
+                principal.tenant_id,
+                property_id,
+                image_id,
+                "original",
+                staged.content_type,
+            )
+            with container.property_image_storage.open(
+                principal.tenant_id, staged.storage_key
+            ) as source:
+                content = source.read()
+            container.property_image_storage.put(
+                principal.tenant_id, new_key, content, staged.content_type
+            )
+            new_keys.append(new_key)
+            is_primary = (
+                not has_primary_image
+                and not any(item.is_primary for item in created)
+                and staged.content_type in ALLOWED_IMAGE_TYPES
+            )
+            image = PropertyImageModel(
+                id=image_id,
+                tenant_id=principal.tenant_id,
+                property_id=property_id,
+                original_storage_key=new_key,
+                original_name=staged.original_name,
+                original_content_type=staged.content_type,
+                original_size=staged.size,
+                status="uploaded",
+                is_primary=is_primary,
+                sort_order=next_sort_order + index,
+            )
+            session.add(image)
+            session.delete(staged)
+            created.append(image)
+        session.commit()
+    except Exception:
+        session.rollback()
+        for key in new_keys:
+            container.property_image_storage.delete(principal.tenant_id, key)
+        raise
+    for staging_id in payload.staging_ids:
+        container.property_image_storage.delete(
+            principal.tenant_id, staged_by_id[staging_id].storage_key
+        )
+    return [_linked_image_response(image) for image in created]
 
 
 @router.post(
@@ -457,7 +679,10 @@ def list_property_images(
 )
 async def add_property_images(
     property_id: UUID,
-    files: Annotated[list[UploadFile], File(description="Imagens JPEG, PNG ou WebP")],
+    files: Annotated[
+        list[UploadFile],
+        File(description="Imagens JPEG, PNG ou WebP, ou vídeos MP4, MOV ou WebM"),
+    ],
     principal: CurrentPrincipal = Depends(get_current_principal),
     container: Container = Depends(get_container),
     session: Session = Depends(get_db_session),
@@ -469,27 +694,51 @@ async def add_property_images(
         .with_for_update()
     )
     if not files or len(files) > container.settings.property_image_max_files:
-        raise HTTPException(status_code=422, detail="Quantidade de imagens inválida.")
+        raise HTTPException(status_code=422, detail="Quantidade de mídias inválida.")
     current_count = session.scalar(
         select(func.count()).select_from(PropertyImageModel).where(
             PropertyImageModel.tenant_id == principal.tenant_id,
             PropertyImageModel.property_id == property_id,
         )
     ) or 0
+    max_sort_order = session.scalar(
+        select(func.max(PropertyImageModel.sort_order)).where(
+            PropertyImageModel.tenant_id == principal.tenant_id,
+            PropertyImageModel.property_id == property_id,
+        )
+    )
+    next_sort_order = (max_sort_order if max_sort_order is not None else -1) + 1
     if current_count + len(files) > container.settings.property_image_max_files:
-        raise HTTPException(status_code=422, detail="O imóvel excederia o limite de imagens.")
+        raise HTTPException(status_code=422, detail="O imóvel excederia o limite de mídias.")
     created: list[PropertyImageModel] = []
     stored_keys: list[str] = []
+    has_primary_image = bool(
+        session.scalar(
+            select(PropertyImageModel.id).where(
+                PropertyImageModel.tenant_id == principal.tenant_id,
+                PropertyImageModel.property_id == property_id,
+                PropertyImageModel.is_primary.is_(True),
+            )
+        )
+    )
     try:
         for index, file in enumerate(files):
+            content_type = (file.content_type or "").lower()
+            max_bytes = (
+                container.settings.property_video_max_bytes
+                if content_type.startswith("video/")
+                else container.settings.property_image_max_bytes
+            )
             upload = PropertyImageUpload(
-                original_name=Path(file.filename or "imagem").name,
-                content_type=(file.content_type or "").lower(),
-                content=await file.read(container.settings.property_image_max_bytes + 1),
+                original_name=Path(file.filename or "midia").name,
+                content_type=content_type,
+                content=await file.read(max_bytes + 1),
             )
             try:
-                validate_property_image(
-                    upload, max_bytes=container.settings.property_image_max_bytes
+                validate_property_media(
+                    upload,
+                    max_image_bytes=container.settings.property_image_max_bytes,
+                    max_video_bytes=container.settings.property_video_max_bytes,
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -501,6 +750,11 @@ async def add_property_images(
                 principal.tenant_id, key, upload.content, upload.content_type
             )
             stored_keys.append(key)
+            is_primary = (
+                not has_primary_image
+                and not any(item.is_primary for item in created)
+                and upload.content_type in ALLOWED_IMAGE_TYPES
+            )
             image = PropertyImageModel(
                 id=image_id,
                 tenant_id=principal.tenant_id,
@@ -510,8 +764,8 @@ async def add_property_images(
                 original_content_type=upload.content_type,
                 original_size=len(upload.content),
                 status="uploaded",
-                is_primary=current_count == 0 and index == 0,
-                sort_order=current_count + index,
+                is_primary=is_primary,
+                sort_order=next_sort_order + index,
             )
             session.add(image)
             created.append(image)
@@ -551,7 +805,7 @@ def property_image_content(
             return RedirectResponse(image.legacy_url)
         raise HTTPException(
             status_code=404,
-            detail="Imagem legada preservada, mas sua origem não é confiável ou acessível.",
+            detail="Mídia legada preservada, mas sua origem não é confiável ou acessível.",
         )
     signed = container.property_image_storage.signed_url(principal.tenant_id, key)
     if signed:
@@ -559,8 +813,16 @@ def property_image_content(
     try:
         stream = container.property_image_storage.open(principal.tenant_id, key)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Arquivo da imagem não encontrado.") from exc
-    return StreamingResponse(stream, media_type=content_type)
+        raise HTTPException(status_code=404, detail="Arquivo da mídia não encontrado.") from exc
+    content_size = image.derived_size if derived else image.original_size
+    return StreamingResponse(
+        _stream_file(stream),
+        media_type=content_type,
+        headers={
+            "Content-Length": str(content_size),
+            "Cache-Control": "private, max-age=300",
+        },
+    )
 
 
 @router.put(
@@ -603,7 +865,7 @@ def reorder_property_images(
         image.sort_order = order_by_id[image.id]
         image.updated_at = datetime.now(UTC)
     session.commit()
-    ordered = sorted(images, key=lambda item: (not item.is_primary, item.sort_order, item.id))
+    ordered = sorted(images, key=lambda item: (item.sort_order, item.created_at, item.id))
     return [_linked_image_response(image) for image in ordered]
 
 
@@ -625,6 +887,11 @@ def update_property_image(
     )
     image = _image_model(session, principal.tenant_id, property_id, image_id)
     if payload.is_primary:
+        if image.original_content_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(
+                status_code=422,
+                detail="Somente imagens podem ser definidas como capa do imóvel.",
+            )
         session.execute(
             update(PropertyImageModel)
             .where(
@@ -681,14 +948,17 @@ def delete_property_image(
     if image is None:
         raise HTTPException(status_code=404, detail="Imagem não encontrada.")
     remaining = [item for item in images if item.id != image_id]
-    if image.is_primary and remaining:
+    remaining_images = [
+        item for item in remaining if item.original_content_type in ALLOWED_IMAGE_TYPES
+    ]
+    if image.is_primary and remaining_images:
         # A restrição parcial de principal único é imediata no PostgreSQL.
         # Desmarcar e flushar dentro da mesma transação libera a chave antes
         # de promover a substituta, sem expor o estado intermediário.
         image.is_primary = False
         session.flush()
-        remaining[0].is_primary = True
-        remaining[0].updated_at = datetime.now(UTC)
+        remaining_images[0].is_primary = True
+        remaining_images[0].updated_at = datetime.now(UTC)
     keys = [key for key in [image.original_storage_key] if key]
     if image.derived_storage_key:
         keys.append(image.derived_storage_key)
@@ -715,9 +985,14 @@ def reprocess_property_image(
     container: Container = Depends(get_container),
     session: Session = Depends(get_db_session),
 ) -> LinkedPropertyImageResponse:
+    image = _image_model(session, principal.tenant_id, property_id, image_id)
+    if image.original_content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail="A otimização com IA está disponível somente para imagens.",
+        )
     if container.ai_provider is None:
         raise HTTPException(status_code=503, detail="A integração OpenAI não está configurada.")
-    image = _image_model(session, principal.tenant_id, property_id, image_id)
     if image.original_storage_key is None:
         raise HTTPException(
             status_code=422,

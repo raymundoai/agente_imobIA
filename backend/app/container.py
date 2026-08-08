@@ -70,9 +70,13 @@ class Container:
             OpenAiAdapter(
                 api_key=settings.openai_api_key.get_secret_value(),
                 chat_model=settings.openai_chat_model,
+                chat_reasoning_effort=settings.openai_chat_reasoning_effort,
+                chat_max_output_tokens=settings.openai_chat_max_output_tokens,
                 embedding_model=settings.openai_embedding_model,
                 embedding_dimensions=settings.openai_embedding_dimensions,
                 image_model=settings.openai_image_model,
+                transcription_model=settings.openai_transcription_model,
+                vision_model=settings.openai_vision_model,
             )
             if settings.openai_api_key is not None
             else None

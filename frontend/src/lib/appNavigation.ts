@@ -3,6 +3,7 @@ export const appRoutes = {
   conversations: "/conversas",
   contacts: "/contatos",
   properties: "/imoveis",
+  propertySearch: "/buscador-de-imoveis",
   settings: "/configuracoes",
 } as const;
 

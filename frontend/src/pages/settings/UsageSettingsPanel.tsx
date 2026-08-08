@@ -14,33 +14,34 @@ export function UsageSettingsPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    void Promise.all([
+  async function loadUsage() {
+    setLoading(true);
+    const results = await Promise.allSettled([
       request<UsageSummaryItem[]>("/usage/summary", {}, token),
       request<CreditAccount>("/usage/credits", {}, token),
       request<CreditLedgerItem[]>("/usage/credits/ledger", {}, token),
-    ])
-      .then(([usage, credits, transactions]) => {
-        setItems(usage);
-        setAccount(credits);
-        setLedger(transactions);
-        setError(null);
-      })
-      .catch((reason) => {
-        setItems([]);
-        setAccount(null);
-        setLedger([]);
-        setError(reason instanceof Error ? reason.message : "Falha ao carregar uso e créditos.");
-      })
-      .finally(() => setLoading(false));
+    ]);
+    const failures: string[] = [];
+    const [usage, credits, transactions] = results;
+    if (usage.status === "fulfilled") setItems(usage.value);
+    else failures.push("resumo de uso");
+    if (credits.status === "fulfilled") setAccount(credits.value);
+    else failures.push("saldo de créditos");
+    if (transactions.status === "fulfilled") setLedger(transactions.value);
+    else failures.push("extrato");
+    setError(failures.length ? `Não foi possível atualizar: ${failures.join(", ")}. Os demais dados continuam disponíveis.` : null);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    void loadUsage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   const total = items.reduce((sum, item) => sum + Number(item.estimated_cost || 0), 0);
   const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
 
   if (loading) return <Card className="settings-panel-card"><div className="empty-state" aria-live="polite">Carregando uso e créditos...</div></Card>;
-  if (error) return <Card className="settings-panel-card"><div className="error-box" role="alert">{error}</div></Card>;
-
   return (
     <Card className="settings-panel-card">
       <div className="settings-panel-header">
@@ -48,10 +49,15 @@ export function UsageSettingsPanel() {
           <h2>Uso e custos</h2>
           <p>Acompanhe volume de atendimento, automações e custo estimado da IA.</p>
         </div>
-        <span className="settings-status">
-          {formatNumber(account?.available_credits ?? 0)} créditos disponíveis
-        </span>
+        <div className="settings-header-actions">
+          <span className="settings-status">
+            {account ? `${formatNumber(account.available_credits)} créditos disponíveis` : "Saldo indisponível"}
+          </span>
+          <button className="button-outline" disabled={loading} onClick={() => void loadUsage()} type="button">Atualizar</button>
+        </div>
       </div>
+
+      {error ? <div className="error-box" role="alert">{error}</div> : null}
 
       <div className="settings-grid">
         {account && account.enforcement_mode === "enforce" && account.available_credits <= 0 ? (

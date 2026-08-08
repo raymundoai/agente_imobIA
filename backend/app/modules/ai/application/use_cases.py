@@ -1,9 +1,10 @@
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from app.modules.ai.application.guardrails import detect_restricted_intent
 from app.modules.ai.domain.entities import (
@@ -31,6 +32,7 @@ from app.modules.conversations.ports.repositories import ConversationRepositoryP
 from app.modules.integrations.ports.credentials import ChannelCredentialsPort
 from app.modules.integrations.ports.message_channel import MessageChannelPort
 from app.modules.leads.ports.qualification import LeadQualificationPort
+from app.modules.leads.ports.repositories import LeadDemandRepositoryPort
 from app.modules.properties.ports.repositories import PropertyRepositoryPort
 from app.modules.tenants.domain.entities import TenantStatus
 from app.modules.tenants.ports.repositories import TenantRepositoryPort
@@ -90,6 +92,7 @@ class ProcessKnowledgeDocumentUseCase:
         *,
         chunk_size_words: int = 500,
         overlap_words: int = 50,
+        max_words: int = 50_000,
     ) -> None:
         self._documents = documents
         self._parser = parser
@@ -97,6 +100,7 @@ class ProcessKnowledgeDocumentUseCase:
         self._events = events
         self._chunk_size_words = chunk_size_words
         self._overlap_words = overlap_words
+        self._max_words = max_words
 
     def execute(self, tenant_id: UUID, document_id: UUID, content: bytes) -> int:
         document = self._documents.get(tenant_id, document_id)
@@ -137,6 +141,10 @@ class ProcessKnowledgeDocumentUseCase:
         words = text.split()
         if not words:
             return []
+        if len(words) > self._max_words:
+            raise ValueError(
+                "Documento muito extenso; reduza-o para no máximo 50 mil palavras"
+            )
         chunks: list[str] = []
         step = max(1, self._chunk_size_words - self._overlap_words)
         for start in range(0, len(words), step):
@@ -189,6 +197,7 @@ class GenerateAiReplyUseCase:
         events: EventBusPort,
         lead_qualification: LeadQualificationPort | None = None,
         properties: PropertyRepositoryPort | None = None,
+        lead_demands: LeadDemandRepositoryPort | None = None,
     ) -> None:
         self._tenants = tenants
         self._conversations = conversations
@@ -200,6 +209,7 @@ class GenerateAiReplyUseCase:
         self._events = events
         self._lead_qualification = lead_qualification
         self._properties = properties
+        self._lead_demands = lead_demands
 
     def execute(
         self,
@@ -225,7 +235,7 @@ class GenerateAiReplyUseCase:
         if conversation.mode is not ConversationMode.AI:
             raise ConfigurationError("AI is disabled while the conversation is in human mode")
         agent_key, agent_settings = self._resolve_agent(tenant.settings)
-        history = self._conversations.list_messages(tenant_id, conversation_id)[-12:]
+        history = self._conversations.list_messages(tenant_id, conversation_id)[-25:]
         user_text = input_text or next(
             (message.text for message in reversed(history) if message.direction.value == "inbound"),
             "",
@@ -258,7 +268,13 @@ class GenerateAiReplyUseCase:
         if dispatch_guard is not None:
             dispatch_guard()
         response = self._ai.chat_completion(
-            system_prompt=self._system_prompt(tenant.settings, agent_key, agent_settings, chunks),
+            system_prompt=self._system_prompt(
+                tenant.settings,
+                agent_key,
+                agent_settings,
+                chunks,
+                self._conversation_context(tenant_id, conversation),
+            ),
             messages=self._messages_from_history(history),
             tools=self._tool_definitions(agent_key),
         )
@@ -271,31 +287,51 @@ class GenerateAiReplyUseCase:
         input_tokens = response.input_tokens
         cached_input_tokens = response.cached_input_tokens
         output_tokens = response.output_tokens
-        for _ in range(4):
-            if not response.tool_calls:
-                break
-            tool_outputs: list[dict[str, str]] = []
-            for call in response.tool_calls:
-                if side_effect_guard is not None:
-                    side_effect_guard()
-                output = self._execute_tool(call.name, call.arguments, tenant_id, conversation_id)
-                tools_called.append({"name": call.name, "arguments": call.arguments})
-                if call.name == "request_human_handoff":
-                    handoff_reason = str(call.arguments.get("reason") or "ai_requested")
-                tool_outputs.append(
-                    {
-                        "role": "tool",
-                        "name": call.name,
-                        "content": json.dumps(output, ensure_ascii=False),
-                    }
+        tool_iterations = 0
+        empty_response_retried = False
+        while True:
+            if response.tool_calls:
+                if tool_iterations >= 4:
+                    break
+                tool_iterations += 1
+                tool_outputs: list[dict[str, str]] = []
+                for call in response.tool_calls:
+                    if side_effect_guard is not None:
+                        side_effect_guard()
+                    output = self._execute_tool(
+                        call.name, call.arguments, tenant_id, conversation_id
+                    )
+                    tools_called.append({"name": call.name, "arguments": call.arguments})
+                    if call.name == "request_human_handoff":
+                        handoff_reason = str(call.arguments.get("reason") or "ai_requested")
+                    tool_outputs.append(
+                        {
+                            "role": "tool",
+                            "name": call.name,
+                            "content": json.dumps(output, ensure_ascii=False),
+                        }
+                    )
+                tool_context.extend(tool_outputs)
+                retry_instruction = ""
+            elif not response.text.strip() and not empty_response_retried:
+                empty_response_retried = True
+                retry_instruction = (
+                    "\n\nNesta tentativa, retorne obrigatoriamente uma resposta final em texto "
+                    "para o cliente. Não encerre apenas com raciocínio interno."
                 )
-            tool_context.extend(tool_outputs)
+            else:
+                break
             if dispatch_guard is not None:
                 dispatch_guard()
             response = self._ai.chat_completion(
                 system_prompt=self._system_prompt(
-                    tenant.settings, agent_key, agent_settings, chunks
-                ),
+                    tenant.settings,
+                    agent_key,
+                    agent_settings,
+                    chunks,
+                    self._conversation_context(tenant_id, conversation),
+                )
+                + retry_instruction,
                 messages=[*self._messages_from_history(history), *tool_context],
                 tools=self._tool_definitions(agent_key),
             )
@@ -306,15 +342,9 @@ class GenerateAiReplyUseCase:
             cached_input_tokens += response.cached_input_tokens
             output_tokens += response.output_tokens
 
-        outbound = Message(
-            id=outbound_message_id or uuid4(),
-            tenant_id=tenant_id,
-            conversation_id=conversation_id,
-            direction=MessageDirection.OUTBOUND,
-            author_type=MessageAuthor.AI,
-            text=response.text,
-            channel=conversation.channel,
-        )
+        response_parts = split_ai_response(response.text)
+        response_text = "\n\n".join(response_parts)
+        base_message_id = outbound_message_id or uuid4()
         if side_effect_guard is not None:
             side_effect_guard()
         if handoff_reason is not None:
@@ -341,11 +371,26 @@ class GenerateAiReplyUseCase:
                 raise ConfigurationError(
                     "Canal de mensagens não configurado para esta empresa"
                 )
-            sent = self._channel.send_message(
-                channel_credentials, conversation.phone, response.text
+        for index, part in enumerate(response_parts):
+            message_id = base_message_id if index == 0 else uuid5(base_message_id, str(index))
+            outbound = Message(
+                id=message_id,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                direction=MessageDirection.OUTBOUND,
+                author_type=MessageAuthor.AI,
+                text=part,
+                channel=conversation.channel,
             )
-            outbound.external_message_id = sent.external_message_id
-        self._conversations.record_outbound(tenant_id, outbound, commit=False)
+            if send_to_channel:
+                sent = self._channel.send_message(
+                    channel_credentials,
+                    conversation.phone,
+                    part,
+                    idempotency_key=f"{base_message_id}:{index}",
+                )
+                outbound.external_message_id = sent.external_message_id
+            self._conversations.record_outbound(tenant_id, outbound, commit=False)
 
         audit = self._audit_logs.create(
             AiAuditLog(
@@ -355,7 +400,7 @@ class GenerateAiReplyUseCase:
                 detected_intent=response.detected_intent,
                 tools_called=tools_called,
                 chunks_used=chunks_used,
-                response_text=response.text,
+                response_text=response_text,
                 model=response.model,
                 tokens_used=total_tokens,
                 input_tokens=input_tokens,
@@ -376,13 +421,14 @@ class GenerateAiReplyUseCase:
             )
         )
         return AiAgentResult(
-            response_text=response.text,
+            response_text=response_text,
             detected_intent=response.detected_intent,
             tools_called=tools_called,
             chunks_used=chunks_used,
             model=response.model,
             tokens_used=total_tokens,
             handoff_reason=handoff_reason,
+            response_parts=response_parts,
         )
 
     def _execute_tool(
@@ -424,6 +470,7 @@ class GenerateAiReplyUseCase:
                 price_max=_decimal(arguments.get("price_max")),
                 bedrooms=_integer(arguments.get("bedrooms")),
                 parking_spaces=_integer(arguments.get("parking_spaces")),
+                internal_only=True,
                 limit=5,
             )
             return {
@@ -437,7 +484,10 @@ class GenerateAiReplyUseCase:
                         "price": str(item.price) if item.price is not None else None,
                         "bedrooms": item.bedrooms,
                         "parking_spaces": item.parking_spaces,
-                        "source_url": item.source_url,
+                        "description": item.description,
+                        "property_type": item.property_type,
+                        "purpose": item.purpose.value if item.purpose else None,
+                        "area": item.area,
                     }
                     for item in properties
                 ],
@@ -537,17 +587,65 @@ class GenerateAiReplyUseCase:
     def _messages_from_history(messages: list[Message]) -> list[dict[str, str]]:
         converted: list[dict[str, str]] = []
         for message in messages:
-            role = "assistant" if message.author_type is MessageAuthor.AI else "user"
-            converted.append({"role": role, "content": message.text})
+            if message.author_type is MessageAuthor.CUSTOMER:
+                role = "user"
+                prefix = ""
+            elif message.author_type is MessageAuthor.HUMAN:
+                role = "assistant"
+                prefix = "[Mensagem anterior da equipe humana] "
+            elif message.author_type is MessageAuthor.SYSTEM:
+                role = "assistant"
+                prefix = "[Contexto interno] "
+            else:
+                role = "assistant"
+                prefix = ""
+            media_context = "\n".join(
+                str(attachment.get("ai_text") or "").strip()
+                for attachment in message.attachments
+                if str(attachment.get("ai_text") or "").strip()
+            )
+            content = "\n".join(part for part in (message.text.strip(), media_context) if part)
+            if content:
+                converted.append({"role": role, "content": f"{prefix}{content}"})
         return converted
+
+    def _conversation_context(
+        self, tenant_id: UUID, conversation: Any
+    ) -> dict[str, Any]:
+        context: dict[str, Any] = {
+            "customer_name": conversation.customer_name,
+            "phone": conversation.phone,
+            "channel": conversation.channel.value,
+            "current_intent": conversation.current_intent,
+        }
+        if self._lead_demands is not None:
+            demand = self._lead_demands.get_open_by_phone(tenant_id, conversation.phone)
+            if demand is not None:
+                context["known_demand"] = {
+                    "lead_name": demand.lead_name,
+                    "purpose": demand.purpose.value if demand.purpose else None,
+                    "property_type": demand.property_type,
+                    "city": demand.city,
+                    "neighborhoods": demand.neighborhoods,
+                    "price_min": str(demand.price_min) if demand.price_min is not None else None,
+                    "price_max": str(demand.price_max) if demand.price_max is not None else None,
+                    "bedrooms": demand.bedrooms,
+                    "parking_spaces": demand.parking_spaces,
+                    "min_area": demand.min_area,
+                    "notes": demand.notes,
+                    "status": demand.status.value,
+                }
+        return context
 
     @staticmethod
     def _resolve_agent(settings: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         agents = settings.get("agents") if isinstance(settings, dict) else None
         if not isinstance(agents, dict):
-            return "leads", {}
+            return "leads", _effective_agent_settings({})
         configured = agents.get("leads")
-        return "leads", configured if isinstance(configured, dict) else {}
+        return "leads", _effective_agent_settings(
+            configured if isinstance(configured, dict) else {}
+        )
 
     @staticmethod
     def _system_prompt(
@@ -555,10 +653,29 @@ class GenerateAiReplyUseCase:
         agent_key: str,
         agent_settings: dict[str, Any],
         chunks: list[Any],
+        conversation_context: dict[str, Any] | None = None,
     ) -> str:
         profile = settings.get("profile", {}) if isinstance(settings, dict) else {}
-        structured_profile = json.dumps(profile, ensure_ascii=False, default=str)
-        structured_agent = json.dumps(agent_settings, ensure_ascii=False, default=str)
+        prompt_profile = {
+            key: profile[key]
+            for key in ("display_name", "legal_name", "regions")
+            if isinstance(profile, dict) and profile.get(key) not in (None, "")
+        }
+        legacy_hours = profile.get("business_hours") if isinstance(profile, dict) else None
+        prompt_profile["horario_de_atendimento"] = _business_hours_text(legacy_hours)
+        structured_profile = json.dumps(prompt_profile, ensure_ascii=False, default=str)
+        structured_agent = json.dumps(
+            {
+                "publico_atendido": "Leads e clientes",
+                "canais_ativos": _active_agent_channels(settings),
+                **agent_settings,
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+        structured_context = json.dumps(
+            conversation_context or {}, ensure_ascii=False, default=str
+        )
         rag = "\n\n".join(chunk.content for chunk in chunks)
         return (
             f"Você é o agente de qualificação de leads do ImobIA (agente: {agent_key}). "
@@ -566,12 +683,28 @@ class GenerateAiReplyUseCase:
             "nome, telefone, finalidade de compra ou locação, cidade, bairros, tipo de imóvel, "
             "faixa de valor, quartos, vagas e urgência. Não repita perguntas já respondidas. "
             "Quando houver critérios suficientes, salve a demanda com create_or_update_lead e "
-            "busque imóveis com search_properties. Nunca invente imóveis ou dados ausentes. "
+            "busque imóveis com search_properties. Essa ferramenta contém somente a carteira "
+            "própria autorizada para oferta. Nunca mencione portal, captação, anunciante ou URL "
+            "de origem. Nunca invente imóveis ou dados ausentes. "
             "Se não houver resultado, explique isso e informe que a equipe poderá iniciar uma "
             "busca externa. Não negocie valores, não dê orientação jurídica conclusiva e peça "
-            "handoff quando a autonomia for insuficiente ou o lead pedir uma pessoa.\n\n"
+            "handoff quando a autonomia for insuficiente ou o lead pedir uma pessoa. "
+            "Respeite integralmente handoff_rules e restrictions da configuração. Ao transferir, "
+            "use a transfer_message configurada, adaptando apenas o mínimo necessário ao contexto. "
+            "Faça uma pergunta por vez. Escreva como uma conversa de WhatsApp: frases curtas, "
+            "linguagem simples e sem tabelas ou títulos. Obedeça ao tom de voz e à quantidade "
+            "de emojis definidos na configuração do agente. 'none' significa nenhum emoji, "
+            "'low' significa no máximo um ocasionalmente e 'moderate' permite até dois quando "
+            "forem naturais. "
+            "Não repita o nome do cliente nem comece respostas seguidas com a mesma expressão. "
+            "Entenda confirmações curtas como 'sim', 'pode ser' e 'bora' pelo contexto anterior. "
+            "Evite jargão, ponto e vírgula e travessão. Não afirme que uma ação foi concluída sem "
+            "o retorno bem-sucedido da ferramenta correspondente. Use transcrições e descrições "
+            "de mídia apenas como contexto auxiliar, sem transformar inferências visuais em "
+            "fatos.\n\n"
             f"Perfil da empresa:\n{structured_profile}\n\n"
             f"Configuração deste agente:\n{structured_agent}\n\n"
+            f"Contexto cadastral já confirmado:\n{structured_context}\n\n"
             f"Base de conhecimento recuperada:\n{rag}"
         )
 
@@ -703,6 +836,118 @@ class GenerateAiReplyUseCase:
                 "strict": True,
             },
         ]
+
+
+def split_ai_response(text: str, *, max_parts: int = 5, target_chars: int = 500) -> list[str]:
+    cleaned = str(text or "").strip().replace("**", "")
+    cleaned = re.sub(r"\s*;\s*", ". ", cleaned)
+    cleaned = re.sub(r"\s+[—–]\s+", ", ", cleaned)
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    if not cleaned:
+        return ["Desculpe, não consegui preparar uma resposta agora. Pode repetir sua mensagem?"]
+
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", cleaned) if part.strip()]
+    parts: list[str] = []
+    for paragraph in paragraphs:
+        if len(paragraph) <= target_chars:
+            parts.append(paragraph)
+            continue
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+", paragraph)
+            if sentence.strip()
+        ]
+        current = ""
+        for sentence in sentences:
+            candidate = f"{current} {sentence}".strip()
+            if current and len(candidate) > target_chars:
+                parts.append(current)
+                current = sentence
+            else:
+                current = candidate
+        if current:
+            parts.append(current)
+
+    if len(parts) > max_parts:
+        parts = [*parts[: max_parts - 1], "\n\n".join(parts[max_parts - 1 :])]
+    return parts or [cleaned]
+
+
+def _business_hours_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip() or "Não informado"
+    if not isinstance(value, dict):
+        return "Não informado"
+    days = value.get("days")
+    if not isinstance(days, dict):
+        return "Não informado"
+    labels = {
+        "monday": "segunda-feira",
+        "tuesday": "terça-feira",
+        "wednesday": "quarta-feira",
+        "thursday": "quinta-feira",
+        "friday": "sexta-feira",
+        "saturday": "sábado",
+        "sunday": "domingo",
+    }
+    descriptions: list[str] = []
+    for key, label in labels.items():
+        schedule = days.get(key)
+        if not isinstance(schedule, dict) or not schedule.get("enabled"):
+            descriptions.append(f"{label}: fechado")
+            continue
+        start = str(schedule.get("start") or "horário não informado")
+        end = str(schedule.get("end") or "horário não informado")
+        description = f"{label}: das {start} às {end}"
+        if schedule.get("break_enabled"):
+            break_start = str(schedule.get("break_start") or "?")
+            break_end = str(schedule.get("break_end") or "?")
+            description += f", com intervalo das {break_start} às {break_end}"
+        descriptions.append(description)
+    timezone = str(value.get("timezone") or "America/Sao_Paulo")
+    return "; ".join(descriptions) + f". Fuso horário: {timezone}."
+
+
+def _effective_agent_settings(configured: dict[str, Any]) -> dict[str, Any]:
+    defaults: dict[str, Any] = {
+        "name": "Agente de Leads",
+        "status": "active",
+        "handoff_rules": (
+            "Lead pronto para visita, pedido de negociação, dúvida complexa ou baixa "
+            "confiança da IA."
+        ),
+        "restrictions": (
+            "Não prometer disponibilidade, não negociar valores finais e não assumir "
+            "compromisso em nome do corretor."
+        ),
+        "transfer_message": (
+            "Vou acionar um corretor da equipe para seguir com as melhores opções."
+        ),
+        "voice_tone": "friendly",
+        "emoji_usage": "low",
+    }
+    return {
+        key: configured.get(key, default)
+        for key, default in defaults.items()
+    }
+
+
+def _active_agent_channels(settings: dict[str, Any]) -> list[str]:
+    channels = settings.get("channels") if isinstance(settings, dict) else None
+    if not isinstance(channels, dict):
+        return []
+    active: list[str] = []
+    for name, configuration in channels.items():
+        if not isinstance(configuration, dict):
+            continue
+        status = str(configuration.get("status") or "pending").lower()
+        configured_agents = configuration.get("agents")
+        has_lead_agent = (
+            isinstance(configured_agents, list) and "leads" in configured_agents
+        ) or (configured_agents is None and configuration.get("agent", "leads") == "leads")
+        if status == "connected" and has_lead_agent:
+            active.append(str(name))
+    return active
 
 
 def _optional_text(value: Any) -> str | None:

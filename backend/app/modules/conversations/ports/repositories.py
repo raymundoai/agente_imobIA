@@ -10,6 +10,8 @@ from app.modules.conversations.domain.entities import (
     ConversationChannel,
     ConversationMode,
     Message,
+    MessageAuthor,
+    MessageDirection,
 )
 
 
@@ -26,6 +28,14 @@ class IncomingMessageData:
     enqueue_auto_reply: bool = False
     send_to_channel: bool = True
     max_attempts: int = 5
+    debounce_seconds: int = 0
+    direction: MessageDirection = MessageDirection.INBOUND
+    author_type: MessageAuthor = MessageAuthor.CUSTOMER
+    record_usage: bool = True
+    is_group: bool = False
+    group_name: str | None = None
+    sender_external_id: str | None = None
+    sender_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

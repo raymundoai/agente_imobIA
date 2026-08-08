@@ -7,6 +7,9 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.modules.auth.ports.security import TokenServicePort
+from app.modules.users.adapters.models import UserModel
+from app.modules.users.domain.entities import UserStatus
+from app.shared.database.session import Database
 
 logger = logging.getLogger("imobos.http")
 
@@ -38,9 +41,10 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
 
 
 class TenantContextMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app: object, token_service: TokenServicePort) -> None:
+    def __init__(self, app: object, token_service: TokenServicePort, database: Database) -> None:
         super().__init__(app)  # type: ignore[arg-type]
         self._tokens = token_service
+        self._database = database
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         request.state.auth_error = None
@@ -48,9 +52,19 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         if authorization.startswith("Bearer "):
             try:
                 claims = self._tokens.decode(authorization[7:], expected_type="access")
+                with self._database.session_factory() as session:
+                    user = session.get(UserModel, claims.user_id)
+                if (
+                    user is None
+                    or user.tenant_id != claims.tenant_id
+                    or user.status != UserStatus.ACTIVE.value
+                    or user.role != claims.role
+                    or user.session_version != claims.session_version
+                ):
+                    raise ValueError("stale user session")
                 request.state.tenant_id = claims.tenant_id
                 request.state.user_id = claims.user_id
-                request.state.user_role = claims.role
+                request.state.user_role = user.role
             except Exception:
                 request.state.auth_error = "invalid_token"
         return await call_next(request)

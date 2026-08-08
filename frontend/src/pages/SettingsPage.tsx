@@ -1,4 +1,4 @@
-import { Bot, Building2, Database, PlugZap, Settings, Users } from "lucide-react";
+import { Bot, Building2, Cable, PlugZap, Settings, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { request } from "../api/client";
 import type { Tenant } from "../api/types";
@@ -6,7 +6,7 @@ import { useAuth } from "../auth/AuthContext";
 import { getTokenClaims } from "../auth/tokenClaims";
 import { AgentsSettingsPanel } from "./settings/AgentsSettingsPanel";
 import { ChannelsSettingsPanel } from "./settings/ChannelsSettingsPanel";
-import { KnowledgeSettingsPanel } from "./settings/KnowledgeSettingsPanel";
+import { IntegrationsSettingsPanel } from "./settings/IntegrationsSettingsPanel";
 import { TenantSettingsPanel } from "./settings/TenantSettingsPanel";
 import { UsageSettingsPanel } from "./settings/UsageSettingsPanel";
 import { UsersSettingsPanel } from "./settings/UsersSettingsPanel";
@@ -14,8 +14,8 @@ import { UsersSettingsPanel } from "./settings/UsersSettingsPanel";
 const tabs = [
   { key: "company", label: "Empresa", icon: Building2 },
   { key: "channels", label: "Canais", icon: PlugZap },
-  { key: "agents", label: "Agentes", icon: Bot },
-  { key: "knowledge", label: "Conhecimento", icon: Database },
+  { key: "integrations", label: "Integrações", icon: Cable },
+  { key: "agents", label: "Configuração da IA", icon: Bot },
   { key: "users", label: "Equipe", icon: Users },
   { key: "usage", label: "Uso", icon: Settings },
 ] as const;
@@ -29,6 +29,7 @@ export function SettingsPage() {
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     if (!claims?.tenantId) {
@@ -46,15 +47,37 @@ export function SettingsPage() {
   }, [claims?.tenantId, token]);
 
   useEffect(() => {
-    const sync = () => setActiveTab(settingsTabFromUrl());
+    const sync = () => {
+      const nextTab = settingsTabFromUrl();
+      if (dirty && nextTab !== activeTab && !window.confirm("Descartar as alterações não salvas?")) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("aba", activeTab);
+        window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+        return;
+      }
+      setDirty(false);
+      setActiveTab(nextTab);
+    };
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
-  }, []);
+  }, [activeTab, dirty]);
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirty) return;
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [dirty]);
 
   function selectTab(tab: SettingsTab) {
+    if (tab === activeTab) return;
+    if (dirty && !window.confirm("Descartar as alterações não salvas?")) return;
     const url = new URL(window.location.href);
     url.searchParams.set("aba", tab);
     window.history.pushState({}, "", `${url.pathname}${url.search}`);
+    setDirty(false);
     setActiveTab(tab);
   }
 
@@ -84,15 +107,17 @@ export function SettingsPage() {
 
         <div className="settings-panel">
           {activeTab === "company" ? (
-            <TenantSettingsPanel onTenantChange={setTenant} tenant={tenant} />
+            <TenantSettingsPanel onDirtyChange={setDirty} onTenantChange={setTenant} tenant={tenant} />
           ) : null}
           {activeTab === "channels" ? (
-            <ChannelsSettingsPanel onTenantChange={setTenant} tenant={tenant} />
+            <ChannelsSettingsPanel onDirtyChange={setDirty} onTenantChange={setTenant} tenant={tenant} />
+          ) : null}
+          {activeTab === "integrations" ? (
+            <IntegrationsSettingsPanel onDirtyChange={setDirty} />
           ) : null}
           {activeTab === "agents" ? (
-            <AgentsSettingsPanel onTenantChange={setTenant} tenant={tenant} />
+            <AgentsSettingsPanel onDirtyChange={setDirty} onTenantChange={setTenant} tenant={tenant} />
           ) : null}
-          {activeTab === "knowledge" ? <KnowledgeSettingsPanel /> : null}
           {activeTab === "users" ? <UsersSettingsPanel /> : null}
           {activeTab === "usage" ? <UsageSettingsPanel /> : null}
         </div>
@@ -103,5 +128,6 @@ export function SettingsPage() {
 
 function settingsTabFromUrl(): SettingsTab {
   const requested = new URLSearchParams(window.location.search).get("aba");
+  if (requested === "knowledge") return "agents";
   return tabs.some((tab) => tab.key === requested) ? requested as SettingsTab : "company";
 }

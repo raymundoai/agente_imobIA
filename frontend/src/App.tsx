@@ -5,7 +5,9 @@ import { ConversationsPage } from "./pages/ConversationsPage";
 import { ContactsPage } from "./pages/ContactsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
+import { InviteAcceptancePage } from "./pages/InviteAcceptancePage";
 import { PropertiesPage } from "./pages/PropertiesPage";
+import { PropertySearchPage } from "./pages/PropertySearchPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { type AppPage, navigateToPage, pageFromPath, subscribeToPageChanges } from "./lib/appNavigation";
 
@@ -16,6 +18,10 @@ export function App() {
   useEffect(() => {
     return subscribeToPageChanges(setPage);
   }, []);
+
+  if (window.location.pathname === "/aceitar-convite") {
+    return <InviteAcceptancePage />;
+  }
 
   if (!isAuthenticated) {
     return <LoginPage />;
@@ -41,6 +47,8 @@ function renderPage(page: AppPage) {
       return <ContactsPage />;
     case "properties":
       return <PropertiesPage />;
+    case "propertySearch":
+      return <PropertySearchPage />;
     case "settings":
       return <SettingsPage />;
     default:

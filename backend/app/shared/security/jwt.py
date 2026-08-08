@@ -20,7 +20,14 @@ class JwtTokenService(TokenServicePort):
         self._access_ttl = timedelta(minutes=access_ttl_minutes)
         self._refresh_ttl = timedelta(days=refresh_ttl_days)
 
-    def _create(self, user_id: UUID, tenant_id: UUID, role: str, token_type: str) -> str:
+    def _create(
+        self,
+        user_id: UUID,
+        tenant_id: UUID,
+        role: str,
+        token_type: str,
+        session_version: int = 0,
+    ) -> str:
         now = datetime.now(UTC)
         ttl = self._access_ttl if token_type == "access" else self._refresh_ttl
         return jwt.encode(
@@ -29,6 +36,7 @@ class JwtTokenService(TokenServicePort):
                 "tenant_id": str(tenant_id),
                 "role": role,
                 "type": token_type,
+                "ver": session_version,
                 "iat": now,
                 "exp": now + ttl,
             },
@@ -36,11 +44,15 @@ class JwtTokenService(TokenServicePort):
             algorithm=self._algorithm,
         )
 
-    def create_access_token(self, user_id: UUID, tenant_id: UUID, role: str) -> str:
-        return self._create(user_id, tenant_id, role, "access")
+    def create_access_token(
+        self, user_id: UUID, tenant_id: UUID, role: str, session_version: int = 0
+    ) -> str:
+        return self._create(user_id, tenant_id, role, "access", session_version)
 
-    def create_refresh_token(self, user_id: UUID, tenant_id: UUID, role: str) -> str:
-        return self._create(user_id, tenant_id, role, "refresh")
+    def create_refresh_token(
+        self, user_id: UUID, tenant_id: UUID, role: str, session_version: int = 0
+    ) -> str:
+        return self._create(user_id, tenant_id, role, "refresh", session_version)
 
     def decode(self, token: str, expected_type: str) -> TokenClaims:
         try:
@@ -52,6 +64,7 @@ class JwtTokenService(TokenServicePort):
                 tenant_id=UUID(payload["tenant_id"]),
                 role=payload["role"],
                 token_type=payload["type"],
+                session_version=int(payload.get("ver", 0)),
             )
         except (jwt.PyJWTError, KeyError, TypeError, ValueError) as exc:
             raise AuthenticationError("Invalid or expired token") from exc

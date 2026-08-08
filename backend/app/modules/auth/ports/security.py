@@ -9,6 +9,7 @@ class TokenClaims:
     tenant_id: UUID
     role: str
     token_type: str
+    session_version: int = 0
 
 
 class PasswordHasherPort(ABC):
@@ -21,10 +22,14 @@ class PasswordHasherPort(ABC):
 
 class TokenServicePort(ABC):
     @abstractmethod
-    def create_access_token(self, user_id: UUID, tenant_id: UUID, role: str) -> str: ...
+    def create_access_token(
+        self, user_id: UUID, tenant_id: UUID, role: str, session_version: int = 0
+    ) -> str: ...
 
     @abstractmethod
-    def create_refresh_token(self, user_id: UUID, tenant_id: UUID, role: str) -> str: ...
+    def create_refresh_token(
+        self, user_id: UUID, tenant_id: UUID, role: str, session_version: int = 0
+    ) -> str: ...
 
     @abstractmethod
     def decode(self, token: str, expected_type: str) -> TokenClaims: ...

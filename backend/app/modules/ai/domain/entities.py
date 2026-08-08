@@ -78,3 +78,4 @@ class AiAgentResult:
     model: str
     tokens_used: int
     handoff_reason: str | None = None
+    response_parts: list[str] = field(default_factory=list)

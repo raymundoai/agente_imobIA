@@ -15,6 +15,8 @@ class _Responses:
     def create(self, **kwargs):
         assert kwargs["model"] == "gpt-5.5"
         assert kwargs["parallel_tool_calls"] is False
+        assert kwargs["reasoning"] == {"effort": "none"}
+        assert kwargs["max_output_tokens"] == 4_000
         return SimpleNamespace(
             model="gpt-5.5",
             output_text="",

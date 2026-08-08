@@ -13,6 +13,9 @@ from app.modules.auth.api.dependencies import (
     get_current_principal,
     require_roles,
 )
+from app.modules.contacts.models import ContactModel
+from app.modules.contacts.phone import normalize_contact_phone
+from app.modules.conversations.application.use_cases import whatsapp_phones_match
 from app.modules.integrations.adapters.evolution_api import EvolutionManagerClient
 from app.modules.tenants.adapters.repositories import SqlAlchemyTenantRepository
 from app.modules.users.domain.entities import UserRole
@@ -82,6 +85,8 @@ class EvolutionWhatsappResponse(BaseModel):
     connected_phone: str | None = None
     connected_name: str | None = None
     webhook_configured: bool = False
+    webhook_url: str | None = None
+    webhook_error: str | None = None
 
 
 class IntegrationSetupSummary(BaseModel):
@@ -116,7 +121,7 @@ class TelegramConnectionResponse(BaseModel):
     last_error: str | None = None
 
 
-@router.get("/setup", response_model=list[IntegrationSetupSummary])
+@mvp_router.get("/setup", response_model=list[IntegrationSetupSummary])
 def list_integration_setups(
     principal: CurrentPrincipal = Depends(get_current_principal),
     session: Session = Depends(get_db_session),
@@ -132,10 +137,12 @@ def list_integration_setups(
     ]
 
 
-@router.post("/setup", response_model=IntegrationSetupSummary)
+@mvp_router.post("/setup", response_model=IntegrationSetupSummary)
 def request_integration_setup(
     payload: IntegrationSetupRequest,
-    principal: CurrentPrincipal = Depends(get_current_principal),
+    principal: CurrentPrincipal = Depends(
+        require_roles(UserRole.ADMIN, UserRole.GESTOR)
+    ),
     session: Session = Depends(get_db_session),
 ) -> IntegrationSetupSummary:
     provider = payload.provider.lower()
@@ -181,7 +188,9 @@ def get_tecimob_status(
 
 @mvp_router.post("/telegram/connect", response_model=TelegramConnectionResponse)
 def connect_telegram(
-    principal: CurrentPrincipal = Depends(get_current_principal),
+    principal: CurrentPrincipal = Depends(
+        require_roles(UserRole.ADMIN, UserRole.GESTOR)
+    ),
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
 ) -> TelegramConnectionResponse:
@@ -272,35 +281,7 @@ def connect_whatsapp(
     manager = _build_manager(container, settings)
     integration = _get_whatsapp_integration(tenant.settings)
     instance = str(integration.get("instance") or _instance_name(tenant.slug))
-    dedicated = (
-        settings.integration_secret_key.get_secret_value()
-        if settings.integration_secret_key
-        else None
-    )
-    cipher = integration_cipher(settings.jwt_secret.get_secret_value(), dedicated)
-    legacy_cipher = SecretCipher(settings.jwt_secret.get_secret_value())
-    encrypted_secret = integration.get("webhook_secret_encrypted")
-    webhook_secret = (
-        (
-            cipher.decrypt(encrypted_secret)
-            or legacy_cipher.decrypt(encrypted_secret)
-            or next(
-                (
-                    value
-                    for key in settings.integration_secret_previous_keys
-                    if (
-                        value := SecretCipher(key.get_secret_value()).decrypt(
-                            encrypted_secret
-                        )
-                    )
-                    is not None
-                ),
-                None,
-            )
-        )
-        if isinstance(encrypted_secret, str)
-        else None
-    ) or secrets.token_urlsafe(32)
+    cipher, webhook_secret = _get_or_create_webhook_secret(integration, settings)
 
     manager.ensure_instance(instance, tenant.slug, webhook_secret)
     connection_payload = manager.connect_instance(instance)
@@ -309,7 +290,14 @@ def connect_whatsapp(
         connection_payload, ("pairingCode", "pairing_code", "code")
     )
     state_payload = _try_connection_state(manager, instance)
+    instance_payload = _try_instance_info(manager, instance)
     status = _normalize_connection_status(state_payload) or ("pending" if qrcode else "created")
+    connected_phone = _connected_phone(state_payload, instance_payload)
+    connected_name = _extract_first_string(
+        instance_payload or state_payload, ("name", "profileName", "profile.name")
+    )
+    _promote_owner_contact(session, tenant.id, connected_phone)
+    webhook_url = manager.webhook_url(tenant.slug)
 
     updated_settings = _upsert_whatsapp_integration(
         tenant.settings,
@@ -318,13 +306,11 @@ def connect_whatsapp(
             "provider": "evolution",
             "instance": instance,
             "status": status,
-            "webhook_configured": bool(settings.backend_public_url),
+            "webhook_configured": webhook_url is not None,
             "webhook_secret_encrypted": cipher.encrypt(webhook_secret),
             "secret_key_version": settings.integration_secret_key_version,
-            "connected_phone": _extract_first_string(
-                state_payload, ("number", "phone", "connectedPhone", "owner")
-            ),
-            "connected_name": _extract_first_string(state_payload, ("name", "profileName")),
+            "connected_phone": connected_phone,
+            "connected_name": connected_name,
         },
     )
     tenant_repo.update_settings(tenant.id, updated_settings)
@@ -334,11 +320,15 @@ def connect_whatsapp(
         status=status,
         qrcode=qrcode,
         pairing_code=pairing_code,
-        connected_phone=_extract_first_string(
-            state_payload, ("number", "phone", "connectedPhone", "owner")
+        connected_phone=connected_phone,
+        connected_name=connected_name,
+        webhook_configured=webhook_url is not None,
+        webhook_url=webhook_url,
+        webhook_error=(
+            None
+            if webhook_url
+            else "BACKEND_PUBLIC_URL não configurada; a Evolution não consegue registrar o webhook."
         ),
-        connected_name=_extract_first_string(state_payload, ("name", "profileName")),
-        webhook_configured=bool(settings.backend_public_url),
     )
 
 
@@ -361,11 +351,28 @@ def get_whatsapp_status(
 
     manager = _build_manager(container, settings)
     state_payload = manager.connection_state(instance)
+    instance_payload = _try_instance_info(manager, instance)
     status = _normalize_connection_status(state_payload) or "pending"
-    connected_phone = _extract_first_string(
-        state_payload, ("number", "phone", "connectedPhone", "owner")
-    )
+    connected_phone = _connected_phone(state_payload, instance_payload)
     connected_name = _extract_first_string(state_payload, ("name", "profileName"))
+    webhook_url = manager.webhook_url(tenant.slug)
+    webhook_error = None
+    try:
+        webhook_payload = manager.webhook_info(instance)
+        webhook_data = webhook_payload.get("webhook", webhook_payload)
+        webhook_configured = bool(
+            isinstance(webhook_data, dict)
+            and webhook_data.get("enabled")
+            and webhook_data.get("url")
+        )
+    except ExternalServiceError as exc:
+        webhook_configured = bool(integration.get("webhook_configured"))
+        webhook_error = f"Não foi possível consultar o webhook: {exc}"
+    if not webhook_url:
+        webhook_error = (
+            "BACKEND_PUBLIC_URL não configurada; a Evolution não consegue registrar o webhook."
+        )
+    _promote_owner_contact(session, tenant.id, connected_phone)
 
     updated_settings = _upsert_whatsapp_integration(
         tenant.settings,
@@ -374,6 +381,7 @@ def get_whatsapp_status(
             "status": status,
             "connected_phone": connected_phone,
             "connected_name": connected_name,
+            "webhook_configured": webhook_configured,
         },
     )
     tenant_repo.update_settings(tenant.id, updated_settings)
@@ -383,7 +391,9 @@ def get_whatsapp_status(
         status=status,
         connected_phone=connected_phone,
         connected_name=connected_name,
-        webhook_configured=bool(integration.get("webhook_configured")),
+        webhook_configured=webhook_configured,
+        webhook_url=webhook_url,
+        webhook_error=webhook_error,
     )
 
 
@@ -497,6 +507,85 @@ def _try_connection_state(manager: EvolutionManagerClient, instance: str) -> dic
         return {}
 
 
+def _try_instance_info(manager: EvolutionManagerClient, instance: str) -> dict[str, Any]:
+    try:
+        return manager.instance_info(instance)
+    except ExternalServiceError:
+        return {}
+
+
+def _connected_phone(*payloads: dict[str, Any]) -> str | None:
+    for payload in payloads:
+        value = _extract_first_string(
+            payload,
+            (
+                "number",
+                "phone",
+                "connectedPhone",
+                "owner",
+                "ownerJid",
+                "instance.owner",
+                "instance.ownerJid",
+            ),
+        )
+        digits = "".join(character for character in str(value or "") if character.isdigit())
+        if digits:
+            return digits
+    return None
+
+
+def _get_or_create_webhook_secret(
+    integration: dict[str, Any], settings: Settings
+) -> tuple[SecretCipher, str]:
+    dedicated = (
+        settings.integration_secret_key.get_secret_value()
+        if settings.integration_secret_key
+        else None
+    )
+    cipher = integration_cipher(settings.jwt_secret.get_secret_value(), dedicated)
+    legacy_cipher = SecretCipher(settings.jwt_secret.get_secret_value())
+    encrypted_secret = integration.get("webhook_secret_encrypted")
+    decrypted = (
+        (
+            cipher.decrypt(encrypted_secret)
+            or legacy_cipher.decrypt(encrypted_secret)
+            or next(
+                (
+                    value
+                    for key in settings.integration_secret_previous_keys
+                    if (
+                        value := SecretCipher(key.get_secret_value()).decrypt(encrypted_secret)
+                    )
+                    is not None
+                ),
+                None,
+            )
+        )
+        if isinstance(encrypted_secret, str)
+        else None
+    )
+    return cipher, decrypted or secrets.token_urlsafe(32)
+
+
+def _promote_owner_contact(session: Session, tenant_id: Any, phone: str | None) -> None:
+    if not phone:
+        return
+    normalized = normalize_contact_phone(phone)
+    contacts = (
+        session.query(ContactModel)
+        .filter(ContactModel.tenant_id == tenant_id)
+        .all()
+    )
+    for contact in contacts:
+        if not whatsapp_phones_match(contact.phone, normalized):
+            continue
+        if contact.kind not in {"owner", "tenant"}:
+            contact.kind = "owner"
+            contact.tags = list(dict.fromkeys([*contact.tags, "whatsapp-owner"]))
+            session.flush()
+        return
+
+
 def _normalize_connection_status(payload: dict[str, Any]) -> str | None:
     state = _extract_first_string(payload, ("state", "status", "connection", "instance.state"))
     if state is None:
@@ -540,6 +629,12 @@ def _extract_first_string(payload: dict[str, Any], keys: tuple[str, ...]) -> str
             found = _extract_first_string(nested, keys)
             if found:
                 return found
+        if isinstance(nested, list):
+            for item in nested:
+                if isinstance(item, dict):
+                    found = _extract_first_string(item, keys)
+                    if found:
+                        return found
     return None
 
 

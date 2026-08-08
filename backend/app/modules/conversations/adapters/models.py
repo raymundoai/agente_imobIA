@@ -90,6 +90,8 @@ class ConversationModel(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_group: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+    group_name: Mapped[str | None] = mapped_column(Text)
 
 
 class MessageModel(Base):
@@ -134,6 +136,8 @@ class MessageModel(Base):
         JSONB, nullable=False, default=list, server_default=sql_text("'[]'::jsonb")
     )
     external_message_id: Mapped[str | None] = mapped_column(Text)
+    sender_external_id: Mapped[str | None] = mapped_column(Text)
+    sender_name: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

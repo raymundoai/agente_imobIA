@@ -35,6 +35,7 @@ class CreateTenantUseCase:
             email=admin_email.strip().lower(),
             hashed_password=self._passwords.hash(admin_password),
             role=UserRole.ADMIN,
+            is_master=True,
         )
         self._provisioning.create_with_admin(tenant, admin)
         self._events.publish(

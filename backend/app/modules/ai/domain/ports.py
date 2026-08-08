@@ -55,6 +55,14 @@ class AiProviderPort(ABC):
     ) -> AiProviderResponse:
         raise NotImplementedError
 
+    def transcribe_audio(
+        self, content: bytes, *, filename: str, content_type: str
+    ) -> str:
+        raise NotImplementedError("This AI provider does not support audio transcription")
+
+    def describe_image(self, content: bytes, *, content_type: str) -> str:
+        raise NotImplementedError("This AI provider does not support image understanding")
+
 
 class KnowledgeDocumentRepositoryPort(ABC):
     @abstractmethod

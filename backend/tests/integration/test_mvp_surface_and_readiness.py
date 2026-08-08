@@ -8,7 +8,7 @@ from app.main import create_app
 pytestmark = pytest.mark.integration
 
 
-def test_readiness_checks_database_and_v2_routes_are_not_registered(
+def test_readiness_checks_database_and_expected_routes_are_registered(
     client: TestClient,
 ) -> None:
     ready = client.get("/ready")
@@ -19,11 +19,54 @@ def test_readiness_checks_database_and_v2_routes_are_not_registered(
     paths = client.app.openapi()["paths"]
     assert "/integrations/evolution/whatsapp/connect" in paths
     assert "/integrations/telegram/connect" in paths
-    assert not any(path.startswith("/capture") for path in paths)
+    assert "/capture/missions/{demand_id}" in paths
+    assert "/capture/missions/{demand_id}/discover" in paths
+    assert "/capture/properties" in paths
     assert not any(path.startswith("/maintenance") for path in paths)
     assert not any("/tecimob" in path for path in paths)
-    assert "/integrations/setup" not in paths
+    assert "/integrations/setup" in paths
     assert "/properties/media-cleanup/process" not in paths
+
+
+def test_integration_setup_catalog_is_available_in_the_mvp(client: TestClient) -> None:
+    password = "valid-test-password-123"
+    created = client.post(
+        "/tenants",
+        json={
+            "name": "Tenant de integrações",
+            "slug": "tenant-integrations",
+            "admin_name": "Admin",
+            "admin_email": "integrations@example.com",
+            "admin_password": password,
+        },
+    )
+    assert created.status_code == 201, created.text
+    login = client.post(
+        "/auth/login",
+        json={
+            "tenant_slug": "tenant-integrations",
+            "email": "integrations@example.com",
+            "password": password,
+        },
+    )
+    auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    catalog = client.get("/integrations/setup", headers=auth)
+    assert catalog.status_code == 200, catalog.text
+    assert {item["provider"] for item in catalog.json()} == {
+        "jetimob",
+        "kenlo",
+        "orulo",
+        "tecimob",
+    }
+
+    requested = client.post(
+        "/integrations/setup",
+        headers=auth,
+        json={"provider": "kenlo", "notes": "Prioridade para imóveis e leads."},
+    )
+    assert requested.status_code == 200, requested.text
+    assert requested.json()["status"] == "awaiting_credentials"
 
 
 def test_readiness_is_generic_for_revision_mismatch_and_database_failure(

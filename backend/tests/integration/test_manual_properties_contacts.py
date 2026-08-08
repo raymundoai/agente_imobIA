@@ -89,6 +89,40 @@ def test_manual_property_and_contacts_are_persisted_and_tenant_isolated(
     assert len(client.get("/contacts", headers=auth_a).json()) == 1
     assert client.get("/contacts", headers=auth_b).json() == []
 
+    lead_contact = client.post(
+        "/contacts",
+        headers=auth_a,
+        json={
+            "name": "Carlos Comprador",
+            "phone": "5511988887777",
+            "kind": "lead",
+            "tags": ["prioridade"],
+        },
+    ).json()
+    demand = client.post(
+        "/leads/demands",
+        headers=auth_a,
+        json={
+            "lead_name": "Carlos Comprador",
+            "phone": "5511988887777",
+            "status": "qualified",
+        },
+    )
+    assert demand.status_code == 201, demand.text
+    filtered = client.get(
+        f"/leads/demands?contact_id={lead_contact['id']}", headers=auth_a
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert [item["id"] for item in filtered.json()] == [demand.json()["id"]]
+    assert (
+        client.get(f"/leads/demands?contact_id={contact.json()['id']}", headers=auth_a).json()
+        == []
+    )
+    assert (
+        client.get(f"/leads/demands?contact_id={lead_contact['id']}", headers=auth_b).json()
+        == []
+    )
+
 
 def test_property_requires_prices_for_each_selected_offer(client: TestClient) -> None:
     token = _provision(client, "tenant-a", "a@example.com")
@@ -196,6 +230,119 @@ def test_property_image_treatment_requires_configured_openai(client: TestClient)
 
     assert response.status_code == 503
     assert "OpenAI" in response.json()["detail"]
+
+
+def test_property_video_upload_is_served_but_cannot_be_cover_or_optimized(
+    client: TestClient,
+) -> None:
+    token = _provision(client, "tenant-video", "video@example.com")
+    auth = {"Authorization": f"Bearer {token}"}
+    created = client.post(
+        "/properties",
+        headers=auth,
+        json={
+            "title": "Casa com vídeo",
+            "purpose": "buy",
+            "property_type": "casa",
+            "category": "residential",
+            "sale_price": 700000,
+            "address": {
+                "street": "Rua Vídeo",
+                "neighborhood": "Centro",
+                "city": "São Paulo",
+                "state": "SP",
+            },
+        },
+    )
+    property_id = created.json()["id"]
+    mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isom"
+    uploaded = client.post(
+        f"/properties/{property_id}/images",
+        headers=auth,
+        files=[("files", ("tour.mp4", mp4, "video/mp4"))],
+    )
+
+    assert uploaded.status_code == 201, uploaded.text
+    video = uploaded.json()[0]
+    assert video["media_type"] == "video"
+    assert video["original_content_type"] == "video/mp4"
+    assert video["is_primary"] is False
+    served = client.get(video["display_url"], headers=auth)
+    assert served.status_code == 200
+    assert served.headers["content-type"].startswith("video/mp4")
+    assert served.headers["content-length"] == str(len(mp4))
+    assert served.content == mp4
+
+    cover = client.patch(
+        f"/properties/{property_id}/images/{video['id']}",
+        headers=auth,
+        json={"is_primary": True},
+    )
+    assert cover.status_code == 422
+    optimized = client.post(
+        f"/properties/{property_id}/images/{video['id']}/reprocess",
+        headers=auth,
+        json={"optimizations": []},
+    )
+    assert optimized.status_code == 422
+    assert "somente para imagens" in optimized.json()["detail"]
+
+
+def test_property_media_can_be_staged_committed_and_discarded(client: TestClient) -> None:
+    token = _provision(client, "tenant-staging", "staging@example.com")
+    auth = {"Authorization": f"Bearer {token}"}
+    created = client.post(
+        "/properties",
+        headers=auth,
+        json={
+            "title": "Casa com mídia preparada",
+            "purpose": "buy",
+            "property_type": "casa",
+            "category": "residential",
+            "address": {
+                "street": "Rua Staging",
+                "neighborhood": "Centro",
+                "city": "São Paulo",
+                "state": "SP",
+            },
+        },
+    )
+    property_id = created.json()["id"]
+    mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isom"
+
+    staged = client.post(
+        "/properties/media/staging",
+        headers=auth,
+        files={"file": ("tour.mp4", mp4, "video/mp4")},
+    )
+    assert staged.status_code == 201, staged.text
+    committed = client.post(
+        f"/properties/{property_id}/images/commit",
+        headers=auth,
+        json={"staging_ids": [staged.json()["id"]]},
+    )
+    assert committed.status_code == 201, committed.text
+    media = committed.json()[0]
+    assert client.get(media["display_url"], headers=auth).content == mp4
+    assert (
+        client.delete(
+            f"/properties/media/staging/{staged.json()['id']}", headers=auth
+        ).status_code
+        == 204
+    )
+
+    discardable = client.post(
+        "/properties/media/staging",
+        headers=auth,
+        files={"file": ("descartar.mp4", mp4, "video/mp4")},
+    )
+    assert discardable.status_code == 201
+    assert (
+        client.delete(
+            f"/properties/media/staging/{discardable.json()['id']}", headers=auth
+        ).status_code
+        == 204
+    )
 
 
 def test_property_image_order_and_primary_delete_are_atomic_and_isolated(

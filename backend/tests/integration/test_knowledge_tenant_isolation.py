@@ -80,3 +80,41 @@ def test_knowledge_search_is_filtered_by_tenant(client: TestClient) -> None:
     contents_b = [item["content"] for item in search_b.json()["results"]]
     assert contents_a == ["Regra exclusiva do tenant A"]
     assert contents_b == ["Regra exclusiva do tenant B"]
+
+
+def test_only_admin_can_manage_knowledge_documents(client: TestClient) -> None:
+    _, admin_token = _provision(client, "knowledge-roles", "admin@knowledge.example.com")
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    created = client.post(
+        "/users",
+        headers=admin_headers,
+        json={
+            "name": "Corretora",
+            "email": "corretora@knowledge.example.com",
+            "password": "valid-test-password-123",
+            "role": "corretor",
+        },
+    )
+    assert created.status_code == 201, created.text
+    login = client.post(
+        "/auth/login",
+        json={
+            "tenant_slug": "knowledge-roles",
+            "email": "corretora@knowledge.example.com",
+            "password": "valid-test-password-123",
+        },
+    )
+    assert login.status_code == 200, login.text
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    response = client.post(
+        "/knowledge/documents",
+        headers=headers,
+        json={
+            "filename": "faq.txt",
+            "file_type": "txt",
+            "content_base64": _encoded("conteúdo"),
+        },
+    )
+
+    assert response.status_code == 403, response.text

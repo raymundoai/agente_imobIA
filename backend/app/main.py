@@ -12,6 +12,7 @@ from app.container import Container
 from app.modules.ai.api import ai_router, knowledge_router
 from app.modules.auth.api.routes import router as auth_router
 from app.modules.billing_usage.api import router as usage_router
+from app.modules.capture.api import router as capture_router
 from app.modules.contacts.api import router as contacts_router
 from app.modules.conversations.api.routes import router as conversations_router
 from app.modules.conversations.api.routes import webhook_router
@@ -33,9 +34,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging(resolved.log_level)
     container = Container.build(resolved)
     alembic_config = AlembicConfig(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
-    expected_database_revision = ScriptDirectory.from_config(
-        alembic_config
-    ).get_current_head()
+    expected_database_revision = ScriptDirectory.from_config(alembic_config).get_current_head()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -46,7 +45,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.container = container
     install_error_handlers(application)
     application.add_middleware(CorrelationIdMiddleware)
-    application.add_middleware(TenantContextMiddleware, token_service=container.token_service)
+    application.add_middleware(
+        TenantContextMiddleware,
+        token_service=container.token_service,
+        database=container.database,
+    )
     if resolved.cors_origins:
         application.add_middleware(
             CORSMiddleware,
@@ -57,6 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     application.include_router(auth_router, prefix=resolved.api_prefix)
+    application.include_router(capture_router, prefix=resolved.api_prefix)
     application.include_router(ai_router, prefix=resolved.api_prefix)
     application.include_router(dashboard_router, prefix=resolved.api_prefix)
     application.include_router(knowledge_router, prefix=resolved.api_prefix)
@@ -71,6 +75,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(tenants_router, prefix=resolved.api_prefix)
     application.include_router(usage_router, prefix=resolved.api_prefix)
     application.include_router(users_router, prefix=resolved.api_prefix)
+
     @application.get("/health", tags=["system"])
     def health() -> dict[str, str]:
         return {"status": "ok"}

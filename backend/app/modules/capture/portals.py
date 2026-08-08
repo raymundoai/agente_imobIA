@@ -14,6 +14,8 @@ class PortalSearch:
     url: str
     applied_filters: list[str]
     pending_filters: list[str]
+    discovery_mode: str = "manual"
+    status_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,7 +160,12 @@ def _zap(demand: LeadDemand) -> PortalSearch:
     )
     url = "https://www.zapimoveis.com.br" + path + (f"?{urlencode(query)}" if query else "")
     return PortalSearch(
-        "zap", "ZAP Imóveis", url, sorted(applied), _common_pending(demand, applied)
+        "zap",
+        "ZAP Imóveis",
+        url,
+        sorted(applied),
+        _common_pending(demand, applied),
+        status_message="O portal protege a leitura automática. A pesquisa abre em nova guia.",
     )
 
 
@@ -188,7 +195,12 @@ def _vivareal(demand: LeadDemand) -> PortalSearch:
     )
     url = "https://www.vivareal.com.br" + path + (f"?{urlencode(query)}" if query else "")
     return PortalSearch(
-        "vivareal", "Viva Real", url, sorted(applied), _common_pending(demand, applied)
+        "vivareal",
+        "Viva Real",
+        url,
+        sorted(applied),
+        _common_pending(demand, applied),
+        status_message="O portal protege a leitura automática. A pesquisa abre em nova guia.",
     )
 
 
@@ -236,6 +248,7 @@ def _olx(demand: LeadDemand) -> PortalSearch:
         "https://www.olx.com.br" + path + "?" + urlencode(query),
         sorted(applied),
         _common_pending(demand, applied),
+        status_message="A OLX bloqueia consultas automáticas. Use a pesquisa assistida.",
     )
 
 
@@ -258,8 +271,10 @@ def _lello(demand: LeadDemand) -> PortalSearch:
         path += f"/{neighborhood}-{city}-bairros"
         applied.update({"cidade", "bairro"})
     if demand.price_min is not None or demand.price_max is not None:
-        minimum = str(demand.price_min or 0)
-        maximum = str(demand.price_max or 999999999)
+        # Lello's route parser rejects decimal notation (for example ``5000.00``)
+        # and silently redirects to a search without the price range.
+        minimum = str(int(demand.price_min or 0))
+        maximum = str(int(demand.price_max or 999999999))
         path += f"/de-{minimum}-ate-{maximum}-r$"
         if demand.price_min is not None:
             applied.add("preço mínimo")
@@ -275,5 +290,11 @@ def _lello(demand: LeadDemand) -> PortalSearch:
         applied.add("vagas")
     url = "https://www.lelloimoveis.com.br" + path + "/#" + "/".join(fragments) + "/"
     return PortalSearch(
-        "lello", "Lello Imóveis", url, sorted(applied), _common_pending(demand, applied)
+        "lello",
+        "Lello Imóveis",
+        url,
+        sorted(applied),
+        _common_pending(demand, applied),
+        discovery_mode="assisted",
+        status_message="A busca abre no portal; confirme os filtros antes de salvar anúncios.",
     )

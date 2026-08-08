@@ -195,6 +195,37 @@ class MessageJobRepository:
         job.updated_at = datetime.now(UTC)
         self.session.commit()
 
+    def mark_delivery_part(
+        self,
+        job_id: UUID,
+        token: UUID,
+        message_id: UUID,
+        part_index: int,
+        external_message_id: str,
+    ) -> None:
+        job = self._leased(job_id, token)
+        outbound = self.session.scalar(
+            select(MessageModel).where(
+                MessageModel.tenant_id == job.tenant_id,
+                MessageModel.id == message_id,
+            )
+        )
+        if outbound is None:
+            raise RuntimeError("Prepared outbound message part is missing")
+        outbound.external_message_id = external_message_id
+        delivered = dict(job.result.get("delivered_parts") or {})
+        delivered[str(part_index)] = external_message_id
+        job.result = {**job.result, "delivered_parts": delivered}
+        job.updated_at = datetime.now(UTC)
+        self.session.commit()
+
+    def finish_delivery(self, job_id: UUID, token: UUID) -> None:
+        job = self._leased(job_id, token)
+        job.status = "sent"
+        job.last_error = None
+        self._release(job, datetime.now(UTC))
+        self.session.commit()
+
     def fail_generation(
         self,
         job_id: UUID,

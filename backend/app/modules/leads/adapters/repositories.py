@@ -105,10 +105,19 @@ class SqlAlchemyLeadDemandRepository(LeadDemandRepositoryPort):
         self._session.refresh(model)
         return _to_domain(model)
 
-    def list(self, tenant_id: UUID, *, limit: int = 50, offset: int = 0) -> list[LeadDemand]:
+    def list(
+        self,
+        tenant_id: UUID,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        contact_id: UUID | None = None,
+    ) -> list[LeadDemand]:
+        statement = select(LeadDemandModel).where(LeadDemandModel.tenant_id == tenant_id)
+        if contact_id is not None:
+            statement = statement.where(LeadDemandModel.contact_id == contact_id)
         models = self._session.scalars(
-            select(LeadDemandModel)
-            .where(LeadDemandModel.tenant_id == tenant_id)
+            statement
             .order_by(LeadDemandModel.created_at.desc(), LeadDemandModel.id)
             .limit(limit)
             .offset(offset)

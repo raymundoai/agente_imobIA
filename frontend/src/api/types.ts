@@ -2,6 +2,7 @@ export type LoginResponse = {
   access_token: string;
   refresh_token: string;
   token_type: string;
+  tenant_slug?: string | null;
 };
 
 export type DashboardStats = {
@@ -22,6 +23,11 @@ export type Conversation = {
   current_intent?: string | null;
   current_agent?: string;
   channel?: "whatsapp" | "telegram";
+  is_group: boolean;
+  group_name: string | null;
+  last_message_text: string | null;
+  last_message_attachments: Message["attachments"];
+  last_message_direction: string | null;
 };
 
 export type TelegramConnection = {
@@ -40,9 +46,38 @@ export type Message = {
   author_type: string;
   text: string;
   created_at: string;
+  attachments: Array<{
+    type: "image" | "video" | "audio" | "document" | "sticker" | string;
+    mimetype?: string;
+    fileName?: string;
+    fileLength?: number | string;
+    url?: string;
+    storage_key?: string;
+    isAnimated?: boolean;
+  }>;
+  external_message_id?: string | null;
+  sender_external_id?: string | null;
+  sender_name?: string | null;
 };
 
 export type ConversationDetail = Conversation & { messages: Message[] };
+
+export type ContactKind = "lead" | "tenant" | "owner" | "client";
+
+export type Contact = {
+  id: string;
+  tenant_id: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  kind: ContactKind;
+  status: "active" | "inactive";
+  tags: string[];
+  interest: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 export type LeadDemand = {
   id: string;
@@ -61,9 +96,41 @@ export type LeadDemand = {
   parking_spaces: number | null;
   min_area: number | null;
   notes: string | null;
-  status: string;
+  status: "open" | "qualified" | "in_progress" | "closed";
   crm_contact_id: string | null;
   crm_deal_id: string | null;
+};
+
+export type CaptureMission = {
+  demand: Pick<LeadDemand, "id" | "lead_name" | "phone" | "purpose" | "property_type" | "city" | "neighborhoods" | "price_min" | "price_max" | "bedrooms" | "parking_spaces">;
+  search_filters: Record<string, string | number | string[] | null>;
+  existing_matches: Array<{
+    id: string;
+    title: string;
+    source_url: string | null;
+    price: string | null;
+    score: number;
+    matched: string[];
+    tradeoffs: string[];
+  }>;
+  portal_searches: Array<{
+    id: string;
+    name: string;
+    url: string;
+    applied_filters: string[];
+    pending_filters: string[];
+    discovery_mode: "manual" | "assisted" | "automatic";
+    status_message: string | null;
+  }>;
+  federated_sources: Array<{
+    id: string;
+    name: string;
+    domain: string;
+    coverage: string;
+    source_type: "portal" | "network";
+    partnership_friendly: boolean;
+    search_url: string;
+  }>;
 };
 
 export type Property = {
@@ -104,6 +171,8 @@ export type PropertyImage = {
   is_primary: boolean;
   sort_order: number;
   original_size: number;
+  original_content_type: string;
+  media_type: "image" | "video";
   derived_size: number | null;
   original_url: string;
   display_url: string;
@@ -161,8 +230,11 @@ export type Tenant = {
 export type TenantSettings = {
   profile?: {
     display_name?: string;
+    legal_name?: string;
+    document_type?: "cpf" | "cnpj";
+    document_number?: string;
     channels?: string;
-    business_hours?: string;
+    business_hours?: string | BusinessHours;
     regions?: string;
     voice_tone?: string;
   };
@@ -198,6 +270,29 @@ export type TenantSettings = {
   [key: string]: unknown;
 };
 
+export type BusinessDaySchedule = {
+  enabled: boolean;
+  start: string;
+  end: string;
+  break_enabled: boolean;
+  break_start: string;
+  break_end: string;
+};
+
+export type BusinessHours = {
+  timezone: string;
+  days: Record<BusinessWeekday, BusinessDaySchedule>;
+};
+
+export type BusinessWeekday =
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday"
+  | "sunday";
+
 export type EvolutionWhatsappConnection = {
   instance: string;
   status: string;
@@ -206,6 +301,8 @@ export type EvolutionWhatsappConnection = {
   connected_phone: string | null;
   connected_name: string | null;
   webhook_configured: boolean;
+  webhook_url: string | null;
+  webhook_error: string | null;
 };
 
 export type IntegrationSetupSummary = {
@@ -224,6 +321,27 @@ export type User = {
   name: string;
   email: string;
   role: "admin" | "gestor" | "corretor" | "atendente";
-  status: "active" | "inactive";
+  status: "active" | "inactive" | "invited";
+  is_master: boolean;
+  must_change_password: boolean;
+  invitation_expires_at: string | null;
+  invited_at: string | null;
+  last_login_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PasswordSetup = {
+  user: User;
+  token: string;
+  expires_at: string;
+};
+
+export type UserAudit = {
+  id: string;
+  actor_user_id: string | null;
+  target_user_id: string | null;
+  action: string;
+  changes: Record<string, unknown>;
   created_at: string;
 };

@@ -1,9 +1,11 @@
 import base64
+import binascii
+from pathlib import Path
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
@@ -21,7 +23,7 @@ from app.modules.ai.application.use_cases import (
     UploadKnowledgeDocumentUseCase,
 )
 from app.modules.ai.domain.entities import KnowledgeDocument
-from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
+from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal, require_roles
 from app.modules.billing_usage.service import CreditLedgerService
 from app.modules.contacts.service import ContactUpsertService
 from app.modules.conversations.adapters.repositories import SqlAlchemyConversationRepository
@@ -29,20 +31,43 @@ from app.modules.leads.adapters.repositories import SqlAlchemyLeadDemandReposito
 from app.modules.leads.application.use_cases import LeadQualificationService
 from app.modules.properties.adapters.repositories import SqlAlchemyPropertyRepository
 from app.modules.tenants.adapters.repositories import SqlAlchemyTenantRepository
+from app.modules.users.domain.entities import UserRole
 from app.shared.errors.exceptions import ConfigurationError, NotFoundError
 
 knowledge_router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 ai_router = APIRouter(prefix="/ai", tags=["ai"])
+KNOWLEDGE_MAX_BYTES = 10 * 1024 * 1024
+KNOWLEDGE_MAX_BASE64_CHARS = 4 * ((KNOWLEDGE_MAX_BYTES + 2) // 3)
+KNOWLEDGE_EXTENSIONS = {".txt", ".md", ".markdown", ".pdf", ".docx"}
 
 
 class UploadKnowledgeDocumentRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     filename: str = Field(min_length=1, max_length=255)
     file_type: str = Field(min_length=1, max_length=80)
-    content_base64: str = Field(min_length=1)
+    content_base64: str = Field(min_length=1, max_length=KNOWLEDGE_MAX_BASE64_CHARS)
+
+    @field_validator("filename")
+    @classmethod
+    def validate_filename(cls, value: str) -> str:
+        if Path(value).suffix.lower() not in KNOWLEDGE_EXTENSIONS:
+            raise ValueError("Use um arquivo TXT, Markdown, PDF ou DOCX")
+        return value
+
+    @model_validator(mode="after")
+    def validate_content(self) -> "UploadKnowledgeDocumentRequest":
+        _decode_knowledge_content(self.content_base64)
+        return self
 
 
 class ReindexKnowledgeDocumentRequest(BaseModel):
-    content_base64: str = Field(min_length=1)
+    content_base64: str = Field(min_length=1, max_length=KNOWLEDGE_MAX_BASE64_CHARS)
+
+    @model_validator(mode="after")
+    def validate_content(self) -> "ReindexKnowledgeDocumentRequest":
+        _decode_knowledge_content(self.content_base64)
+        return self
 
 
 class KnowledgeDocumentResponse(BaseModel):
@@ -99,7 +124,7 @@ class AiReplyResponse(BaseModel):
 )
 def upload_document(
     payload: UploadKnowledgeDocumentRequest,
-    principal: CurrentPrincipal = Depends(get_current_principal),
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN)),
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
 ) -> KnowledgeDocumentResponse:
@@ -123,7 +148,7 @@ def upload_document(
             tenant_id=principal.tenant_id,
             filename=payload.filename,
             file_type=payload.file_type,
-            content=base64.b64decode(payload.content_base64),
+            content=_decode_knowledge_content(payload.content_base64),
             uploaded_by=principal.user_id,
         )
     )
@@ -133,7 +158,7 @@ def upload_document(
 
 @knowledge_router.get("/documents", response_model=list[KnowledgeDocumentResponse])
 def list_documents(
-    principal: CurrentPrincipal = Depends(get_current_principal),
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN)),
     session: Session = Depends(get_db_session),
 ) -> list[KnowledgeDocumentResponse]:
     return [
@@ -145,7 +170,7 @@ def list_documents(
 @knowledge_router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_document(
     document_id: UUID,
-    principal: CurrentPrincipal = Depends(get_current_principal),
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN)),
     session: Session = Depends(get_db_session),
 ) -> None:
     DeleteKnowledgeDocumentUseCase(SqlAlchemyKnowledgeRepository(session)).execute(
@@ -157,7 +182,7 @@ def delete_document(
 def reindex_document(
     document_id: UUID,
     payload: ReindexKnowledgeDocumentRequest,
-    principal: CurrentPrincipal = Depends(get_current_principal),
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN)),
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
 ) -> KnowledgeDocumentResponse:
@@ -170,11 +195,21 @@ def reindex_document(
         container.document_parser,
         _ai_provider(container),
         container.event_bus,
-    ).execute(principal.tenant_id, document_id, base64.b64decode(payload.content_base64))
+    ).execute(principal.tenant_id, document_id, _decode_knowledge_content(payload.content_base64))
     refreshed = repository.get(principal.tenant_id, document_id)
     if refreshed is None:
         raise NotFoundError("Knowledge document not found")
     return KnowledgeDocumentResponse.from_domain(refreshed)
+
+
+def _decode_knowledge_content(content_base64: str) -> bytes:
+    try:
+        content = base64.b64decode(content_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("O conteúdo do arquivo é inválido") from exc
+    if len(content) > KNOWLEDGE_MAX_BYTES:
+        raise ValueError("O arquivo deve ter no máximo 10 MB")
+    return content
 
 
 @knowledge_router.post("/search", response_model=KnowledgeSearchResponse)
@@ -218,6 +253,7 @@ def generate_ai_reply(
             ContactUpsertService(session),
         ),
         properties=SqlAlchemyPropertyRepository(session),
+        lead_demands=SqlAlchemyLeadDemandRepository(session),
     ).execute(
         principal.tenant_id,
         conversation_id,

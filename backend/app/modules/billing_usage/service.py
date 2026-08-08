@@ -18,12 +18,13 @@ from app.shared.errors.exceptions import PaymentRequiredError
 
 CREDIT_VALUE_USD = Decimal("0.001")
 DEFAULT_MARKUP_MULTIPLIER = Decimal("2.0")
-PRICING_CATALOG_VERSION = "2026-07-25"
+PRICING_CATALOG_VERSION = "2026-08-04"
 
 CHAT_RATES_USD_PER_MILLION: dict[str, tuple[Decimal, Decimal, Decimal]] = {
     "gpt-5-nano": (Decimal("0.05"), Decimal("0.005"), Decimal("0.40")),
     "gpt-5.5": (Decimal("5.00"), Decimal("0.50"), Decimal("30.00")),
     "gpt-5.4-mini": (Decimal("0.75"), Decimal("0.075"), Decimal("4.50")),
+    "gpt-5.6-luna": (Decimal("0.20"), Decimal("0.02"), Decimal("1.20")),
 }
 IMAGE_TOKEN_RATES_USD_PER_MILLION: dict[str, tuple[Decimal, Decimal, Decimal]] = {
     "gpt-image-2": (Decimal("8.00"), Decimal("5.00"), Decimal("30.00")),

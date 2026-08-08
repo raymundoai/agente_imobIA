@@ -48,6 +48,7 @@ class PropertyRepositoryPort(ABC):
         price_max: Decimal | None = None,
         bedrooms: int | None = None,
         parking_spaces: int | None = None,
+        internal_only: bool = False,
         limit: int = 5,
     ) -> list[Property]:
         raise NotImplementedError

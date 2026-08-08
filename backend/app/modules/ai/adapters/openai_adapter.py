@@ -22,15 +22,90 @@ class OpenAiAdapter(AiProviderPort):
         api_key: str,
         chat_model: str,
         embedding_model: str,
+        chat_reasoning_effort: str = "none",
+        chat_max_output_tokens: int = 4_000,
         embedding_dimensions: int = 1536,
         image_model: str = "gpt-image-2",
+        transcription_model: str = "gpt-4o-mini-transcribe",
+        vision_model: str | None = None,
         client: OpenAI | None = None,
     ) -> None:
         self._client = client or OpenAI(api_key=api_key, max_retries=0)
         self._chat_model = chat_model
+        self._chat_reasoning_effort = chat_reasoning_effort
+        self._chat_max_output_tokens = chat_max_output_tokens
         self._embedding_model = embedding_model
         self._embedding_dimensions = embedding_dimensions
         self._image_model = image_model
+        self._transcription_model = transcription_model
+        self._vision_model = vision_model or chat_model
+
+    def transcribe_audio(
+        self, content: bytes, *, filename: str, content_type: str
+    ) -> str:
+        audio = BytesIO(content)
+        audio.name = filename
+        try:
+            response = self._client.audio.transcriptions.create(
+                model=self._transcription_model,
+                file=audio,
+                response_format="text",
+            )
+        except (APIConnectionError, APITimeoutError) as exc:
+            raise AiProviderDispatchUncertainError(
+                "OpenAI transcription dispatch is uncertain"
+            ) from exc
+        except APIStatusError as exc:
+            if exc.status_code < 500:
+                raise AiProviderRejectedError("OpenAI rejected the transcription") from exc
+            raise AiProviderDispatchUncertainError(
+                "OpenAI transcription dispatch is uncertain"
+            ) from exc
+        text = response if isinstance(response, str) else getattr(response, "text", "")
+        return str(text or "").strip()
+
+    def describe_image(self, content: bytes, *, content_type: str) -> str:
+        encoded = base64.b64encode(content).decode("ascii")
+        prompt = (
+            "Descreva objetivamente esta imagem para um atendimento imobiliário. "
+            "Identifique textos visíveis, tipo de documento e características aparentes "
+            "do imóvel, cômodos ou possíveis danos. Não identifique pessoas e não conclua "
+            "endereço, propriedade, autenticidade, preço, metragem ou condição jurídica."
+        )
+        try:
+            response = self._client.responses.create(
+                model=self._vision_model,
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": prompt},
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:{content_type};base64,{encoded}",
+                            },
+                        ],
+                    }
+                ],
+                reasoning={"effort": self._chat_reasoning_effort},
+                max_output_tokens=800,
+            )
+        except (APIConnectionError, APITimeoutError) as exc:
+            raise AiProviderDispatchUncertainError(
+                "OpenAI vision dispatch is uncertain"
+            ) from exc
+        except APIStatusError as exc:
+            if exc.status_code < 500:
+                raise AiProviderRejectedError("OpenAI rejected the image analysis") from exc
+            raise AiProviderDispatchUncertainError(
+                "OpenAI vision dispatch is uncertain"
+            ) from exc
+        description = str(
+            getattr(response, "output_text", "") or self._extract_text(response)
+        ).strip()
+        if not description:
+            raise RuntimeError("OpenAI did not return an image description")
+        return description
 
     def edit_image(self, content: bytes, *, filename: str, prompt: str) -> ImageEditResult:
         image = BytesIO(content)
@@ -104,7 +179,8 @@ class OpenAiAdapter(AiProviderPort):
                 input=self._responses_input(messages),
                 tools=tools,
                 parallel_tool_calls=False,
-                max_output_tokens=2_000,
+                reasoning={"effort": self._chat_reasoning_effort},
+                max_output_tokens=self._chat_max_output_tokens,
             )
         except (APIConnectionError, APITimeoutError) as exc:
             raise AiProviderDispatchUncertainError("OpenAI chat dispatch is uncertain") from exc

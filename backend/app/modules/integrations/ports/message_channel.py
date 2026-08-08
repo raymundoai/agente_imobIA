@@ -16,6 +16,9 @@ class InboundChannelMessage:
     attachments: list[dict[str, Any]] = field(default_factory=list)
     from_me: bool = False
     is_group: bool = False
+    conversation_name: str | None = None
+    sender_external_id: str | None = None
+    sender_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,3 +39,25 @@ class MessageChannelPort(ABC):
         *,
         idempotency_key: str | None = None,
     ) -> SentChannelMessage: ...
+
+    def send_media(
+        self,
+        credentials: ChannelCredentials,
+        phone: str,
+        *,
+        content: bytes,
+        media_type: str,
+        mimetype: str,
+        filename: str,
+        caption: str = "",
+    ) -> SentChannelMessage:
+        raise NotImplementedError("This channel does not support media")
+
+    def send_presence(
+        self,
+        credentials: ChannelCredentials,
+        phone: str,
+        *,
+        delay_ms: int,
+    ) -> None:
+        return None

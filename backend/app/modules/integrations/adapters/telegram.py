@@ -88,6 +88,22 @@ class TelegramApiAdapter(MessageChannelPort):
             raise ExternalServiceError("Telegram response did not include a message id")
         return SentChannelMessage(external_message_id=f"{chat_id}:{message_id}")
 
+    def send_presence(
+        self,
+        credentials: ChannelCredentials,
+        phone: str,
+        *,
+        delay_ms: int,
+    ) -> None:
+        chat_id = phone.removeprefix("telegram:")
+        try:
+            self._client.post(
+                f"{credentials.base_url}/bot{credentials.api_key}/sendChatAction",
+                json={"chat_id": chat_id, "action": "typing"},
+            )
+        except Exception:
+            return None
+
     def get_me(self, credentials: ChannelCredentials) -> dict[str, Any]:
         response = self._client.get(f"{credentials.base_url}/bot{credentials.api_key}/getMe")
         if response.status_code >= 400:

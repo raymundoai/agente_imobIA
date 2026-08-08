@@ -121,6 +121,84 @@ def test_webhook_rejects_invalid_secret_without_persisting(client: TestClient) -
     assert conversations.json() == []
 
 
+def test_from_me_message_is_mirrored_without_contact_usage_or_ai_job(
+    client: TestClient, migrated_database: str
+) -> None:
+    tenant, token = _provision(client, "tenant-a")
+    client.app.state.container.settings.ai_auto_reply_enabled = True
+    payload = _payload("from-phone-1")
+    payload["data"]["key"]["fromMe"] = True
+    payload["data"]["message"] = {"conversation": "Mensagem enviada pelo celular"}
+
+    response = client.post(
+        "/webhooks/whatsapp/tenant-a",
+        headers={"X-ImobIA-Webhook-Secret": TEST_WEBHOOK_SECRET},
+        json=payload,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "mirrored_outbound"
+    assert response.json()["job_id"] is None
+    detail = client.get(
+        f"/conversations/{response.json()['conversation_id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()
+    assert detail["messages"][0]["direction"] == "outbound"
+    assert detail["messages"][0]["author_type"] == "human"
+    assert client.get("/contacts", headers={"Authorization": f"Bearer {token}"}).json() == []
+
+    engine = create_engine(migrated_database)
+    with engine.connect() as connection:
+        usage_count = connection.scalar(
+            text("SELECT count(*) FROM usage_records WHERE tenant_id = :tenant_id"),
+            {"tenant_id": tenant["id"]},
+        )
+        job_count = connection.scalar(
+            text("SELECT count(*) FROM message_jobs WHERE tenant_id = :tenant_id"),
+            {"tenant_id": tenant["id"]},
+        )
+    engine.dispose()
+    assert (usage_count, job_count) == (0, 0)
+
+
+def test_group_message_creates_human_conversation_without_lead_or_ai_job(
+    client: TestClient,
+) -> None:
+    _, token = _provision(client, "tenant-a")
+    client.app.state.container.settings.ai_auto_reply_enabled = True
+    response = client.post(
+        "/webhooks/whatsapp/tenant-a",
+        headers={"X-ImobIA-Webhook-Secret": TEST_WEBHOOK_SECRET},
+        json={
+            "event": "messages.upsert",
+            "data": {
+                "key": {
+                    "id": "group-message-1",
+                    "remoteJid": "120363419697103562@g.us",
+                    "participant": "5511888888888@s.whatsapp.net",
+                    "fromMe": False,
+                },
+                "pushName": "Corretora Ana",
+                "groupName": "Captações Zona Sul",
+                "message": {"conversation": "Novo imóvel disponível"},
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "processed"
+    assert response.json()["job_id"] is None
+    auth = {"Authorization": f"Bearer {token}"}
+    detail = client.get(
+        f"/conversations/{response.json()['conversation_id']}", headers=auth
+    ).json()
+    assert detail["is_group"] is True
+    assert detail["group_name"] == "Captações Zona Sul"
+    assert detail["mode"] == "human"
+    assert detail["messages"][0]["sender_name"] == "Corretora Ana"
+    assert client.get("/contacts", headers=auth).json() == []
+
+
 def test_webhook_can_generate_local_ai_reply_without_sending_to_whatsapp(
     client: TestClient,
 ) -> None:
@@ -140,10 +218,7 @@ def test_webhook_can_generate_local_ai_reply_without_sending_to_whatsapp(
     processed = MessageJobProcessor(client.app.state.container, "test-worker").process_next()
     assert processed is not None
     assert processed["status"] == "sent"
-    assert (
-        processed["response_text"]
-        == "Olá! Para começar, você busca comprar ou alugar?"
-    )
+    assert processed["response_text"] == "Olá! Para começar, você busca comprar ou alugar?"
     detail = client.get(
         f"/conversations/{response.json()['conversation_id']}",
         headers={"Authorization": f"Bearer {token}"},
@@ -239,3 +314,31 @@ def test_inactive_lead_agent_does_not_enqueue_reply(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert jobs.json() == []
+
+
+def test_connected_tenant_owner_is_not_registered_as_lead(
+    client: TestClient, migrated_database: str
+) -> None:
+    tenant, token = _provision(client, "tenant-a")
+    engine = create_engine(migrated_database)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE tenants SET settings = "
+                """'{"integrations":{"evolution":{"connected_phone":"551199999999"}}}'::jsonb """
+                "WHERE id = :tenant_id"
+            ),
+            {"tenant_id": tenant["id"]},
+        )
+    engine.dispose()
+
+    webhook = client.post(
+        "/webhooks/whatsapp/tenant-a",
+        headers={"X-ImobIA-Webhook-Secret": TEST_WEBHOOK_SECRET},
+        json=_payload("owner-message-1"),
+    )
+
+    assert webhook.status_code == 200
+    assert webhook.json()["status"] == "ignored_tenant_owner"
+    assert client.get("/contacts", headers={"Authorization": f"Bearer {token}"}).json() == []
+    assert client.get("/conversations", headers={"Authorization": f"Bearer {token}"}).json() == []

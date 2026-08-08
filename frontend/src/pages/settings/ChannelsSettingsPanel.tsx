@@ -2,7 +2,7 @@ import { Loader2, LogIn, MessageCircle, PlugZap, QrCode, Send, X } from "lucide-
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { request } from "../../api/client";
-import type { EvolutionWhatsappConnection, TelegramConnection, Tenant, TenantSettings } from "../../api/types";
+import type { EvolutionWhatsappConnection, TelegramConnection, Tenant } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { getTokenClaims } from "../../auth/tokenClaims";
 import { Badge } from "../../components/Badge";
@@ -29,9 +29,11 @@ const defaultChannels: Record<ChannelKey, ChannelConfig> = {
 export function ChannelsSettingsPanel({
   tenant,
   onTenantChange,
+  onDirtyChange,
 }: {
   tenant: Tenant | null;
   onTenantChange: (tenant: Tenant) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { token } = useAuth();
   const claims = getTokenClaims(token);
@@ -46,16 +48,32 @@ export function ChannelsSettingsPanel({
   const [message, setMessage] = useState<string | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [messageKind, setMessageKind] = useState<"success" | "error">("success");
+  const [initialBindings, setInitialBindings] = useState<string | null>(null);
+  const canManage = claims?.role === "admin";
+  const canConnect = claims?.role === "admin" || claims?.role === "gestor";
+  const currentBindings = JSON.stringify({
+    whatsapp: channels.whatsapp.agents,
+    telegram: channels.telegram.agents,
+  });
+  const dirty = initialBindings !== null && initialBindings !== currentBindings;
 
   useEffect(() => {
     const savedChannels = tenant?.settings.channels as
       | Partial<Record<ChannelKey, Partial<ChannelConfig> & { agent?: "leads" }>>
       | undefined;
-    setChannels({
+    const nextChannels = {
       whatsapp: normalizeChannel(defaultChannels.whatsapp, savedChannels?.whatsapp),
       telegram: normalizeChannel(defaultChannels.telegram, savedChannels?.telegram),
-    });
+    };
+    setChannels(nextChannels);
+    setInitialBindings(JSON.stringify({
+      whatsapp: nextChannels.whatsapp.agents,
+      telegram: nextChannels.telegram.agents,
+    }));
   }, [tenant]);
+
+  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
 
   useEffect(() => {
     if (!token) {
@@ -107,27 +125,26 @@ export function ChannelsSettingsPanel({
   async function save() {
     if (!claims || !tenant) {
       setMessage("Empresa não identificada no acesso atual.");
+      setMessageKind("error");
       return;
     }
     setSaving(true);
     setMessage(null);
     try {
-      const settings: TenantSettings = {
-        ...tenant.settings,
-        channels,
-      };
       const updated = await request<Tenant>(
-        `/tenants/${claims.tenantId}/settings`,
+        `/tenants/${claims.tenantId}/settings/channels`,
         {
           method: "PATCH",
-          body: JSON.stringify({ settings }),
+          body: JSON.stringify({ channels }),
         },
         token,
       );
       onTenantChange(updated);
       setMessage("Canais salvos.");
+      setMessageKind("success");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao salvar canais.");
+      setMessageKind("error");
     } finally {
       setSaving(false);
     }
@@ -166,8 +183,10 @@ export function ChannelsSettingsPanel({
       setTelegramConnection(connection);
       updateChannel("telegram", { status: toChannelStatus(connection.status) });
       setMessage(`Telegram @${connection.bot_username ?? "bot"} conectado.`);
+      setMessageKind("success");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao conectar Telegram.");
+      setMessageKind("error");
     }
   }
 
@@ -195,6 +214,8 @@ export function ChannelsSettingsPanel({
           onChange={updateChannel}
           onConnect={connectTelegram}
           connection={telegramConnection}
+          canConnect={canConnect}
+          canEdit={canManage}
         />
         <ChannelEditor
           channel="whatsapp"
@@ -205,12 +226,15 @@ export function ChannelsSettingsPanel({
           onConnect={connectWhatsapp}
           connection={whatsappConnection}
           connecting={connectingWhatsapp}
+          canConnect={canConnect}
+          canEdit={canManage}
         />
       </div>
 
       <div className="settings-actions">
-        {message ? <span>{message}</span> : null}
-        <button disabled={saving || !tenant} onClick={save} type="button">
+        {message ? <span className={`settings-feedback ${messageKind}`} role={messageKind === "error" ? "alert" : "status"} aria-live="polite">{message}</span> : null}
+        {dirty ? <span className="unsaved-indicator">Alterações não salvas</span> : null}
+        <button disabled={saving || !tenant || !canManage || !dirty} onClick={save} type="button">
           {saving ? "Salvando..." : "Salvar canais"}
         </button>
       </div>
@@ -236,6 +260,8 @@ function ChannelEditor({
   title,
   connection,
   connecting = false,
+  canConnect,
+  canEdit,
 }: {
   channel: ChannelKey;
   config: ChannelConfig;
@@ -245,6 +271,8 @@ function ChannelEditor({
   title: string;
   connection?: (EvolutionWhatsappConnection | TelegramConnection) | null;
   connecting?: boolean;
+  canConnect: boolean;
+  canEdit: boolean;
 }) {
   return (
     <section className="channel-card">
@@ -256,6 +284,9 @@ function ChannelEditor({
             {statusLabels[config.status]}
           </Badge>
           {connection && "connected_phone" in connection && connection.connected_phone ? <span>{connection.connected_phone}</span> : null}
+          {connection && "webhook_error" in connection && connection.webhook_error ? (
+            <span className="integration-warning">A sincronização está temporariamente indisponível.</span>
+          ) : null}
         </div>
       </div>
       <div className="form-grid single">
@@ -265,6 +296,7 @@ function ChannelEditor({
             <label key={agent.key}>
               <input
                 checked={config.agents.includes(agent.key)}
+                disabled={!canEdit}
                 onChange={(event) => {
                   const nextAgents = event.target.checked
                     ? [...config.agents, agent.key]
@@ -281,7 +313,7 @@ function ChannelEditor({
       <div className="integration-actions">
         <button
           className="button-outline"
-          disabled={connecting}
+          disabled={connecting || !canConnect}
           onClick={onConnect}
           type="button"
         >
@@ -293,18 +325,16 @@ function ChannelEditor({
             <LogIn size={15} />
           )}
           {channel === "whatsapp"
-            ? "Gerar QR Code"
-            : "Configurar webhook"}
+            ? config.status === "connected" ? "Ver conexão" : "Gerar QR Code"
+            : config.status === "connected" ? "Ver conexão" : "Conectar Telegram"}
         </button>
-        <span>
-          {channel === "whatsapp"
-            ? connection && "instance" in connection && connection.instance
-              ? `Instância: ${connection.instance}`
-              : "A conexão será feita pela Evolution API."
-            : connection && "bot_username" in connection && connection.bot_username
+        {channel === "telegram" ? (
+          <span>
+            {connection && "bot_username" in connection && connection.bot_username
               ? `Bot: @${connection.bot_username}`
-              : "Configure o token do BotFather no backend."}
-        </span>
+              : "A conexão usa a chave protegida configurada para esta empresa."}
+          </span>
+        ) : null}
       </div>
     </section>
   );
@@ -368,7 +398,7 @@ function WhatsappQrModal({
             <h2>Conectar WhatsApp</h2>
             <p>
               {connected
-                ? "WhatsApp conectado à Evolution API."
+                ? "WhatsApp conectado."
                 : "Abra o WhatsApp no celular e leia o QR Code para ativar o canal."}
             </p>
           </div>
@@ -401,11 +431,11 @@ function WhatsappQrModal({
           ) : connected ? (
             <div className="qr-placeholder success">
               <strong>Canal conectado</strong>
-              <span>{connection.connected_phone || connection.connected_name || connection.instance}</span>
+              <span>{connection.connected_phone || connection.connected_name || "WhatsApp conectado"}</span>
             </div>
           ) : (
             <div className="qr-placeholder">
-              <span>Aguardando QR Code da Evolution.</span>
+              <span>Aguardando QR Code.</span>
             </div>
           )}
         </div>
@@ -415,9 +445,9 @@ function WhatsappQrModal({
             {connected ? "Conectado" : "Aguardando leitura"}
           </Badge>
           {connection?.webhook_configured ? (
-            <span>Webhook configurado.</span>
+            <span>Sincronização configurada.</span>
           ) : (
-            <span>Webhook será configurado quando houver URL pública do backend.</span>
+            <span>A sincronização será configurada quando o endereço público estiver disponível.</span>
           )}
         </div>
       </div>

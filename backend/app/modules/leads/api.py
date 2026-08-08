@@ -147,11 +147,15 @@ def create_demand(
 def list_demands(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    contact_id: UUID | None = None,
     principal: CurrentPrincipal = Depends(get_current_principal),
     session: Session = Depends(get_db_session),
 ) -> list[LeadDemandResponse]:
     demands = SqlAlchemyLeadDemandRepository(session).list(
-        principal.tenant_id, limit=limit, offset=offset
+        principal.tenant_id,
+        limit=limit,
+        offset=offset,
+        contact_id=contact_id,
     )
     return [LeadDemandResponse.from_domain(demand) for demand in demands]
 

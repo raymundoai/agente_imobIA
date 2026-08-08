@@ -7,12 +7,13 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
-from app.container import get_db_session
+from app.container import Container, get_container, get_db_session
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
 from app.modules.contacts.models import ContactModel
 from app.modules.contacts.phone import normalize_contact_phone
 from app.modules.conversations.adapters.models import ConversationModel
 from app.modules.leads.adapters.models import LeadDemandModel
+from app.modules.tenants.adapters.models import TenantModel
 from app.shared.errors.exceptions import ConflictError, NotFoundError
 
 router = APIRouter(prefix="/contacts", tags=["contacts"])
@@ -43,6 +44,10 @@ class ContactResponse(ContactPayload):
     @classmethod
     def from_model(cls, model: ContactModel) -> "ContactResponse":
         return cls.model_validate(model, from_attributes=True)
+
+
+class ContactProfilePictureResponse(BaseModel):
+    url: str | None
 
 
 @router.get("", response_model=list[ContactResponse])
@@ -156,3 +161,27 @@ def update_contact(
     session.commit()
     session.refresh(model)
     return ContactResponse.from_model(model)
+
+
+@router.get("/{contact_id}/profile-picture", response_model=ContactProfilePictureResponse)
+def get_contact_profile_picture(
+    contact_id: UUID,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    session: Session = Depends(get_db_session),
+    container: Container = Depends(get_container),
+) -> ContactProfilePictureResponse:
+    model = session.scalar(
+        select(ContactModel).where(
+            ContactModel.tenant_id == principal.tenant_id,
+            ContactModel.id == contact_id,
+        )
+    )
+    if model is None:
+        raise NotFoundError("Contato não encontrado")
+    tenant_slug = session.scalar(
+        select(TenantModel.slug).where(TenantModel.id == principal.tenant_id)
+    )
+    credentials = container.channel_credentials.get(tenant_slug) if tenant_slug else None
+    resolver = getattr(container.message_channel, "profile_picture_url", None)
+    url = resolver(credentials, model.phone) if credentials and callable(resolver) else None
+    return ContactProfilePictureResponse(url=url)

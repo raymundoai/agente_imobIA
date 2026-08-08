@@ -28,6 +28,11 @@ class ConversationResponse(BaseModel):
     assigned_user_id: UUID | None
     started_at: datetime
     last_message_at: datetime
+    is_group: bool
+    group_name: str | None
+    last_message_text: str | None
+    last_message_attachments: list[dict[str, Any]]
+    last_message_direction: str | None
 
     @classmethod
     def from_domain(cls, conversation: Conversation) -> "ConversationResponse":
@@ -45,6 +50,15 @@ class ConversationResponse(BaseModel):
             assigned_user_id=conversation.assigned_user_id,
             started_at=conversation.started_at,
             last_message_at=conversation.last_message_at,
+            is_group=conversation.is_group,
+            group_name=conversation.group_name,
+            last_message_text=conversation.last_message_text,
+            last_message_attachments=conversation.last_message_attachments,
+            last_message_direction=(
+                conversation.last_message_direction.value
+                if conversation.last_message_direction is not None
+                else None
+            ),
         )
 
 
@@ -58,6 +72,8 @@ class MessageResponse(BaseModel):
     attachments: list[dict[str, Any]]
     external_message_id: str | None
     created_at: datetime
+    sender_external_id: str | None
+    sender_name: str | None
 
     @classmethod
     def from_domain(cls, message: Message) -> "MessageResponse":
@@ -71,6 +87,8 @@ class MessageResponse(BaseModel):
             attachments=message.attachments,
             external_message_id=message.external_message_id,
             created_at=message.created_at,
+            sender_external_id=message.sender_external_id,
+            sender_name=message.sender_name,
         )
 
 

@@ -28,5 +28,12 @@ class LeadDemandRepositoryPort(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def list(self, tenant_id: UUID, *, limit: int = 50, offset: int = 0) -> list[LeadDemand]:
+    def list(
+        self,
+        tenant_id: UUID,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        contact_id: UUID | None = None,
+    ) -> list[LeadDemand]:
         raise NotImplementedError

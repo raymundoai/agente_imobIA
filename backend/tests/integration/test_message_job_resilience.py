@@ -195,11 +195,11 @@ def test_crash_after_remote_send_is_not_automatically_resent(
     def crash_before_complete(*args, **kwargs):
         raise RuntimeError("simulated crash before local complete")
 
-    monkeypatch.setattr(MessageJobRepository, "delivery_completed", crash_before_complete)
+    monkeypatch.setattr(MessageJobRepository, "mark_delivery_part", crash_before_complete)
     result = processor.process_next()
     assert result["status"] == "delivery_unknown"
     assert fake_channel.sent == 1
-    assert fake_channel.keys == [job_id]
+    assert fake_channel.keys == [f"{job_id}:0"]
     assert processor.process_next() is None
 
 
