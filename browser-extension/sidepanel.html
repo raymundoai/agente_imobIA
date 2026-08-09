@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ImobIA Captura</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">IMOBIA</p>
+        <h1>Captura assistida</h1>
+        <p>Abra uma busca da OLX ou do Marketplace e capture os cards já renderizados.</p>
+      </header>
+      <button id="capture" type="button">Capturar resultados desta guia</button>
+      <p id="status" role="status">Nenhuma captura nesta sessão.</p>
+      <section id="summary" hidden>
+        <div class="summary-line">
+          <strong id="source"></strong>
+          <span id="count"></span>
+        </div>
+        <div id="results"></div>
+        <button id="download" class="secondary" type="button">Baixar lote JSON</button>
+      </section>
+      <aside>
+        A extensão lê somente os anúncios visíveis na guia ativa. Login, cookies e credenciais não
+        são copiados.
+      </aside>
+    </main>
+    <script src="sidepanel.js"></script>
+  </body>
+</html>
