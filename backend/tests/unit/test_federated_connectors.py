@@ -1,20 +1,24 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
 import httpx
 
+from app.modules.capture.connectors.base import ExternalListingRecord
 from app.modules.capture.connectors.lello import LelloConnector
 from app.modules.capture.connectors.lopes import LopesConnector
 from app.modules.capture.connectors.quintoandar import QuintoAndarConnector
+from app.modules.capture.federated import FederatedSearchRepository
+from app.modules.capture.models import ExternalListingModel
 from app.modules.leads.domain.entities import LeadDemand, LeadPurpose
 
 
-def _demand() -> LeadDemand:
+def _demand(purpose: LeadPurpose = LeadPurpose.BUY) -> LeadDemand:
     return LeadDemand(
         tenant_id=uuid4(),
         lead_name="Bruna",
         phone="5551999999999",
-        purpose=LeadPurpose.BUY,
+        purpose=purpose,
         property_type="apartamento",
         city="São Paulo",
         neighborhoods=["Pinheiros"],
@@ -78,6 +82,42 @@ def test_lopes_connector_normalizes_public_json() -> None:
     assert record.extraction_confidence == 95
 
 
+def test_lopes_rent_uses_base_rent_and_keeps_sale_as_alternative() -> None:
+    payload = {
+        "products": {
+            "content": [
+                {
+                    "id": "REO1096429",
+                    "type": "Casa",
+                    "priceFormat": "Total R$ 17.746/mês",
+                    "sellingPriceFormat": "R$ 3.390.000",
+                    "fullMonthlyPriceFormat": "R$ 17.746",
+                    "subPrice": "Aluguel: R$ 14.500&nbsp;&nbsp; IPTU: R$ 3.246",
+                    "dealType": "rent",
+                    "deal_types": ["rent", "sale"],
+                    "attributes": [],
+                    "locationDTO": {
+                        "city": "São Paulo",
+                        "neighborhood": "Jardim Guedala",
+                        "uf": "SP",
+                    },
+                    "photo": [],
+                }
+            ]
+        }
+    }
+
+    connector = LopesConnector(
+        httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json=payload)))
+    )
+    record = connector.search(_demand(LeadPurpose.RENT)).records[0]
+
+    assert record.price == Decimal("14500")
+    assert record.rent_price == Decimal("14500")
+    assert record.sale_price == Decimal("3390000")
+    assert record.purpose == "both"
+
+
 def test_quintoandar_connector_reads_real_estate_json_ld() -> None:
     html = """
     <html><script type="application/ld+json">{
@@ -130,6 +170,7 @@ def test_lello_connector_reuses_structured_parser_and_corrects_location() -> Non
       "bairro":"Pinheiros",
       "cidade":"São Paulo",
       "valorVenda":1200000,
+      "valorLocacao":3500,
       "quantidadeDormitorios":2,
       "quantidadeBanheiros":2,
       "quantidadeVagas":1,
@@ -160,10 +201,19 @@ def test_lello_connector_reuses_structured_parser_and_corrects_location() -> Non
     assert record.city == "São Paulo"
     assert record.neighborhood == "Pinheiros"
     assert record.price == Decimal("1200000")
+    assert record.sale_price == Decimal("1200000")
+    assert record.rent_price == Decimal("3500")
+    assert record.purpose == "both"
     assert record.bedrooms == 2
     assert record.area == 80
     assert record.primary_image_url == "https://cdn.lello.test/171614.webp"
     assert record.extraction_confidence == 94
+
+    rent_connector = LelloConnector(httpx.Client(transport=httpx.MockTransport(handler)))
+    rent_record = rent_connector.search(_demand(LeadPurpose.RENT)).records[0]
+    assert rent_record.price == Decimal("3500")
+    assert rent_record.sale_price == Decimal("1200000")
+    assert rent_record.rent_price == Decimal("3500")
 
 
 def test_connectors_expose_completeness_separately_from_fit() -> None:
@@ -191,3 +241,34 @@ def test_connectors_expose_completeness_separately_from_fit() -> None:
     )
 
     assert 0 < record.completeness_score() < 100
+
+
+def test_external_catalog_preserves_alternative_price_between_searches() -> None:
+    now = datetime.now(UTC)
+    listing = ExternalListingModel(
+        id=uuid4(),
+        source_id="source",
+        source_listing_id="1",
+        canonical_url="https://example.test/1",
+        title="Imóvel",
+        city="São Paulo",
+        purpose="buy",
+        sale_price=Decimal("900000"),
+        content_hash="old",
+    )
+    rent_record = ExternalListingRecord(
+        source_id="source",
+        source_listing_id="1",
+        canonical_url="https://example.test/1",
+        title="Imóvel",
+        city="São Paulo",
+        purpose="rent",
+        price=Decimal("4500"),
+        rent_price=Decimal("4500"),
+    )
+
+    FederatedSearchRepository._apply_record(listing, rent_record, now)
+
+    assert listing.sale_price == Decimal("900000")
+    assert listing.rent_price == Decimal("4500")
+    assert listing.purpose == "both"

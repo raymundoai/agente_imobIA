@@ -5,6 +5,7 @@ from app.modules.capture.connectors.base import (
     ExternalListingRecord,
     PortalConnector,
     SourceDescriptor,
+    available_purpose,
     decimal_value,
     infer_state,
     integer_value,
@@ -19,7 +20,7 @@ from app.modules.leads.domain.entities import LeadDemand
 
 class LelloConnector(PortalConnector):
     descriptor = SourceDescriptor("lello", "Lello Imóveis", "São Paulo", "json_ld")
-    parser_version = "lello-public-v2"
+    parser_version = "lello-public-v3"
 
     def supports(self, demand: LeadDemand) -> bool:
         return infer_state(demand.city) == "SP"
@@ -33,8 +34,7 @@ class LelloConnector(PortalConnector):
         native_by_id = _native_items_by_id(response.text)
         records = []
         for item in discovered:
-            purpose = requested_purpose(demand)
-            price = decimal_value(item.price)
+            requested = requested_purpose(demand)
             neighborhood = item.neighborhood
             city = item.city
             # Some Lello JSON-LD payloads expose the neighborhood in addressLocality and
@@ -53,12 +53,23 @@ class LelloConnector(PortalConnector):
                 ),
                 photos[0] if photos and isinstance(photos[0], dict) else {},
             )
-            price = decimal_value(
-                native.get("valorVenda")
-                or native.get("valorCampanhaVenda")
+            sale_price = decimal_value(
+                native.get("valorCampanhaVenda")
+                or native.get("valorVenda")
                 or native.get("valorVendaMin")
-                or item.price
             )
+            rent_price = decimal_value(
+                native.get("valorCampanhaLocacao")
+                or native.get("valorLocacao")
+                or native.get("valorLocacaoMin")
+            )
+            fallback_price = decimal_value(item.price)
+            if requested == "rent" and rent_price is None:
+                rent_price = fallback_price
+            elif requested == "buy" and sale_price is None:
+                sale_price = fallback_price
+            price = rent_price if requested == "rent" else sale_price
+            purpose = available_purpose(sale_price, rent_price, requested)
             records.append(
                 ExternalListingRecord(
                     source_id=self.descriptor.id,
@@ -87,8 +98,8 @@ class LelloConnector(PortalConnector):
                     latitude=decimal_value(native.get("latitude")),
                     longitude=decimal_value(native.get("longitude")),
                     price=price,
-                    sale_price=price if purpose == "buy" else None,
-                    rent_price=price if purpose == "rent" else None,
+                    sale_price=sale_price,
+                    rent_price=rent_price,
                     condominium_fee=decimal_value(native.get("previsaoCondominio")),
                     property_tax=decimal_value(native.get("previsaoIptu")),
                     bedrooms=integer_value(native.get("quantidadeDormitorios")) or item.bedrooms,

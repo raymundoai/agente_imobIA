@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import html
+import re
+from decimal import Decimal
 from typing import Any
 
 from app.modules.capture.connectors.base import (
@@ -8,6 +11,7 @@ from app.modules.capture.connectors.base import (
     PortalConnector,
     SourceDescriptor,
     SourceShapeError,
+    available_purpose,
     decimal_value,
     infer_state,
     integer_value,
@@ -19,7 +23,7 @@ from app.modules.leads.domain.entities import LeadDemand
 
 class LopesConnector(PortalConnector):
     descriptor = SourceDescriptor("lopes", "Lopes", "Nacional", "json")
-    parser_version = "lopes-json-v1"
+    parser_version = "lopes-json-v2"
 
     def search(self, demand: LeadDemand, *, limit: int = 24) -> ConnectorBatch:
         state = (infer_state(demand.city) or "SP").casefold()
@@ -49,8 +53,13 @@ class LopesConnector(PortalConnector):
         listing_id = str(item.get("id") or item.get("sku"))
         photos = item.get("photo") or []
         photo = photos[0] if photos and isinstance(photos[0], dict) else {}
-        price = decimal_value(item.get("sellingPriceFormat") or item.get("priceFormat"))
-        purpose = "rent" if item.get("dealType") == "rent" else "buy"
+        sale_price = decimal_value(item.get("sellingPriceFormat"))
+        rent_price = _labeled_price(item.get("subPrice"), "Aluguel")
+        requested = requested_purpose(demand)
+        if requested == "buy" and sale_price is None:
+            sale_price = decimal_value(item.get("priceFormat"))
+        price = rent_price if requested == "rent" else sale_price
+        purpose = available_purpose(sale_price, rent_price, requested)
         property_type = str(item.get("type") or demand.property_type or "Imóvel")
         bedrooms = integer_value(attributes.get("bedroom_attr"))
         city = str(location.get("city") or demand.city or "")
@@ -82,8 +91,8 @@ class LopesConnector(PortalConnector):
             latitude=decimal_value(item.get("lat")),
             longitude=decimal_value(item.get("lng")),
             price=price,
-            sale_price=price if purpose == "buy" else None,
-            rent_price=price if purpose == "rent" else None,
+            sale_price=sale_price,
+            rent_price=rent_price,
             bedrooms=bedrooms,
             bathrooms=integer_value(attributes.get("bathroom_attr")),
             parking_spaces=integer_value(attributes.get("parking_lots_attr")),
@@ -92,9 +101,19 @@ class LopesConnector(PortalConnector):
                 photo.get("mediumUrl") or photo.get("largeUrl") or photo.get("smallUrl")
             ),
             advertiser_name=_text((item.get("company") or {}).get("name")),
-            raw_data={"id": listing_id, "dealType": item.get("dealType")},
+            raw_data={
+                "id": listing_id,
+                "dealType": item.get("dealType"),
+                "dealTypes": item.get("deal_types") or [],
+            },
             extraction_confidence=95,
         )
+
+
+def _labeled_price(value: Any, label: str) -> Decimal | None:
+    normalized = html.unescape(str(value or "")).replace("\xa0", " ")
+    match = re.search(rf"{re.escape(label)}\s*:\s*R\$\s*([\d.,]+)", normalized, re.I)
+    return decimal_value(match.group(1)) if match else None
 
 
 def _text(value: Any) -> str | None:

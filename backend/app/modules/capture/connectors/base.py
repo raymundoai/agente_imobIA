@@ -205,3 +205,17 @@ def listing_id_from_url(url: str) -> str:
 
 def requested_purpose(demand: LeadDemand) -> str | None:
     return demand.purpose.value if demand.purpose else None
+
+
+def available_purpose(
+    sale_price: Decimal | None,
+    rent_price: Decimal | None,
+    fallback: str | None = None,
+) -> str | None:
+    if sale_price is not None and rent_price is not None:
+        return "both"
+    if rent_price is not None:
+        return "rent"
+    if sale_price is not None:
+        return "buy"
+    return fallback

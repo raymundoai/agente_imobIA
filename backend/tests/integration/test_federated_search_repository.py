@@ -111,6 +111,9 @@ def test_federated_run_persists_parent_before_jobs_and_aggregates_results(
         assert persisted.status == "completed"
         assert persisted.completed_source_count == 1
         assert persisted.result_count == 1
-        assert len(repository.list_results(tenant_id, run.id)) == 1
+        results = repository.list_results(tenant_id, run.id)
+        assert len(results) == 1
+        assert results[0]["sale_price"] == "850000"
+        assert results[0]["rent_price"] is None
         assert repository.list_results(other_tenant_id, run.id) == []
     engine.dispose()

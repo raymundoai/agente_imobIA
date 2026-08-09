@@ -401,7 +401,6 @@ class FederatedSearchRepository:
         listing.canonical_url = record.canonical_url
         listing.title = record.title
         listing.description = record.description
-        listing.purpose = record.purpose
         listing.property_type = record.property_type
         listing.status = "active"
         listing.state = record.state
@@ -411,8 +410,18 @@ class FederatedSearchRepository:
         listing.latitude = record.latitude
         listing.longitude = record.longitude
         listing.price = record.price
-        listing.sale_price = record.sale_price
-        listing.rent_price = record.rent_price
+        if record.sale_price is not None:
+            listing.sale_price = record.sale_price
+        if record.rent_price is not None:
+            listing.rent_price = record.rent_price
+        if listing.sale_price is not None and listing.rent_price is not None:
+            listing.purpose = "both"
+        elif listing.rent_price is not None:
+            listing.purpose = "rent"
+        elif listing.sale_price is not None:
+            listing.purpose = "buy"
+        else:
+            listing.purpose = record.purpose
         listing.condominium_fee = record.condominium_fee
         listing.property_tax = record.property_tax
         listing.bedrooms = record.bedrooms
@@ -492,6 +501,8 @@ def _result_payload(
         "city": listing.city,
         "neighborhood": listing.neighborhood,
         "price": str(listing.price) if listing.price is not None else None,
+        "sale_price": str(listing.sale_price) if listing.sale_price is not None else None,
+        "rent_price": str(listing.rent_price) if listing.rent_price is not None else None,
         "bedrooms": listing.bedrooms,
         "bathrooms": listing.bathrooms,
         "parking_spaces": listing.parking_spaces,

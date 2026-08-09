@@ -118,6 +118,8 @@ class ExternalSearchResultResponse(BaseModel):
     city: str
     neighborhood: str | None
     price: Decimal | None
+    sale_price: Decimal | None
+    rent_price: Decimal | None
     bedrooms: int | None
     bathrooms: int | None
     parking_spaces: int | None

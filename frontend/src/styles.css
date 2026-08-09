@@ -79,6 +79,10 @@
 .external-result-content { display: grid; gap: 8px; padding: 14px; }
 .external-result-content h3 { display: -webkit-box; font-size: .94rem; line-height: 1.35; margin: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .external-result-content > strong { font-size: 1rem; }
+.external-result-price { display: grid; gap: 2px; }
+.external-result-price > small { color: var(--muted-foreground); font-size: .68rem; font-weight: 700; text-transform: uppercase; }
+.external-result-price > strong { font-size: 1rem; }
+.external-result-price > span { color: var(--muted-foreground); font-size: .75rem; }
 .external-result-content > p { color: var(--muted-foreground); font-size: .78rem; margin: 0; }
 .external-result-source, .external-result-scores { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
 .external-result-source span { color: var(--accent); font-size: .72rem; font-weight: 800; text-transform: uppercase; }

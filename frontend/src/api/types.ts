@@ -158,6 +158,8 @@ export type ExternalPropertyResult = {
   city: string;
   neighborhood: string | null;
   price: string | null;
+  sale_price: string | null;
+  rent_price: string | null;
   bedrooms: number | null;
   bathrooms: number | null;
   parking_spaces: number | null;
