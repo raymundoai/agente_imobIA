@@ -119,17 +119,19 @@ class PortalConnector(ABC):
     def search(self, demand: LeadDemand, *, limit: int = 24) -> ConnectorBatch:
         raise NotImplementedError
 
-    def get_public(self, url: str) -> httpx.Response:
+    def get_public(self, url: str, *, headers: dict[str, str] | None = None) -> httpx.Response:
+        request_headers = {
+            "Accept": "text/html,application/xhtml+xml,application/json",
+            "Accept-Language": "pt-BR,pt;q=0.9",
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+            ),
+        }
+        request_headers.update(headers or {})
         response = self.client.get(
             url,
-            headers={
-                "Accept": "text/html,application/xhtml+xml,application/json",
-                "Accept-Language": "pt-BR,pt;q=0.9",
-                "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
-                ),
-            },
+            headers=request_headers,
             follow_redirects=True,
         )
         challenge = response.text[:50_000].casefold()
@@ -161,6 +163,11 @@ def infer_state(city: str | None) -> str | None:
         "gravatai": "RS",
         "novo hamburgo": "RS",
         "sao leopoldo": "RS",
+        "salvador": "BA",
+        "lauro de freitas": "BA",
+        "mata de sao joao": "BA",
+        "camacari": "BA",
+        "simoes filho": "BA",
         "rio de janeiro": "RJ",
     }
     return by_city.get(slug(city).replace("-", " "))

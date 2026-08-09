@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import httpx
 
+from app.modules.capture.connectors.auxiliadora_predial import AuxiliadoraPredialConnector
 from app.modules.capture.connectors.base import PortalConnector, SourceDescriptor
 from app.modules.capture.connectors.bridge import BridgeConnector
 from app.modules.capture.connectors.chaves_na_mao import ChavesNaMaoConnector
 from app.modules.capture.connectors.foxter import FoxterConnector
 from app.modules.capture.connectors.guarida import GuaridaConnector
+from app.modules.capture.connectors.imoveis_diferenciados import ImoveisDiferenciadosConnector
 from app.modules.capture.connectors.lello import LelloConnector
 from app.modules.capture.connectors.lopes import LopesConnector
+from app.modules.capture.connectors.nova_sao_paulo import NovaSaoPauloConnector
+from app.modules.capture.connectors.ohi import OhiConnector
 from app.modules.capture.connectors.quintoandar import QuintoAndarConnector
 from app.modules.capture.connectors.refugios_urbanos import RefugiosUrbanosConnector
 from app.modules.leads.domain.entities import LeadDemand
@@ -46,5 +50,9 @@ def default_connector_registry(client: httpx.Client) -> ConnectorRegistry:
             BridgeConnector(client),
             ChavesNaMaoConnector(client),
             RefugiosUrbanosConnector(client),
+            AuxiliadoraPredialConnector(client),
+            NovaSaoPauloConnector(client),
+            OhiConnector(client),
+            ImoveisDiferenciadosConnector(client),
         ]
     )
