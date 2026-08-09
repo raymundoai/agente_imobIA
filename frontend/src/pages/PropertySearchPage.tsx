@@ -1,7 +1,7 @@
-import { ExternalLink, Handshake, Plus, RefreshCw, Search, Sparkles, X } from "lucide-react";
+import { ExternalLink, Plus, RefreshCw, Search, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { request } from "../api/client";
-import type { CaptureMission, LeadDemand, Property } from "../api/types";
+import type { CaptureMission, FederatedSearchRun, LeadDemand, Property } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { DemandModal } from "../components/DemandModal";
 
@@ -15,6 +15,18 @@ function purposeLabel(value: string | null) {
   return value === "rent" ? "Aluguel" : "Compra";
 }
 
+const terminalSearchStatuses = new Set(["partial", "completed", "failed", "cancelled"]);
+
+function sourceStatusLabel(status: string) {
+  return {
+    queued: "Na fila",
+    running: "Pesquisando",
+    completed: "Concluído",
+    failed: "Falhou",
+    blocked: "Bloqueado",
+  }[status] ?? status;
+}
+
 export function PropertySearchPage() {
   const { token } = useAuth();
   const [demands, setDemands] = useState<LeadDemand[]>([]);
@@ -25,6 +37,8 @@ export function PropertySearchPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(false);
   const [savingCapture, setSavingCapture] = useState(false);
+  const [searchRun, setSearchRun] = useState<FederatedSearchRun | null>(null);
+  const [startingSearch, setStartingSearch] = useState(false);
   const [captureForm, setCaptureForm] = useState({ source: "olx", source_url: "", title: "", price: "", neighborhood: "" });
 
   const loadMission = useCallback(async (demandId: string) => {
@@ -51,10 +65,42 @@ export function PropertySearchPage() {
 
   async function selectDemand(id: string) {
     setSelectedId(id);
+    setSearchRun(null);
     setLoading(true);
     try { await loadMission(id); }
     catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao abrir a busca."); }
     finally { setLoading(false); }
+  }
+
+  const pollSearchRun = useCallback(async (runId: string) => {
+    try {
+      setSearchRun(await request<FederatedSearchRun>(`/capture/search-runs/${runId}`, {}, token));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível atualizar a busca.");
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (!searchRun || terminalSearchStatuses.has(searchRun.status)) return;
+    const timeout = window.setTimeout(() => void pollSearchRun(searchRun.id), 1500);
+    return () => window.clearTimeout(timeout);
+  }, [pollSearchRun, searchRun]);
+
+  async function startFederatedSearch() {
+    if (!selectedId) return;
+    setStartingSearch(true);
+    setMessage(null);
+    try {
+      const run = await request<FederatedSearchRun>("/capture/search-runs", {
+        method: "POST",
+        body: JSON.stringify({ demand_id: selectedId }),
+      }, token);
+      setSearchRun(run);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível iniciar a busca.");
+    } finally {
+      setStartingSearch(false);
+    }
   }
 
   async function saveCapturedProperty() {
@@ -115,9 +161,8 @@ export function PropertySearchPage() {
         <main className="capture-workspace">
           {loading ? <div className="panel-card empty-state large"><RefreshCw className="spin" size={26} /><p>Preparando a busca…</p></div> : null}
           {!loading && mission ? <>
-            <section className="panel-card mission-summary"><div><span className="eyebrow">Busca ativa</span><h2>{mission.demand.lead_name}</h2><p>{purposeLabel(mission.demand.purpose)} de {mission.demand.property_type || "imóvel"} em {mission.demand.city || "cidade não informada"}</p></div><div className="mission-chips">{mission.demand.neighborhoods.map((item) => <span key={item}>{item}</span>)}{mission.demand.price_max ? <span>até {money(mission.demand.price_max)}</span> : null}{mission.demand.bedrooms ? <span>{mission.demand.bedrooms}+ quartos</span> : null}</div></section>
-            <section><div className="section-heading"><div><span className="eyebrow">Portais principais</span><h2>Pesquisa assistida</h2></div><p>Os portais abrem fora do app; confirme os filtros exibidos antes de salvar.</p></div><div className="portal-grid">{mission.portal_searches.map((portal) => <article className="panel-card portal-card" key={portal.id}><div><h3>{portal.name}</h3><p>{portal.applied_filters.length} filtros preparados</p></div>{portal.pending_filters.length ? <small>Ajustar no portal: {portal.pending_filters.join(", ")}</small> : <small className="all-filters">Filtros principais preparados</small>}{portal.status_message ? <small className="portal-status">{portal.status_message}</small> : null}<div className="portal-actions"><a className="secondary-button" href={portal.url} rel="noreferrer" target="_blank">Pesquisar no portal <ExternalLink size={15} /></a></div></article>)}</div></section>
-            <section><div className="section-heading"><div><span className="eyebrow">Busca federada</span><h2>Outras fontes</h2></div><p>Pesquise a mesma demanda em sites públicos e redes de parceria.</p></div><div className="federated-source-grid">{mission.federated_sources.map((source) => <article className="panel-card source-card" key={source.id}><div className="source-card-heading"><div><h3>{source.name}</h3><small>{source.coverage}</small></div>{source.partnership_friendly ? <span className="partnership-badge"><Handshake size={13} /> Parceria</span> : null}</div><p>{source.source_type === "network" ? "Rede de corretores e oportunidades de parceria." : `Resultados públicos em ${source.domain}.`}</p><a className="secondary-button" href={source.search_url} rel="noreferrer" target="_blank"><Search size={15} /> Pesquisar nesta fonte</a></article>)}</div></section>
+            <section className="panel-card mission-summary"><div><span className="eyebrow">Busca ativa</span><h2>{mission.demand.lead_name}</h2><p>{purposeLabel(mission.demand.purpose)} de {mission.demand.property_type || "imóvel"} em {mission.demand.city || "cidade não informada"}</p></div><div className="mission-search-actions"><div className="mission-chips">{mission.demand.neighborhoods.map((item) => <span key={item}>{item}</span>)}{mission.demand.price_max ? <span>até {money(mission.demand.price_max)}</span> : null}{mission.demand.bedrooms ? <span>{mission.demand.bedrooms}+ quartos</span> : null}</div><button className="primary-button" disabled={startingSearch || Boolean(searchRun && !terminalSearchStatuses.has(searchRun.status))} onClick={() => void startFederatedSearch()} type="button"><Search size={16} />{startingSearch ? "Iniciando…" : searchRun ? "Buscar novamente" : "Buscar imóveis"}</button></div></section>
+            <section><div className="section-heading"><div><span className="eyebrow">Busca federada</span><h2>Resultados dos portais</h2></div><p>Os anúncios são pesquisados e comparados dentro do ImobIA.</p></div>{searchRun ? <><div className="federated-progress panel-card"><div><strong>{searchRun.completed_source_count} de {searchRun.source_count} fontes concluídas</strong><span>{searchRun.result_count} imóveis compatíveis</span></div><div className="federated-source-statuses">{searchRun.sources.map((source) => <span className={`source-status ${source.status}`} key={source.source_id}><i />{source.source_name}: {sourceStatusLabel(source.status)}{source.discovered_count ? ` · ${source.discovered_count}` : ""}</span>)}</div></div>{searchRun.results.length ? <div className="external-result-grid">{searchRun.results.map((item) => <article className="panel-card external-result-card" key={item.id}>{item.primary_image_url ? <img alt={item.title} loading="lazy" src={item.primary_image_url} /> : <div className="external-result-placeholder"><Search size={24} /></div>}<div className="external-result-content"><div className="external-result-source"><span>{item.source_name}</span><small>Atualizado agora</small></div><h3>{item.title}</h3><strong>{money(item.price)}</strong><p>{[item.neighborhood, item.city, item.state].filter(Boolean).join(" · ")}</p><div className="external-result-features">{item.area ? <span>{item.area} m²</span> : null}{item.bedrooms != null ? <span>{item.bedrooms} quartos</span> : null}{item.parking_spaces != null ? <span>{item.parking_spaces} vagas</span> : null}</div><div className="external-result-scores"><span>{item.fit_score}% compatível</span><small>Confiança {item.confidence_score}%</small></div><a href={item.canonical_url} rel="noreferrer" target="_blank">Ver anúncio original <ExternalLink size={14} /></a></div></article>)}</div> : <div className="panel-card empty-state">{terminalSearchStatuses.has(searchRun.status) ? <Search size={24} /> : <RefreshCw className="spin" size={24} />}<p>{terminalSearchStatuses.has(searchRun.status) ? "Nenhum resultado compatível nesta execução." : "Pesquisando nos portais e preparando os primeiros resultados…"}</p></div>}</> : <div className="panel-card empty-state"><Search size={24} /><p>Revise os critérios e inicie a busca para consultar os portais.</p></div>}</section>
             <section><div className="section-heading"><div><span className="eyebrow">Resultados salvos</span><h2>Imóveis captados</h2></div><div className="section-actions"><p>{mission.existing_matches.length} vinculados a esta demanda</p><button className="secondary-button" onClick={() => setCaptureOpen(true)} type="button"><Plus size={15} /> Salvar anúncio</button></div></div>{mission.existing_matches.length ? <div className="captured-results">{mission.existing_matches.map((item) => <article className="panel-card captured-result" key={item.id}><div><strong>{item.title}</strong><span>{money(item.price)}</span></div><div className="match-score">{Math.round(item.score)}% compatível</div>{item.tradeoffs.length ? <small>Pontos de atenção: {item.tradeoffs.join(", ")}</small> : <small className="all-filters">Compatível com os filtros principais</small>}{item.source_url ? <a href={item.source_url} rel="noreferrer" target="_blank">Ver anúncio original <ExternalLink size={14} /></a> : null}</article>)}</div> : <div className="panel-card empty-state"><Search size={24} /><p>Nenhum imóvel externo captado para esta demanda.</p></div>}</section>
           </> : null}
         </main>

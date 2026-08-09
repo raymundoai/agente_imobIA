@@ -54,6 +54,17 @@ services:
       - imobos_property_media:/data/property-images
       - imobos_conversation_media:/data/conversation-media
 
+  capture-worker:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    command: ["python", "-m", "app.modules.capture.worker"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   imobos_postgres:
   imobos_property_media:

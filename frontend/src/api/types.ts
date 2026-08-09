@@ -133,6 +133,61 @@ export type CaptureMission = {
   }>;
 };
 
+export type FederatedSearchSource = {
+  source_id: string;
+  source_name: string;
+  status: "queued" | "running" | "completed" | "failed" | "blocked";
+  discovered_count: number;
+  imported_count: number;
+  error_code: string | null;
+  error: string | null;
+  parser_version: string | null;
+};
+
+export type ExternalPropertyResult = {
+  id: string;
+  source_id: string;
+  source_name: string;
+  source_listing_id: string;
+  canonical_url: string;
+  title: string;
+  description: string | null;
+  purpose: string | null;
+  property_type: string | null;
+  state: string | null;
+  city: string;
+  neighborhood: string | null;
+  price: string | null;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  parking_spaces: number | null;
+  area: number | null;
+  primary_image_url: string | null;
+  advertiser_name: string | null;
+  fit_score: number;
+  confidence_score: number;
+  matched: string[];
+  tradeoffs: string[];
+  review_status: "new" | "reviewed" | "saved" | "contacted" | "discarded";
+  last_seen_at: string;
+};
+
+export type FederatedSearchRun = {
+  id: string;
+  demand_id: string;
+  status: "queued" | "running" | "partial" | "completed" | "failed" | "cancelled";
+  filters: Record<string, string | number | string[] | null>;
+  source_count: number;
+  completed_source_count: number;
+  result_count: number;
+  error: string | null;
+  sources: FederatedSearchSource[];
+  results: ExternalPropertyResult[];
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+};
+
 export type Property = {
   id: string;
   tenant_id: string;

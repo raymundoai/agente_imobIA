@@ -1,0 +1,116 @@
+from decimal import Decimal
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.orm import Session
+
+from app.modules.capture.connectors.base import ExternalListingRecord
+from app.modules.capture.federated import FederatedSearchRepository
+from app.modules.capture.models import CaptureJobModel, SearchRunSourceModel
+from app.modules.leads.adapters.repositories import SqlAlchemyLeadDemandRepository
+from app.modules.leads.domain.entities import LeadDemand, LeadPurpose
+from app.modules.tenants.adapters.models import TenantModel
+
+pytestmark = pytest.mark.integration
+
+
+def test_federated_run_persists_parent_before_jobs_and_aggregates_results(
+    migrated_database: str,
+) -> None:
+    tenant_id = uuid4()
+    other_tenant_id = uuid4()
+    engine = create_engine(migrated_database)
+    with Session(engine, autoflush=False, expire_on_commit=False) as session:
+        session.add_all(
+            [
+                TenantModel(
+                    id=tenant_id,
+                    name="Imobiliária A",
+                    slug="federated-a",
+                    status="active",
+                    settings={},
+                ),
+                TenantModel(
+                    id=other_tenant_id,
+                    name="Imobiliária B",
+                    slug="federated-b",
+                    status="active",
+                    settings={},
+                ),
+            ]
+        )
+        session.commit()
+        demand = SqlAlchemyLeadDemandRepository(session).create(
+            tenant_id,
+            LeadDemand(
+                tenant_id=tenant_id,
+                lead_name="Bruna",
+                phone="5551999999999",
+                purpose=LeadPurpose.BUY,
+                property_type="apartamento",
+                city="São Paulo",
+                neighborhoods=["Pinheiros"],
+                price_max=Decimal("1000000"),
+                bedrooms=2,
+            ),
+        )
+        repository = FederatedSearchRepository(session)
+        run = repository.create_run(tenant_id, demand, ["test_source"])
+
+        assert repository.get_run(tenant_id, run.id) is not None
+        assert repository.get_run(other_tenant_id, run.id) is None
+        assert (
+            session.scalar(
+                select(func.count(SearchRunSourceModel.id)).where(
+                    SearchRunSourceModel.search_run_id == run.id
+                )
+            )
+            == 1
+        )
+        assert (
+            session.scalar(
+                select(func.count(CaptureJobModel.id)).where(
+                    CaptureJobModel.search_run_id == run.id
+                )
+            )
+            == 1
+        )
+
+        job = repository.claim_next(lease_seconds=60, worker_id="integration-test")
+        assert job is not None
+        record = ExternalListingRecord(
+            source_id="test_source",
+            source_listing_id="listing-1",
+            canonical_url="https://example.test/imovel/listing-1",
+            title="Apartamento com 2 quartos em Pinheiros",
+            purpose="buy",
+            property_type="apartamento",
+            state="SP",
+            city="São Paulo",
+            neighborhood="Pinheiros",
+            price=Decimal("850000"),
+            sale_price=Decimal("850000"),
+            bedrooms=2,
+            bathrooms=2,
+            area=80,
+            primary_image_url="https://example.test/imovel/listing-1.jpg",
+            extraction_confidence=95,
+        )
+        _, matched = repository.upsert_and_match(job, demand, record)
+        assert matched
+        repository.complete(
+            job,
+            discovered_count=1,
+            imported_count=1,
+            parser_version="test-v1",
+        )
+
+        persisted = repository.get_run(tenant_id, run.id)
+        assert persisted is not None
+        assert persisted.status == "completed"
+        assert persisted.completed_source_count == 1
+        assert persisted.result_count == 1
+        assert len(repository.list_results(tenant_id, run.id)) == 1
+        assert repository.list_results(other_tenant_id, run.id) == []
+    engine.dispose()

@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     message_job_max_attempts: int = Field(default=5, ge=1, le=20)
     message_job_backoff_seconds: int = Field(default=5, ge=1, le=3600)
     message_job_stale_seconds: int = Field(default=300, ge=30, le=86400)
+    capture_job_max_attempts: int = Field(default=3, ge=1, le=10)
+    capture_job_backoff_seconds: int = Field(default=15, ge=1, le=3600)
+    capture_job_stale_seconds: int = Field(default=180, ge=30, le=3600)
     integration_secret_key: SecretStr | None = None
     integration_secret_key_version: int = Field(default=1, ge=1, le=1000)
     integration_secret_previous_keys: list[SecretStr] = Field(default_factory=list)

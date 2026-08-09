@@ -63,6 +63,8 @@ def clean_database(request: pytest.FixtureRequest) -> Generator[None, None, None
         connection.execute(
             text(
                 "TRUNCATE TABLE ai_audit_logs, knowledge_chunks, knowledge_documents, "
+                "capture_jobs, demand_external_matches, capture_search_run_sources, "
+                "capture_search_runs, external_listings, "
                 "property_demand_matches, properties, contacts, maintenance_tickets, lead_demands, "
                 "message_jobs, messages, conversations, "
                 "credit_reservations, credit_ledger, credit_accounts, usage_records, "
@@ -75,6 +77,8 @@ def clean_database(request: pytest.FixtureRequest) -> Generator[None, None, None
         connection.execute(
             text(
                 "TRUNCATE TABLE ai_audit_logs, knowledge_chunks, knowledge_documents, "
+                "capture_jobs, demand_external_matches, capture_search_run_sources, "
+                "capture_search_runs, external_listings, "
                 "property_demand_matches, properties, contacts, maintenance_tickets, lead_demands, "
                 "message_jobs, messages, conversations, "
                 "credit_reservations, credit_ledger, credit_accounts, usage_records, "
