@@ -234,6 +234,35 @@ def get_search_run(
     )
 
 
+@router.post(
+    "/search-runs/{run_id}/results/{listing_id}/save",
+    response_model=PropertyResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def save_search_result(
+    run_id: UUID,
+    listing_id: UUID,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    session: Session = Depends(get_db_session),
+    container: Container = Depends(get_container),
+) -> PropertyResponse:
+    repository = FederatedSearchRepository(session)
+    result = repository.get_result_for_capture(principal.tenant_id, run_id, listing_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Search result not found")
+    demand_id, capture_data = result
+    property_ = CapturePropertyUseCase(
+        SqlAlchemyLeadDemandRepository(session),
+        SqlAlchemyPropertyRepository(session),
+        container.event_bus,
+    ).execute(
+        principal.tenant_id,
+        {"demand_id": demand_id, **capture_data},
+    )
+    repository.mark_result_saved(principal.tenant_id, run_id, listing_id)
+    return PropertyResponse.from_domain(property_)
+
+
 @router.post("/missions/{demand_id}/discover", response_model=DiscoverMissionResponse)
 def discover_mission_properties(
     demand_id: UUID,

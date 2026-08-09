@@ -131,6 +131,110 @@ class FederatedSearchRepository:
         ).all()
         return [_result_payload(match, listing) for match, listing in rows]
 
+    def get_result_for_capture(
+        self,
+        tenant_id: UUID,
+        run_id: UUID,
+        listing_id: UUID,
+    ) -> tuple[UUID, dict[str, Any]] | None:
+        row = self.session.execute(
+            select(SearchRunModel, DemandExternalMatchModel, ExternalListingModel)
+            .join(
+                DemandExternalMatchModel,
+                (DemandExternalMatchModel.tenant_id == SearchRunModel.tenant_id)
+                & (DemandExternalMatchModel.demand_id == SearchRunModel.demand_id)
+                & (DemandExternalMatchModel.last_search_run_id == SearchRunModel.id),
+            )
+            .join(
+                ExternalListingModel,
+                ExternalListingModel.id == DemandExternalMatchModel.external_listing_id,
+            )
+            .where(
+                SearchRunModel.tenant_id == tenant_id,
+                SearchRunModel.id == run_id,
+                ExternalListingModel.id == listing_id,
+                DemandExternalMatchModel.review_status != "discarded",
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        run, match, listing = row
+        purpose = str(run.filters.get("purpose") or "")
+        price = (
+            listing.rent_price
+            if purpose == "rent" and listing.rent_price is not None
+            else listing.sale_price
+            if purpose == "buy" and listing.sale_price is not None
+            else listing.price
+        )
+        images = (
+            [{"url": listing.primary_image_url, "is_primary": True}]
+            if listing.primary_image_url
+            else []
+        )
+        return run.demand_id, {
+            "source": listing.source_id,
+            "source_url": listing.canonical_url,
+            "title": listing.title,
+            "city": listing.city,
+            "neighborhood": listing.neighborhood,
+            "price": price,
+            "sale_price": listing.sale_price,
+            "rent_price": listing.rent_price,
+            "purpose": listing.purpose,
+            "property_type": listing.property_type,
+            "listing_code": f"{listing.source_id}:{listing.source_listing_id}",
+            "description": listing.description,
+            "bedrooms": listing.bedrooms,
+            "suites": listing.suites,
+            "bathrooms": listing.bathrooms,
+            "parking_spaces": listing.parking_spaces,
+            "area": listing.area,
+            "land_area": listing.land_area,
+            "address": listing.address,
+            "details": {
+                "external_listing_id": str(listing.id),
+                "state": listing.state,
+                "fit_score": match.fit_score,
+                "confidence_score": match.confidence_score,
+                "condominium_fee": (
+                    str(listing.condominium_fee) if listing.condominium_fee is not None else None
+                ),
+                "property_tax": (
+                    str(listing.property_tax) if listing.property_tax is not None else None
+                ),
+            },
+            "images": images,
+            "advertiser_name": listing.advertiser_name,
+            "advertiser_phone": listing.advertiser_phone,
+        }
+
+    def mark_result_saved(
+        self,
+        tenant_id: UUID,
+        run_id: UUID,
+        listing_id: UUID,
+    ) -> bool:
+        match = self.session.scalar(
+            select(DemandExternalMatchModel)
+            .join(
+                SearchRunModel,
+                (SearchRunModel.tenant_id == DemandExternalMatchModel.tenant_id)
+                & (SearchRunModel.id == DemandExternalMatchModel.last_search_run_id),
+            )
+            .where(
+                SearchRunModel.tenant_id == tenant_id,
+                SearchRunModel.id == run_id,
+                DemandExternalMatchModel.external_listing_id == listing_id,
+            )
+        )
+        if match is None:
+            return False
+        match.review_status = "saved"
+        match.updated_at = datetime.now(UTC)
+        self.session.commit()
+        return True
+
     def claim_next(self, lease_seconds: int, worker_id: str) -> CaptureJobSnapshot | None:
         now = datetime.now(UTC)
         expired = list(

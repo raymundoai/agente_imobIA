@@ -1,5 +1,5 @@
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import create_engine, func, select
@@ -116,4 +116,19 @@ def test_federated_run_persists_parent_before_jobs_and_aggregates_results(
         assert results[0]["sale_price"] == "850000"
         assert results[0]["rent_price"] is None
         assert repository.list_results(other_tenant_id, run.id) == []
+        listing_id = UUID(results[0]["id"])
+        capture = repository.get_result_for_capture(tenant_id, run.id, listing_id)
+        assert capture is not None
+        capture_demand_id, capture_data = capture
+        assert capture_demand_id == demand.id
+        assert capture_data["source"] == "test_source"
+        assert capture_data["price"] == Decimal("850000")
+        assert capture_data["listing_code"] == "test_source:listing-1"
+        assert capture_data["images"] == [
+            {"url": "https://example.test/imovel/listing-1.jpg", "is_primary": True}
+        ]
+        assert repository.get_result_for_capture(other_tenant_id, run.id, listing_id) is None
+        assert not repository.mark_result_saved(other_tenant_id, run.id, listing_id)
+        assert repository.mark_result_saved(tenant_id, run.id, listing_id)
+        assert repository.list_results(tenant_id, run.id)[0]["review_status"] == "saved"
     engine.dispose()

@@ -22,6 +22,7 @@ def test_readiness_checks_database_and_expected_routes_are_registered(
     assert "/capture/missions/{demand_id}" in paths
     assert "/capture/missions/{demand_id}/discover" in paths
     assert "/capture/properties" in paths
+    assert "/capture/search-runs/{run_id}/results/{listing_id}/save" in paths
     assert not any(path.startswith("/maintenance") for path in paths)
     assert not any("/tecimob" in path for path in paths)
     assert "/integrations/setup" in paths
@@ -93,9 +94,7 @@ def test_readiness_is_generic_for_revision_mismatch_and_database_failure(
         raise RuntimeError("postgresql://user:secret@private-host/database")
 
     with monkeypatch.context() as scoped:
-        scoped.setattr(
-            client.app.state.container.database, "session_factory", unavailable
-        )
+        scoped.setattr(client.app.state.container.database, "session_factory", unavailable)
         failed = client.get("/ready")
     assert failed.status_code == 503
     assert failed.json() == {"status": "not_ready"}
