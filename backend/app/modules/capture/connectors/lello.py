@@ -23,7 +23,7 @@ class LelloConnector(PortalConnector):
     parser_version = "lello-public-v3"
 
     def supports(self, demand: LeadDemand) -> bool:
-        return infer_state(demand.city) == "SP"
+        return infer_state(demand.city, demand.state) == "SP"
 
     def search(self, demand: LeadDemand, *, limit: int = 24) -> ConnectorBatch:
         url = next(item.url for item in build_portal_searches(demand) if item.id == "lello")

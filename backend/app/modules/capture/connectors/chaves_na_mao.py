@@ -24,7 +24,7 @@ class ChavesNaMaoConnector(PortalConnector):
     parser_version = "chaves-jsonld-v1"
 
     def supports(self, demand: LeadDemand) -> bool:
-        return infer_state(demand.city) is not None
+        return infer_state(demand.city, demand.state) is not None
 
     def search(self, demand: LeadDemand, *, limit: int = 24) -> ConnectorBatch:
         url = _search_url(demand)
@@ -48,14 +48,14 @@ class ChavesNaMaoConnector(PortalConnector):
             title=str(item.get("name") or "Imóvel no Chaves na Mão"),
             purpose=purpose,
             property_type=_schema_type(offered.get("@type")) or demand.property_type,
-            state=(infer_state(demand.city) or "").upper() or None,
+            state=(infer_state(demand.city, demand.state) or "").upper() or None,
             city=demand.city or "",
             neighborhood=_text(address.get("addressLocality")),
             address={
                 "street": address.get("streetAddress"),
                 "neighborhood": address.get("addressLocality"),
                 "city": demand.city,
-                "state": infer_state(demand.city),
+                "state": infer_state(demand.city, demand.state),
                 "postal_code": address.get("postalCode"),
             },
             latitude=decimal_value(geo.get("latitude")),
@@ -93,7 +93,7 @@ def _search_url(demand: LeadDemand) -> str:
             if "casa" in kind
             else "imoveis-a-venda"
         )
-    state = (infer_state(demand.city) or "SP").casefold()
+    state = (infer_state(demand.city, demand.state) or "SP").casefold()
     return f"https://www.chavesnamao.com.br/{prefix}/{state}-{slug(demand.city)}/"
 
 

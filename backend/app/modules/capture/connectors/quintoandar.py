@@ -24,7 +24,7 @@ class QuintoAndarConnector(PortalConnector):
     parser_version = "quintoandar-jsonld-v1"
 
     def search(self, demand: LeadDemand, *, limit: int = 24) -> ConnectorBatch:
-        state = (infer_state(demand.city) or "SP").casefold()
+        state = (infer_state(demand.city, demand.state) or "SP").casefold()
         action = "alugar" if requested_purpose(demand) == "rent" else "comprar"
         kind = slug(demand.property_type) or "imovel"
         url = (
@@ -63,7 +63,11 @@ class QuintoAndarConnector(PortalConnector):
             description=_text(item.get("description")),
             purpose=purpose,
             property_type=property_type,
-            state=str(address.get("addressRegion") or infer_state(demand.city) or "").upper()
+            state=str(
+                address.get("addressRegion")
+                or infer_state(demand.city, demand.state)
+                or ""
+            ).upper()
             or None,
             city=str(address.get("addressLocality") or demand.city or ""),
             neighborhood=neighborhood,
@@ -71,7 +75,8 @@ class QuintoAndarConnector(PortalConnector):
                 "street": street or None,
                 "neighborhood": neighborhood,
                 "city": address.get("addressLocality") or demand.city,
-                "state": address.get("addressRegion") or infer_state(demand.city),
+                "state": address.get("addressRegion")
+                or infer_state(demand.city, demand.state),
             },
             price=price,
             sale_price=price if purpose == "buy" else None,

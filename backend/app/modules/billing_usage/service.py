@@ -60,6 +60,17 @@ def estimated_image_charge(model: str) -> CreditCharge:
     )
 
 
+def fixed_credit_charge(credits: int) -> CreditCharge:
+    if credits < 0:
+        raise ValueError("credits must be nonnegative")
+    retail = Decimal(credits) * CREDIT_VALUE_USD
+    return CreditCharge(
+        provider_cost_usd=Decimal("0"),
+        retail_cost_usd=retail,
+        credits=credits,
+    )
+
+
 def chat_charge(
     model: str,
     *,

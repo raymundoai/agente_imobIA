@@ -23,10 +23,13 @@ class FoxterConnector(PortalConnector):
     parser_version = "foxter-next-v1"
 
     def supports(self, demand: LeadDemand) -> bool:
-        return infer_state(demand.city) == "RS" and requested_purpose(demand) != "rent"
+        return (
+            infer_state(demand.city, demand.state) == "RS"
+            and requested_purpose(demand) != "rent"
+        )
 
     def search(self, demand: LeadDemand, *, limit: int = 24) -> ConnectorBatch:
-        state = (infer_state(demand.city) or "RS").casefold()
+        state = (infer_state(demand.city, demand.state) or "RS").casefold()
         url = (
             "https://www.foxterciaimobiliaria.com.br/imoveis/a-venda/"
             f"em-{slug(demand.city)}-{state}"

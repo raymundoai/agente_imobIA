@@ -84,6 +84,7 @@ class LeadDemandModel(Base):
     purpose: Mapped[str | None] = mapped_column(Text)
     property_type: Mapped[str | None] = mapped_column(Text)
     city: Mapped[str | None] = mapped_column(Text)
+    state: Mapped[str | None] = mapped_column(Text)
     neighborhoods: Mapped[list[str]] = mapped_column(
         ARRAY(Text), nullable=False, default=list, server_default=text("'{}'::text[]")
     )
@@ -116,6 +117,7 @@ class LeadDemandModel(Base):
             purpose=lead.purpose.value if lead.purpose else None,
             property_type=lead.property_type,
             city=lead.city,
+            state=lead.state,
             neighborhoods=lead.neighborhoods,
             price_min=lead.price_min,
             price_max=lead.price_max,

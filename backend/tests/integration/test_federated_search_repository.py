@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -106,6 +107,22 @@ def test_federated_run_persists_parent_before_jobs_and_aggregates_results(
             parser_version="test-v1",
         )
 
+        reusable = repository.find_reusable_run(tenant_id, demand, ["test_source"])
+        assert reusable is not None
+        assert reusable.id == run.id
+        latest = repository.latest_compatible_run(
+            tenant_id, demand, ["test_source"]
+        )
+        assert latest is not None
+        assert latest.id == run.id
+        assert repository.find_reusable_run(tenant_id, demand, ["other_source"]) is None
+        demand.price_max = Decimal("900000")
+        assert repository.find_reusable_run(tenant_id, demand, ["test_source"]) is None
+        assert repository.latest_compatible_run(
+            tenant_id, demand, ["test_source"]
+        ) is None
+        demand.price_max = Decimal("1000000")
+
         persisted = repository.get_run(tenant_id, run.id)
         assert persisted is not None
         assert persisted.status == "completed"
@@ -131,4 +148,44 @@ def test_federated_run_persists_parent_before_jobs_and_aggregates_results(
         assert not repository.mark_result_saved(other_tenant_id, run.id, listing_id)
         assert repository.mark_result_saved(tenant_id, run.id, listing_id)
         assert repository.list_results(tenant_id, run.id)[0]["review_status"] == "saved"
+
+        second_run = repository.create_run(
+            tenant_id,
+            demand,
+            ["test_source"],
+            force_refresh=True,
+        )
+        second_job = repository.claim_next(lease_seconds=60, worker_id="integration-test")
+        assert second_job is not None
+        changed_record = ExternalListingRecord(
+            source_id="test_source",
+            source_listing_id="listing-1",
+            canonical_url="https://example.test/imovel/listing-1",
+            title="Apartamento atualizado em Pinheiros",
+            purpose="buy",
+            property_type="apartamento",
+            state="SP",
+            city="São Paulo",
+            neighborhood="Pinheiros",
+            price=Decimal("900000"),
+            sale_price=Decimal("900000"),
+            bedrooms=2,
+        )
+        repository.upsert_and_match(second_job, demand, changed_record)
+        repository.complete(
+            second_job,
+            discovered_count=1,
+            imported_count=1,
+            parser_version="test-v2",
+        )
+
+        assert repository.list_results(tenant_id, run.id)[0]["sale_price"] == "850000"
+        assert repository.list_results(tenant_id, second_run.id)[0]["sale_price"] == "900000"
+        assert repository.get_run(tenant_id, run.id).result_count == 1
+        assert repository.get_run(tenant_id, second_run.id).result_count == 1
+
+        second_run.cache_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        run.cache_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        session.commit()
+        assert repository.find_reusable_run(tenant_id, demand, ["test_source"]) is None
     engine.dispose()

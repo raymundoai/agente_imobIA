@@ -2,18 +2,25 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
-from pydantic import BaseModel, Field, field_validator
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.container import get_db_session
-from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
+from app.modules.auth.api.dependencies import (
+    CurrentPrincipal,
+    get_current_principal,
+    require_roles,
+)
+from app.modules.billing_usage.service import CreditLedgerService
+from app.modules.capture.models import SearchRunModel
 from app.modules.contacts.phone import normalize_contact_phone
 from app.modules.contacts.service import ContactUpsertService
 from app.modules.conversations.adapters.models import ConversationModel
 from app.modules.leads.adapters.repositories import SqlAlchemyLeadDemandRepository
 from app.modules.leads.domain.entities import LeadDemand, LeadDemandStatus, LeadPurpose
+from app.modules.users.domain.entities import UserRole
 from app.shared.errors.exceptions import ConflictError, NotFoundError
 
 router = APIRouter(prefix="/leads", tags=["leads"])
@@ -25,6 +32,7 @@ class LeadDemandRequest(BaseModel):
     purpose: LeadPurpose | None = None
     property_type: str | None = None
     city: str | None = None
+    state: str | None = Field(default=None, min_length=2, max_length=2)
     neighborhoods: list[str] = Field(default_factory=list)
     price_min: Decimal | None = None
     price_max: Decimal | None = None
@@ -40,6 +48,21 @@ class LeadDemandRequest(BaseModel):
     def normalize_phone(cls, value: str) -> str:
         return normalize_contact_phone(value)
 
+    @field_validator("state")
+    @classmethod
+    def normalize_state(cls, value: str | None) -> str | None:
+        return value.strip().upper() if value else None
+
+    @model_validator(mode="after")
+    def validate_price_range(self) -> "LeadDemandRequest":
+        if (
+            self.price_min is not None
+            and self.price_max is not None
+            and self.price_min > self.price_max
+        ):
+            raise ValueError("O preço mínimo não pode ser maior que o preço máximo")
+        return self
+
 
 class LeadDemandPatchRequest(BaseModel):
     lead_name: str | None = None
@@ -47,6 +70,7 @@ class LeadDemandPatchRequest(BaseModel):
     purpose: LeadPurpose | None = None
     property_type: str | None = None
     city: str | None = None
+    state: str | None = Field(default=None, min_length=2, max_length=2)
     neighborhoods: list[str] | None = None
     price_min: Decimal | None = None
     price_max: Decimal | None = None
@@ -62,6 +86,11 @@ class LeadDemandPatchRequest(BaseModel):
     def normalize_phone(cls, value: str | None) -> str | None:
         return normalize_contact_phone(value) if value is not None else None
 
+    @field_validator("state")
+    @classmethod
+    def normalize_state(cls, value: str | None) -> str | None:
+        return value.strip().upper() if value else None
+
 
 class LeadDemandResponse(BaseModel):
     id: UUID
@@ -73,6 +102,7 @@ class LeadDemandResponse(BaseModel):
     purpose: str | None
     property_type: str | None
     city: str | None
+    state: str | None
     neighborhoods: list[str]
     price_min: Decimal | None
     price_max: Decimal | None
@@ -96,6 +126,7 @@ class LeadDemandResponse(BaseModel):
             purpose=demand.purpose.value if demand.purpose else None,
             property_type=demand.property_type,
             city=demand.city,
+            state=demand.state,
             neighborhoods=demand.neighborhoods,
             price_min=demand.price_min,
             price_max=demand.price_max,
@@ -112,7 +143,9 @@ class LeadDemandResponse(BaseModel):
 @router.post("/demands", response_model=LeadDemandResponse, status_code=status.HTTP_201_CREATED)
 def create_demand(
     payload: LeadDemandRequest,
-    principal: CurrentPrincipal = Depends(get_current_principal),
+    principal: CurrentPrincipal = Depends(
+        require_roles(UserRole.ADMIN, UserRole.GESTOR, UserRole.CORRETOR)
+    ),
     session: Session = Depends(get_db_session),
 ) -> LeadDemandResponse:
     values = payload.model_dump()
@@ -176,7 +209,9 @@ def get_demand(
 def patch_demand(
     demand_id: UUID,
     payload: LeadDemandPatchRequest,
-    principal: CurrentPrincipal = Depends(get_current_principal),
+    principal: CurrentPrincipal = Depends(
+        require_roles(UserRole.ADMIN, UserRole.GESTOR, UserRole.CORRETOR)
+    ),
     session: Session = Depends(get_db_session),
 ) -> LeadDemandResponse:
     repo = SqlAlchemyLeadDemandRepository(session)
@@ -187,6 +222,15 @@ def patch_demand(
         if field == "phone" and value is not None:
             value = normalize_contact_phone(value)
         setattr(demand, field, value)
+    if (
+        demand.price_min is not None
+        and demand.price_max is not None
+        and demand.price_min > demand.price_max
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="O preço mínimo não pode ser maior que o preço máximo",
+        )
     conversation = _validated_conversation(
         session, principal.tenant_id, demand.conversation_id, demand.phone
     )
@@ -208,6 +252,41 @@ def patch_demand(
     demand.phone = contact.phone
     demand.contact_id = contact.id
     return LeadDemandResponse.from_domain(repo.update(principal.tenant_id, demand))
+
+
+@router.delete("/demands/{demand_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_demand(
+    demand_id: UUID,
+    principal: CurrentPrincipal = Depends(
+        require_roles(UserRole.ADMIN, UserRole.GESTOR, UserRole.CORRETOR)
+    ),
+    session: Session = Depends(get_db_session),
+) -> None:
+    search_runs = session.scalars(
+        select(SearchRunModel).where(
+            SearchRunModel.tenant_id == principal.tenant_id,
+            SearchRunModel.demand_id == demand_id,
+        )
+    ).all()
+    if any(run.status in {"queued", "running"} for run in search_runs):
+        raise ConflictError("Cancele a busca em andamento antes de excluir a demanda")
+    ledger = CreditLedgerService(session)
+    if any(
+        run.billing_reservation_key
+        and ledger.reservation_status(
+            principal.tenant_id, run.billing_reservation_key
+        )
+        in {"reserved", "started"}
+        for run in search_runs
+    ):
+        raise ConflictError(
+            "Aguarde a finalização da cobrança da busca antes de excluir a demanda"
+        )
+    deleted = SqlAlchemyLeadDemandRepository(session).delete(
+        principal.tenant_id, demand_id
+    )
+    if not deleted:
+        raise NotFoundError("Lead demand not found")
 
 
 def _validated_conversation(

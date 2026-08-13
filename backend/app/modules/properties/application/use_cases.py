@@ -8,7 +8,10 @@ from uuid import UUID
 
 from app.modules.leads.domain.entities import LeadDemand, LeadPurpose
 from app.modules.leads.ports.repositories import LeadDemandRepositoryPort
-from app.modules.properties.application.matching import calculate_property_match
+from app.modules.properties.application.matching import (
+    calculate_property_match,
+    property_offer_price,
+)
 from app.modules.properties.domain.entities import Property, PropertyPurpose
 from app.modules.properties.ports.repositories import PropertyRepositoryPort
 from app.shared.errors.exceptions import NotFoundError
@@ -27,12 +30,24 @@ class CapturePropertyUseCase:
         self._properties = properties
         self._events = events
 
-    def execute(self, tenant_id: UUID, data: dict[str, Any]) -> Property:
+    def execute(
+        self,
+        tenant_id: UUID,
+        data: dict[str, Any],
+        *,
+        commit: bool = True,
+    ) -> Property:
         demand_id = _uuid_or_none(data.get("demand_id"))
         if demand_id and self._leads.get_by_id(tenant_id, demand_id) is None:
             raise NotFoundError("Lead demand not found")
         property_ = normalize_property(tenant_id, data)
-        saved = self._properties.upsert_captured(tenant_id, property_, demand_id)
+        saved = (
+            self._properties.upsert_captured(tenant_id, property_, demand_id)
+            if commit
+            else self._properties.upsert_captured(
+                tenant_id, property_, demand_id, commit=False
+            )
+        )
         self._events.publish(
             DomainEvent(
                 name="PropertyCaptured",
@@ -68,6 +83,7 @@ class GetCaptureMissionUseCase:
             "demand": _demand_payload(demand),
             "search_filters": {
                 "city": demand.city,
+                "state": demand.state,
                 "purpose": demand.purpose.value if demand.purpose else None,
                 "property_type": demand.property_type,
                 "neighborhoods": demand.neighborhoods,
@@ -75,14 +91,23 @@ class GetCaptureMissionUseCase:
                 "price_max": str(demand.price_max) if demand.price_max is not None else None,
                 "bedrooms": demand.bedrooms,
                 "parking_spaces": demand.parking_spaces,
+                "min_area": demand.min_area,
             },
             "existing_matches": [
                 {
                     "id": str(match.property.id),
                     "title": match.property.title,
                     "source_url": match.property.source_url,
-                    "price": str(match.property.price)
-                    if match.property.price is not None
+                    "price": str(
+                        property_offer_price(
+                            match.property,
+                            demand.purpose.value if demand.purpose else None,
+                        )
+                    )
+                    if property_offer_price(
+                        match.property,
+                        demand.purpose.value if demand.purpose else None,
+                    ) is not None
                     else None,
                     "score": match.score,
                     "matched": match.matched,
@@ -193,11 +218,15 @@ def _demand_payload(demand: LeadDemand) -> dict[str, Any]:
         "purpose": demand.purpose.value if demand.purpose else None,
         "property_type": demand.property_type,
         "city": demand.city,
+        "state": demand.state,
         "neighborhoods": demand.neighborhoods,
         "price_min": str(demand.price_min) if demand.price_min is not None else None,
         "price_max": str(demand.price_max) if demand.price_max is not None else None,
         "bedrooms": demand.bedrooms,
         "parking_spaces": demand.parking_spaces,
+        "min_area": demand.min_area,
+        "notes": demand.notes,
+        "status": demand.status.value,
     }
 
 

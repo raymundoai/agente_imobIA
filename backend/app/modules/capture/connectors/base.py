@@ -36,6 +36,8 @@ class SourceDescriptor:
     name: str
     coverage: str
     connector_type: str = "http"
+    automatic: bool = True
+    premium: bool = False
 
 
 @dataclass(slots=True)
@@ -103,6 +105,7 @@ class ConnectorBatch:
     parser_version: str
     request_url: str
     records: list[ExternalListingRecord]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class PortalConnector(ABC):
@@ -148,6 +151,43 @@ class PortalConnector(ABC):
         response.raise_for_status()
         return response
 
+    def post_public(
+        self,
+        url: str,
+        *,
+        json: dict[str, Any],
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        request_headers = {
+            "Accept": "application/json",
+            "Accept-Language": "pt-BR,pt;q=0.9",
+            "Content-Type": "application/json",
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+            ),
+        }
+        request_headers.update(headers or {})
+        response = self.client.post(
+            url,
+            headers=request_headers,
+            json=json,
+            follow_redirects=True,
+        )
+        challenge = response.text[:50_000].casefold()
+        if response.status_code in {401, 403, 429} or any(
+            marker in challenge
+            for marker in (
+                "attention required! | cloudflare",
+                "just a moment...",
+                "cf-chl-",
+                "captcha-delivery.com",
+            )
+        ):
+            raise SourceBlockedError(f"{self.descriptor.name} bloqueou a leitura automatizada")
+        response.raise_for_status()
+        return response
+
 
 def slug(value: str | None) -> str:
     normalized = unicodedata.normalize("NFKD", value or "")
@@ -155,14 +195,67 @@ def slug(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", "-", ascii_value.casefold()).strip("-")
 
 
-def infer_state(city: str | None) -> str | None:
+def infer_state(city: str | None, explicit_state: str | None = None) -> str | None:
+    if explicit_state and len(explicit_state.strip()) == 2:
+        return explicit_state.strip().upper()
     by_city = {
         "sao paulo": "SP",
+        "americana": "SP",
+        "barueri": "SP",
+        "bauru": "SP",
+        "campinas": "SP",
+        "carapicuiba": "SP",
+        "cotia": "SP",
+        "diadema": "SP",
+        "guaruja": "SP",
+        "guarulhos": "SP",
+        "jundiai": "SP",
+        "mogi das cruzes": "SP",
+        "osasco": "SP",
+        "piracicaba": "SP",
+        "ribeirao preto": "SP",
+        "santo andre": "SP",
+        "santos": "SP",
+        "sao bernardo do campo": "SP",
+        "sao caetano do sul": "SP",
+        "sao jose do rio preto": "SP",
+        "sao jose dos campos": "SP",
+        "sorocaba": "SP",
+        "sumare": "SP",
+        "taubate": "SP",
+        "alvorada": "RS",
+        "cachoeirinha": "RS",
+        "campo bom": "RS",
+        "bento goncalves": "RS",
+        "canela": "RS",
+        "capao da canoa": "RS",
+        "caxias do sul": "RS",
         "porto alegre": "RS",
         "canoas": "RS",
+        "dois irmaos": "RS",
+        "eldorado do sul": "RS",
+        "estancia velha": "RS",
+        "esteio": "RS",
+        "gramado": "RS",
         "gravatai": "RS",
+        "guaiba": "RS",
+        "igrejinha": "RS",
+        "ivoti": "RS",
+        "lajeado": "RS",
         "novo hamburgo": "RS",
+        "osorio": "RS",
+        "passo fundo": "RS",
+        "pelotas": "RS",
+        "rio grande": "RS",
+        "santa cruz do sul": "RS",
+        "santa maria": "RS",
+        "sapiranga": "RS",
+        "sapucaia do sul": "RS",
         "sao leopoldo": "RS",
+        "taquara": "RS",
+        "torres": "RS",
+        "tramandai": "RS",
+        "viamao": "RS",
         "salvador": "BA",
         "lauro de freitas": "BA",
         "mata de sao joao": "BA",

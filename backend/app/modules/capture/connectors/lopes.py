@@ -26,7 +26,7 @@ class LopesConnector(PortalConnector):
     parser_version = "lopes-json-v2"
 
     def search(self, demand: LeadDemand, *, limit: int = 24) -> ConnectorBatch:
-        state = (infer_state(demand.city) or "SP").casefold()
+        state = (infer_state(demand.city, demand.state) or "SP").casefold()
         deal = "rent" if requested_purpose(demand) == "rent" else "sale"
         url = (
             "https://apis.lopes.com.br/portal-home/v2/search/cache/"

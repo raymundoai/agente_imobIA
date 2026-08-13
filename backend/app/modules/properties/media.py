@@ -227,7 +227,8 @@ def optimization_prompt(optimizations: list[str], note: str | None) -> str:
     instructions = requested or "melhoria geral de iluminação e nitidez"
     user_request = note.strip() if note and note.strip() else ""
     complement = (
-        f" Pedido adicional do usuário (execute-o como parte obrigatória da edição): {user_request}."
+        " Pedido adicional do usuário (execute-o como parte obrigatória da edição): "
+        f"{user_request}."
         if user_request
         else ""
     )
@@ -244,7 +245,8 @@ def optimization_prompt(optimizations: list[str], note: str | None) -> str:
         or requests_furniture_change
     )
     element_constraint = (
-        "A alteração de mobília foi solicitada; altere somente a mobília, sem modificar elementos estruturais."
+        "A alteração de mobília foi solicitada; altere somente a mobília, sem modificar "
+        "elementos estruturais."
         if furniture_change_requested
         else "Não adicione, remova nem invente elementos e preserve a mobília existente."
     )

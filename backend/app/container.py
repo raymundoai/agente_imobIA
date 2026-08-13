@@ -61,10 +61,17 @@ class Container:
     document_parser: DocumentParserPort
     property_image_storage: PropertyImageStorage
     http_client: httpx.Client
+    capture_http_client: httpx.Client
 
     @classmethod
     def build(cls, settings: Settings) -> "Container":
         http_client = httpx.Client(timeout=settings.evolution_timeout_seconds)
+        capture_http_client = httpx.Client(
+            timeout=httpx.Timeout(
+                settings.capture_http_read_timeout_seconds,
+                connect=settings.capture_http_connect_timeout_seconds,
+            )
+        )
         database = Database(settings.database_url)
         ai_provider = (
             OpenAiAdapter(
@@ -141,10 +148,12 @@ class Container:
             document_parser=PlainTextDocumentParser(),
             property_image_storage=property_image_storage,
             http_client=http_client,
+            capture_http_client=capture_http_client,
         )
 
     def close(self) -> None:
         self.http_client.close()
+        self.capture_http_client.close()
         self.database.dispose()
 
 

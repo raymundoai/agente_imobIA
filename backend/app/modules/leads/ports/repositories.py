@@ -28,6 +28,10 @@ class LeadDemandRepositoryPort(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def delete(self, tenant_id: UUID, lead_id: UUID) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
     def list(
         self,
         tenant_id: UUID,

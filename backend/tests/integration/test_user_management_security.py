@@ -257,3 +257,42 @@ def test_password_setup_revokes_old_session_and_accepts_new_password(
         json={"token": setup.json()["token"], "password": "replacement-password-123"},
     )
     assert accepted.status_code == 200, accepted.text
+
+
+def test_attendant_has_read_only_access_to_property_demands(client: TestClient) -> None:
+    _, admin_tokens = _provision(client, "attendant-demands")
+    admin_headers = _headers(admin_tokens["access_token"])
+    created = client.post(
+        "/users",
+        headers=admin_headers,
+        json={
+            "name": "Atendente",
+            "email": "readonly@example.com",
+            "password": PASSWORD,
+            "role": "atendente",
+        },
+    )
+    assert created.status_code == 201, created.text
+    login = client.post(
+        "/auth/login",
+        json={
+            "tenant_slug": "attendant-demands",
+            "email": "readonly@example.com",
+            "password": PASSWORD,
+        },
+    )
+    attendant_headers = _headers(login.json()["access_token"])
+
+    assert client.get("/leads/demands", headers=attendant_headers).status_code == 200
+    denied = client.post(
+        "/leads/demands",
+        headers=attendant_headers,
+        json={
+            "lead_name": "Sem permissão",
+            "phone": "5551999881100",
+            "purpose": "rent",
+            "city": "Porto Alegre",
+            "state": "RS",
+        },
+    )
+    assert denied.status_code == 403

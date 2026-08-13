@@ -15,7 +15,12 @@ class PropertyRepositoryPort(ABC):
 
     @abstractmethod
     def upsert_captured(
-        self, tenant_id: UUID, property: Property, demand_id: UUID | None
+        self,
+        tenant_id: UUID,
+        property: Property,
+        demand_id: UUID | None,
+        *,
+        commit: bool = True,
     ) -> Property:
         raise NotImplementedError
 

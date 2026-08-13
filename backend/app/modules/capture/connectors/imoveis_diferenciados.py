@@ -23,7 +23,7 @@ class ImoveisDiferenciadosConnector(PortalConnector):
     parser_version = "imoveis-diferenciados-api-v1"
 
     def supports(self, demand: LeadDemand) -> bool:
-        return infer_state(demand.city) == "BA"
+        return infer_state(demand.city, demand.state) == "BA"
 
     def search(self, demand: LeadDemand, *, limit: int = 24) -> ConnectorBatch:
         purpose = requested_purpose(demand)
@@ -70,13 +70,13 @@ class ImoveisDiferenciadosConnector(PortalConnector):
             title=str(item.get("title_formatted") or item.get("meta_title") or "Imóvel"),
             purpose=purpose,
             property_type=property_type or demand.property_type,
-            state=state or infer_state(city) or infer_state(demand.city),
+            state=state or infer_state(city) or infer_state(demand.city, demand.state),
             city=city or str(demand.city or ""),
             neighborhood=neighborhood,
             address={
                 "neighborhood": neighborhood,
                 "city": city or demand.city,
-                "state": state or infer_state(city) or infer_state(demand.city),
+                "state": state or infer_state(city) or infer_state(demand.city, demand.state),
             },
             price=price,
             sale_price=price if purpose == "buy" else None,

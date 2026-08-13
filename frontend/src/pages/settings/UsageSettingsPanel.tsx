@@ -162,6 +162,8 @@ const typeLabels: Record<string, string> = {
 const resourceLabels: Record<string, string> = {
   ai_message: "Atendimento por IA",
   image_edit: "Tratamento de imagem",
+  property_search_standard: "Busca convencional de imóveis",
+  property_search_ai: "Descoberta web com IA",
 };
 
 function formatUsd(value: number) {

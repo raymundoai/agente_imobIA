@@ -28,6 +28,7 @@ class LeadDemand:
     purpose: LeadPurpose | None = None
     property_type: str | None = None
     city: str | None = None
+    state: str | None = None
     neighborhoods: list[str] = field(default_factory=list)
     price_min: Decimal | None = None
     price_max: Decimal | None = None

@@ -12,6 +12,7 @@ def main() -> None:
     processor = CaptureJobProcessor(container)
     logging.basicConfig(level=container.settings.log_level)
     stopping = threading.Event()
+    logger = logging.getLogger(__name__)
 
     def stop(_: int, __: object) -> None:
         stopping.set()
@@ -20,9 +21,16 @@ def main() -> None:
     signal.signal(signal.SIGINT, stop)
     try:
         while not stopping.is_set():
-            result = processor.process_next()
+            try:
+                result = processor.process_next()
+            except Exception:
+                logger.exception("Capture worker survived an unexpected processor error")
+                stopping.wait(1)
+                continue
             if result is None:
                 stopping.wait(1)
+            else:
+                logger.info("Capture job processed: %s", result)
     finally:
         container.close()
 

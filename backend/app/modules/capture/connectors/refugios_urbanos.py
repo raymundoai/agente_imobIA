@@ -27,7 +27,10 @@ class RefugiosUrbanosConnector(PortalConnector):
     parser_version = "refugios-cards-v1"
 
     def supports(self, demand: LeadDemand) -> bool:
-        return infer_state(demand.city) == "SP" and requested_purpose(demand) != "rent"
+        return (
+            infer_state(demand.city, demand.state) == "SP"
+            and requested_purpose(demand) != "rent"
+        )
 
     def search(self, demand: LeadDemand, *, limit: int = 24) -> ConnectorBatch:
         if demand.neighborhoods:

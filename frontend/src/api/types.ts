@@ -88,6 +88,7 @@ export type LeadDemand = {
   phone: string;
   purpose: string | null;
   city: string | null;
+  state: string | null;
   property_type: string | null;
   neighborhoods: string[];
   price_min: string | null;
@@ -102,7 +103,7 @@ export type LeadDemand = {
 };
 
 export type CaptureMission = {
-  demand: Pick<LeadDemand, "id" | "lead_name" | "phone" | "purpose" | "property_type" | "city" | "neighborhoods" | "price_min" | "price_max" | "bedrooms" | "parking_spaces">;
+  demand: Pick<LeadDemand, "id" | "lead_name" | "phone" | "purpose" | "property_type" | "city" | "state" | "neighborhoods" | "price_min" | "price_max" | "bedrooms" | "parking_spaces" | "min_area" | "notes" | "status">;
   search_filters: Record<string, string | number | string[] | null>;
   existing_matches: Array<{
     id: string;
@@ -136,7 +137,7 @@ export type CaptureMission = {
 export type FederatedSearchSource = {
   source_id: string;
   source_name: string;
-  status: "queued" | "running" | "completed" | "failed" | "blocked";
+  status: "queued" | "running" | "completed" | "failed" | "blocked" | "cancelled";
   discovered_count: number;
   imported_count: number;
   error_code: string | null;
@@ -144,10 +145,20 @@ export type FederatedSearchSource = {
   parser_version: string | null;
 };
 
+export type FederatedSourceDescriptor = {
+  id: string;
+  name: string;
+  coverage: string;
+  connector_type: string;
+  automatic: boolean;
+  premium: boolean;
+};
+
 export type ExternalPropertyResult = {
   id: string;
   source_id: string;
   source_name: string;
+  source_domain: string;
   source_listing_id: string;
   canonical_url: string;
   title: string;
@@ -188,6 +199,15 @@ export type FederatedSearchRun = {
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
+  cache_hit: boolean;
+  cache_expires_at: string | null;
+  requested_by_user_id: string | null;
+  results_has_more: boolean;
+};
+
+export type FederatedSearchHistory = {
+  standard: FederatedSearchRun | null;
+  ai: FederatedSearchRun | null;
 };
 
 export type Property = {

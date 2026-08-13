@@ -8,6 +8,8 @@ from decimal import Decimal
 from app.modules.leads.domain.entities import LeadDemand
 from app.modules.properties.domain.entities import Property, PropertyPurpose
 
+MATCHING_VERSION = "2026-08-13.1"
+
 
 @dataclass(slots=True)
 class PropertyMatch:
@@ -87,7 +89,7 @@ def calculate_property_match(property_: Property, demand: LeadDemand) -> Propert
     price = property_offer_price(property_, purpose)
     if demand.price_min is not None or demand.price_max is not None:
         price_ok = (
-            None
+            False
             if price is None
             else (
                 (demand.price_min is None or price >= demand.price_min)
@@ -98,25 +100,31 @@ def calculate_property_match(property_: Property, demand: LeadDemand) -> Propert
     criterion(
         "quartos",
         8,
-        property_.bedrooms >= demand.bedrooms
-        if property_.bedrooms is not None and demand.bedrooms is not None
-        else None,
+        None
+        if demand.bedrooms is None
+        else False
+        if property_.bedrooms is None
+        else property_.bedrooms >= demand.bedrooms,
         "menos quartos",
     )
     criterion(
         "vagas",
         5,
-        property_.parking_spaces >= demand.parking_spaces
-        if property_.parking_spaces is not None and demand.parking_spaces is not None
-        else None,
+        None
+        if demand.parking_spaces is None
+        else False
+        if property_.parking_spaces is None
+        else property_.parking_spaces >= demand.parking_spaces,
         "menos vagas",
     )
     criterion(
         "área",
         7,
-        property_.area >= demand.min_area
-        if property_.area is not None and demand.min_area is not None
-        else None,
+        None
+        if demand.min_area is None
+        else False
+        if property_.area is None
+        else property_.area >= demand.min_area,
         "área menor que a desejada",
     )
     return PropertyMatch(
@@ -125,6 +133,29 @@ def calculate_property_match(property_: Property, demand: LeadDemand) -> Propert
         matched=matched,
         tradeoffs=tradeoffs,
     )
+
+
+def meets_required_constraints(property_: Property, demand: LeadDemand) -> bool:
+    """Apply the non-negotiable boundaries before ranking optional preferences."""
+    if demand.purpose and property_.purpose not in {demand.purpose, PropertyPurpose.BOTH}:
+        return False
+    if demand.city and normalize_search_text(property_.city) != normalize_search_text(demand.city):
+        return False
+    property_state = normalize_search_text(str(property_.address.get("state") or ""))
+    demand_state = normalize_search_text(demand.state)
+    if demand_state and property_state and property_state != demand_state:
+        return False
+    price = property_offer_price(
+        property_, demand.purpose.value if demand.purpose else None
+    )
+    if demand.price_min is not None or demand.price_max is not None:
+        if price is None:
+            return False
+        if demand.price_min is not None and price < demand.price_min:
+            return False
+        if demand.price_max is not None and price > demand.price_max:
+            return False
+    return True
 
 
 def _similar_text(left: str | None, right: str | None) -> bool:

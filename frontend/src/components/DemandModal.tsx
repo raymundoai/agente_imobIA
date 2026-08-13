@@ -14,6 +14,7 @@ type DemandForm = {
   purpose: string;
   property_type: string;
   city: string;
+  state: string;
   neighborhoods: string;
   price_min: string;
   price_max: string;
@@ -30,6 +31,7 @@ type DemandModalProps = {
   isOpen: boolean;
   onClose: () => void;
   onCreated: (demand: LeadDemand) => void;
+  demand?: LeadDemand | null;
 };
 
 const emptyForm: DemandForm = {
@@ -38,6 +40,7 @@ const emptyForm: DemandForm = {
   purpose: "buy",
   property_type: "",
   city: "",
+  state: "",
   neighborhoods: "",
   price_min: "",
   price_max: "",
@@ -82,6 +85,7 @@ export function DemandModal({
   isOpen,
   onClose,
   onCreated,
+  demand,
 }: DemandModalProps) {
   const { token } = useAuth();
   const [form, setForm] = useState<DemandForm>(emptyForm);
@@ -94,11 +98,22 @@ export function DemandModal({
     }
     setForm({
       ...emptyForm,
-      lead_name: initialLeadName ?? "",
-      phone: formatPhoneInput(initialPhone ?? ""),
+      lead_name: demand?.lead_name ?? initialLeadName ?? "",
+      phone: formatPhoneInput(demand?.phone ?? initialPhone ?? ""),
+      purpose: demand?.purpose ?? "buy",
+      property_type: demand?.property_type ?? "",
+      city: demand?.city ?? "",
+      state: demand?.state ?? "",
+      neighborhoods: demand?.neighborhoods.join(", ") ?? "",
+      price_min: demand?.price_min ? brlFormatter.format(Number(demand.price_min)) : "",
+      price_max: demand?.price_max ? brlFormatter.format(Number(demand.price_max)) : "",
+      bedrooms: demand?.bedrooms?.toString() ?? "",
+      parking_spaces: demand?.parking_spaces?.toString() ?? "",
+      min_area: demand?.min_area?.toString() ?? "",
+      notes: demand?.notes ?? "",
     });
     setMessage(null);
-  }, [initialLeadName, initialPhone, isOpen]);
+  }, [demand, initialLeadName, initialPhone, isOpen]);
 
   if (!isOpen) {
     return null;
@@ -114,6 +129,7 @@ export function DemandModal({
       form.purpose &&
       form.property_type.trim() &&
       form.city.trim() &&
+      form.state &&
       form.neighborhoods.split(",").some((item) => item.trim()) &&
       priceMax &&
       priceRangeValid,
@@ -123,10 +139,10 @@ export function DemandModal({
     setSaving(true);
     setMessage(null);
     try {
-      const demand = await request<LeadDemand>(
-        "/leads/demands",
+      const savedDemand = await request<LeadDemand>(
+        demand ? `/leads/demands/${demand.id}` : "/leads/demands",
         {
-          method: "POST",
+          method: demand ? "PATCH" : "POST",
           body: JSON.stringify({
             lead_name: form.lead_name,
             phone: contactIdentity,
@@ -134,6 +150,7 @@ export function DemandModal({
             purpose: form.purpose || null,
             property_type: form.property_type || null,
             city: form.city || null,
+            state: form.state || null,
             neighborhoods: form.neighborhoods
               .split(",")
               .map((item) => item.trim())
@@ -148,7 +165,7 @@ export function DemandModal({
         },
         token,
       );
-      onCreated(demand);
+      onCreated(savedDemand);
       onClose();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao cadastrar demanda.");
@@ -163,8 +180,8 @@ export function DemandModal({
         <header className="modal-header">
           <div>
             <span className="eyebrow">Busca de imóvel</span>
-            <h2>Cadastrar demanda</h2>
-            <p>Preencha o perfil do imóvel para registrar a demanda e iniciar a busca.</p>
+            <h2>{demand ? "Editar demanda" : "Cadastrar demanda"}</h2>
+            <p>Revise os critérios. A consulta aos portais será iniciada separadamente.</p>
             <small className="required-fields-note">Campos marcados com * são obrigatórios.</small>
           </div>
           <button aria-label="Fechar" className="icon-button" onClick={onClose} type="button">
@@ -226,6 +243,20 @@ export function DemandModal({
               value={form.city}
               onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))}
             />
+          </label>
+          <label>
+            Estado *
+            <select
+              required
+              value={form.state}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, state: event.target.value }))
+              }
+            >
+              <option value="">Selecione</option>
+              <option value="RS">Rio Grande do Sul</option>
+              <option value="SP">São Paulo</option>
+            </select>
           </label>
           <label>
             Bairros *
@@ -315,7 +346,7 @@ export function DemandModal({
             type="button"
           >
             <Search size={16} />
-            {saving ? "Iniciando..." : "Iniciar busca"}
+            {saving ? "Salvando..." : demand ? "Salvar alterações" : "Cadastrar demanda"}
           </button>
         </footer>
       </section>

@@ -29,12 +29,12 @@ class AuxiliadoraPredialConnector(PortalConnector):
     parser_version = "auxiliadora-jsonld-v1"
 
     def supports(self, demand: LeadDemand) -> bool:
-        return infer_state(demand.city) in {"SP", "RS"}
+        return infer_state(demand.city, demand.state) in {"SP", "RS"}
 
     def search(self, demand: LeadDemand, *, limit: int = 24) -> ConnectorBatch:
         purpose = requested_purpose(demand)
         action = "alugar" if purpose == "rent" else "comprar"
-        state = (infer_state(demand.city) or "RS").casefold()
+        state = (infer_state(demand.city, demand.state) or "RS").casefold()
         url = (
             f"https://www.auxiliadorapredial.com.br/{action}/residencial/"
             f"{state}+{slug(demand.city)}"
@@ -93,14 +93,14 @@ class AuxiliadoraPredialConnector(PortalConnector):
             description=_text(item.get("description")),
             purpose=purpose,
             property_type=_text(offered.get("accommodationCategory")) or demand.property_type,
-            state=infer_state(city) or infer_state(demand.city),
+            state=infer_state(city) or infer_state(demand.city, demand.state),
             city=city,
             neighborhood=neighborhood,
             address={
                 "street": address.get("streetAddress"),
                 "neighborhood": neighborhood,
                 "city": city,
-                "state": infer_state(city) or infer_state(demand.city),
+                "state": infer_state(city) or infer_state(demand.city, demand.state),
             },
             latitude=decimal_value(geo.get("latitude")),
             longitude=decimal_value(geo.get("longitude")),

@@ -24,11 +24,11 @@ class GuaridaConnector(PortalConnector):
     parser_version = "guarida-next-v1"
 
     def supports(self, demand: LeadDemand) -> bool:
-        return infer_state(demand.city) == "RS"
+        return infer_state(demand.city, demand.state) == "RS"
 
     def search(self, demand: LeadDemand, *, limit: int = 24) -> ConnectorBatch:
         deal = "alugar" if requested_purpose(demand) == "rent" else "comprar"
-        state = (infer_state(demand.city) or "RS").casefold()
+        state = (infer_state(demand.city, demand.state) or "RS").casefold()
         url = (
             f"https://guarida.com.br/busca/{deal}/residencial%2Bcomercial/"
             f"{slug(demand.city)}-{state}"

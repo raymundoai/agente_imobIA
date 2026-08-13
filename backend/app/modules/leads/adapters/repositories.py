@@ -19,6 +19,7 @@ def _to_domain(model: LeadDemandModel) -> LeadDemand:
         purpose=LeadPurpose(model.purpose) if model.purpose else None,
         property_type=model.property_type,
         city=model.city,
+        state=model.state,
         neighborhoods=model.neighborhoods,
         price_min=model.price_min,
         price_max=model.price_max,
@@ -89,6 +90,7 @@ class SqlAlchemyLeadDemandRepository(LeadDemandRepositoryPort):
         model.purpose = lead.purpose.value if lead.purpose else None
         model.property_type = lead.property_type
         model.city = lead.city
+        model.state = lead.state
         model.neighborhoods = lead.neighborhoods
         model.price_min = lead.price_min
         model.price_max = lead.price_max
@@ -104,6 +106,19 @@ class SqlAlchemyLeadDemandRepository(LeadDemandRepositoryPort):
         self._session.commit()
         self._session.refresh(model)
         return _to_domain(model)
+
+    def delete(self, tenant_id: UUID, lead_id: UUID) -> bool:
+        model = self._session.scalar(
+            select(LeadDemandModel).where(
+                LeadDemandModel.tenant_id == tenant_id,
+                LeadDemandModel.id == lead_id,
+            )
+        )
+        if model is None:
+            return False
+        self._session.delete(model)
+        self._session.commit()
+        return True
 
     def list(
         self,

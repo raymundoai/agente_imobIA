@@ -243,7 +243,7 @@ def test_connectors_expose_completeness_separately_from_fit() -> None:
     assert 0 < record.completeness_score() < 100
 
 
-def test_external_catalog_preserves_alternative_price_between_searches() -> None:
+def test_external_catalog_clears_an_alternative_price_missing_from_current_offer() -> None:
     now = datetime.now(UTC)
     listing = ExternalListingModel(
         id=uuid4(),
@@ -269,6 +269,6 @@ def test_external_catalog_preserves_alternative_price_between_searches() -> None
 
     FederatedSearchRepository._apply_record(listing, rent_record, now)
 
-    assert listing.sale_price == Decimal("900000")
+    assert listing.sale_price is None
     assert listing.rent_price == Decimal("4500")
-    assert listing.purpose == "both"
+    assert listing.purpose == "rent"

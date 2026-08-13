@@ -4,6 +4,8 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
+    BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -120,11 +122,26 @@ class SearchRunModel(Base):
         UniqueConstraint("tenant_id", "id", name="uq_capture_search_runs_tenant_id_id"),
         Index("ix_capture_search_runs_tenant_created", "tenant_id", "created_at"),
         Index("ix_capture_search_runs_tenant_demand", "tenant_id", "demand_id"),
+        Index(
+            "uq_capture_search_runs_cache_bucket",
+            "tenant_id",
+            "demand_id",
+            "cache_key",
+            "cache_bucket",
+            unique=True,
+            postgresql_where=text(
+                "status IN ('queued', 'running', 'partial', 'completed') AND NOT force_refresh"
+            ),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
     tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     demand_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    requested_by_user_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+    )
     status: Mapped[str] = mapped_column(
         Text, nullable=False, default="queued", server_default="queued"
     )
@@ -135,6 +152,16 @@ class SearchRunModel(Base):
     completed_source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     result_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error: Mapped[str | None] = mapped_column(Text)
+    cache_key: Mapped[str | None] = mapped_column(Text)
+    cache_bucket: Mapped[int | None] = mapped_column(BigInteger)
+    cache_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    catalog_version: Mapped[str | None] = mapped_column(Text)
+    matching_version: Mapped[str | None] = mapped_column(Text)
+    force_refresh: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    billing_reservation_key: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
@@ -149,7 +176,7 @@ class SearchRunSourceModel(Base):
     __tablename__ = "capture_search_run_sources"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('queued', 'running', 'completed', 'failed', 'blocked')",
+            "status IN ('queued', 'running', 'completed', 'failed', 'blocked', 'cancelled')",
             name="status",
         ),
         ForeignKeyConstraint(
@@ -218,6 +245,10 @@ class DemandExternalMatchModel(Base):
         nullable=False,
     )
     last_search_run_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    saved_property_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="SET NULL"),
+    )
     fit_score: Mapped[int] = mapped_column(Integer, nullable=False)
     confidence_score: Mapped[int] = mapped_column(Integer, nullable=False)
     matched: Mapped[list[str]] = mapped_column(
@@ -241,7 +272,7 @@ class CaptureJobModel(Base):
     __tablename__ = "capture_jobs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('queued', 'processing', 'retrying', 'completed', 'failed')",
+            "status IN ('queued', 'processing', 'retrying', 'completed', 'failed', 'cancelled')",
             name="status",
         ),
         ForeignKeyConstraint(
@@ -280,4 +311,61 @@ class CaptureJobModel(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SearchRunResultModel(Base):
+    """Immutable listing and match snapshot produced by one search execution."""
+
+    __tablename__ = "capture_search_run_results"
+    __table_args__ = (
+        CheckConstraint("fit_score BETWEEN 0 AND 100", name="fit_score"),
+        CheckConstraint("confidence_score BETWEEN 0 AND 100", name="confidence_score"),
+        ForeignKeyConstraint(
+            ["tenant_id", "search_run_id"],
+            ["capture_search_runs.tenant_id", "capture_search_runs.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "search_run_id",
+            "external_listing_id",
+            name="uq_capture_search_run_result",
+        ),
+        Index(
+            "ix_capture_search_run_results_rank",
+            "tenant_id",
+            "search_run_id",
+            "fit_score",
+        ),
+        Index(
+            "ix_capture_search_run_results_source",
+            "tenant_id",
+            "search_run_id",
+            "source_id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    search_run_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    external_listing_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("external_listings.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_id: Mapped[str] = mapped_column(Text, nullable=False)
+    fit_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    confidence_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    matched: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    tradeoffs: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    listing_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )

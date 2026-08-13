@@ -59,7 +59,12 @@ class SqlAlchemyPropertyRepository(PropertyRepositoryPort):
         self._session = session
 
     def upsert_captured(
-        self, tenant_id: UUID, property: Property, demand_id: UUID | None
+        self,
+        tenant_id: UUID,
+        property: Property,
+        demand_id: UUID | None,
+        *,
+        commit: bool = True,
     ) -> Property:
         if property.tenant_id != tenant_id:
             raise ValueError("Property tenant does not match repository scope")
@@ -100,8 +105,11 @@ class SqlAlchemyPropertyRepository(PropertyRepositoryPort):
             self._session.flush()
         if demand_id is not None:
             self._link(tenant_id, model.id, demand_id)
-        self._session.commit()
-        self._session.refresh(model)
+        if commit:
+            self._session.commit()
+            self._session.refresh(model)
+        else:
+            self._session.flush()
         return _to_domain(model)
 
     def create_manual(self, tenant_id: UUID, property: Property) -> Property:

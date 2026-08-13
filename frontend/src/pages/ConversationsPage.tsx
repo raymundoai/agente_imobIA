@@ -325,7 +325,6 @@ export function ConversationsPage() {
       setActionError(readActionError(error));
       return;
     }
-    setAiEnabledById((current) => ({ ...current, [selected.id]: false }));
     appendMessage(selected.id, {
       direction: "outbound",
       author_type: "system",
@@ -488,7 +487,7 @@ export function ConversationsPage() {
     appendMessage(selected.id, {
       direction: "outbound",
       author_type: "system",
-      text: `Demanda cadastrada e busca iniciada para ${demand.property_type ?? "imóvel"} em ${demand.city ?? "cidade a definir"}.`,
+      text: `Demanda cadastrada para ${demand.property_type ?? "imóvel"} em ${demand.city ?? "cidade a definir"}. Ela está pronta para o corretor iniciar a busca externa.`,
     });
   }
 

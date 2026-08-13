@@ -800,7 +800,10 @@ def property_image_content(
             image.legacy_url
             and parsed.scheme == "https"
             and parsed.hostname
-            and parsed.hostname.lower() in allowed_hosts
+            and (
+                parsed.hostname.lower() in allowed_hosts
+                or image.legacy_metadata.get("external_capture") is True
+            )
         ):
             return RedirectResponse(image.legacy_url)
         raise HTTPException(

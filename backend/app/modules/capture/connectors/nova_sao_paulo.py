@@ -28,7 +28,7 @@ class NovaSaoPauloConnector(PortalConnector):
     parser_version = "nova-sp-cards-v1"
 
     def supports(self, demand: LeadDemand) -> bool:
-        return infer_state(demand.city) == "SP"
+        return infer_state(demand.city, demand.state) == "SP"
 
     def search(self, demand: LeadDemand, *, limit: int = 24) -> ConnectorBatch:
         requested = requested_purpose(demand)

@@ -97,6 +97,14 @@ class Settings(BaseSettings):
     capture_job_max_attempts: int = Field(default=3, ge=1, le=10)
     capture_job_backoff_seconds: int = Field(default=15, ge=1, le=3600)
     capture_job_stale_seconds: int = Field(default=180, ge=30, le=3600)
+    capture_http_connect_timeout_seconds: float = Field(default=5, gt=0, le=30)
+    capture_http_read_timeout_seconds: float = Field(default=20, gt=0, le=120)
+    capture_search_cache_ttl_seconds: int = Field(default=86_400, ge=300, le=604_800)
+    capture_standard_search_credits: int = Field(default=10, ge=0, le=100_000)
+    capture_web_discovery_enabled: bool = True
+    capture_web_discovery_model: str = "gpt-5.6-luna"
+    capture_web_discovery_max_results: int = Field(default=6, ge=1, le=12)
+    capture_web_discovery_max_output_tokens: int = Field(default=4_000, ge=512, le=16_000)
     integration_secret_key: SecretStr | None = None
     integration_secret_key_version: int = Field(default=1, ge=1, le=1000)
     integration_secret_previous_keys: list[SecretStr] = Field(default_factory=list)

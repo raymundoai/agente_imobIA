@@ -626,6 +626,7 @@ class GenerateAiReplyUseCase:
                     "purpose": demand.purpose.value if demand.purpose else None,
                     "property_type": demand.property_type,
                     "city": demand.city,
+                    "state": demand.state,
                     "neighborhoods": demand.neighborhoods,
                     "price_min": str(demand.price_min) if demand.price_min is not None else None,
                     "price_max": str(demand.price_max) if demand.price_max is not None else None,
@@ -767,6 +768,7 @@ class GenerateAiReplyUseCase:
                         "purpose": {"type": ["string", "null"], "enum": ["buy", "rent", None]},
                         "property_type": {"type": ["string", "null"]},
                         "city": {"type": ["string", "null"]},
+                        "state": {"type": ["string", "null"]},
                         "neighborhoods": {
                             "type": "array",
                             "items": {"type": "string"},
@@ -786,6 +788,7 @@ class GenerateAiReplyUseCase:
                         "purpose",
                         "property_type",
                         "city",
+                        "state",
                         "neighborhoods",
                         "price_min",
                         "price_max",

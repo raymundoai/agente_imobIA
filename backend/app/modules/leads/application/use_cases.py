@@ -174,11 +174,19 @@ class LeadQualificationService(LeadQualificationPort):
         lead.purpose = _purpose(data.get("purpose")) or lead.purpose
         lead.property_type = _as_optional_str(data.get("property_type")) or lead.property_type
         lead.city = _as_optional_str(data.get("city")) or lead.city
+        state = _as_optional_str(data.get("state"))
+        lead.state = state.upper() if state and len(state) == 2 else lead.state
         neighborhoods = data.get("neighborhoods")
         if isinstance(neighborhoods, list):
             lead.neighborhoods = [str(item) for item in neighborhoods if str(item).strip()]
         lead.price_min = _decimal_or_none(data.get("price_min")) or lead.price_min
         lead.price_max = _decimal_or_none(data.get("price_max")) or lead.price_max
+        if (
+            lead.price_min is not None
+            and lead.price_max is not None
+            and lead.price_min > lead.price_max
+        ):
+            raise ValueError("O preço mínimo não pode ser maior que o preço máximo")
         lead.bedrooms = _int_or_none(data.get("bedrooms")) or lead.bedrooms
         lead.parking_spaces = _int_or_none(data.get("parking_spaces")) or lead.parking_spaces
         lead.min_area = _int_or_none(data.get("min_area")) or lead.min_area

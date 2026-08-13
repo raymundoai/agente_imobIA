@@ -51,7 +51,12 @@ def dashboard_stats(
         .where(MaintenanceTicketModel.tenant_id == tenant_id)
     )
     properties = session.scalar(
-        select(func.count()).select_from(PropertyModel).where(PropertyModel.tenant_id == tenant_id)
+        select(func.count())
+        .select_from(PropertyModel)
+        .where(
+            PropertyModel.tenant_id == tenant_id,
+            PropertyModel.source == "manual",
+        )
     )
     return DashboardStats(
         conversations=int(conversations or 0),

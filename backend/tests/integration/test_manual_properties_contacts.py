@@ -146,6 +146,121 @@ def test_property_requires_prices_for_each_selected_offer(client: TestClient) ->
     assert response.status_code == 422
 
 
+def test_lead_demand_can_only_be_deleted_by_its_own_tenant(client: TestClient) -> None:
+    token_a = _provision(client, "demand-owner", "owner@example.com")
+    token_b = _provision(client, "demand-other", "other@example.com")
+    auth_a = {"Authorization": f"Bearer {token_a}"}
+    auth_b = {"Authorization": f"Bearer {token_b}"}
+    created = client.post(
+        "/leads/demands",
+        headers=auth_a,
+        json={
+            "lead_name": "Cliente da demanda",
+            "phone": "5511999887766",
+            "purpose": "rent",
+            "city": "São Paulo",
+        },
+    )
+    assert created.status_code == 201, created.text
+    demand_id = created.json()["id"]
+
+    denied = client.delete(f"/leads/demands/{demand_id}", headers=auth_b)
+    assert denied.status_code == 404
+    assert len(client.get("/leads/demands", headers=auth_a).json()) == 1
+
+    deleted = client.delete(f"/leads/demands/{demand_id}", headers=auth_a)
+    assert deleted.status_code == 204, deleted.text
+    assert client.get("/leads/demands", headers=auth_a).json() == []
+
+
+def test_lead_demand_update_persists_state_and_validates_price_range(
+    client: TestClient,
+) -> None:
+    token = _provision(client, "demand-state", "state@example.com")
+    auth = {"Authorization": f"Bearer {token}"}
+    created = client.post(
+        "/leads/demands",
+        headers=auth,
+        json={
+            "lead_name": "Cliente estadual",
+            "phone": "5551999001122",
+            "purpose": "buy",
+            "city": "Porto Alegre",
+            "state": "rs",
+            "price_min": 400000,
+            "price_max": 800000,
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["state"] == "RS"
+
+    updated = client.patch(
+        f"/leads/demands/{created.json()['id']}",
+        headers=auth,
+        json={"city": "São Paulo", "state": "sp"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["city"] == "São Paulo"
+    assert updated.json()["state"] == "SP"
+
+    invalid = client.patch(
+        f"/leads/demands/{created.json()['id']}",
+        headers=auth,
+        json={"price_min": 900000},
+    )
+    assert invalid.status_code == 422
+
+
+def test_federated_search_reuses_cache_and_releases_unstarted_reservation(
+    client: TestClient,
+) -> None:
+    token = _provision(client, "search-cache-api", "search@example.com")
+    auth = {"Authorization": f"Bearer {token}"}
+    demand = client.post(
+        "/leads/demands",
+        headers=auth,
+        json={
+            "lead_name": "Cliente da busca",
+            "phone": "5551999770011",
+            "purpose": "buy",
+            "property_type": "apartamento",
+            "city": "São Paulo",
+            "state": "SP",
+            "price_max": 900000,
+        },
+    )
+    assert demand.status_code == 201, demand.text
+    payload = {"demand_id": demand.json()["id"]}
+
+    first = client.post("/capture/search-runs", headers=auth, json=payload)
+    assert first.status_code == 202, first.text
+    assert first.json()["cache_hit"] is False
+    credits = client.get("/usage/credits", headers=auth)
+    assert credits.status_code == 200, credits.text
+    assert credits.json()["reserved_credits"] == 10
+
+    repeated = client.post("/capture/search-runs", headers=auth, json=payload)
+    assert repeated.status_code == 202, repeated.text
+    assert repeated.json()["id"] == first.json()["id"]
+    assert repeated.json()["cache_hit"] is True
+    assert client.get("/usage/credits", headers=auth).json()["reserved_credits"] == 10
+
+    cancelled = client.post(
+        f"/capture/search-runs/{first.json()['id']}/cancel",
+        headers=auth,
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert client.get("/usage/credits", headers=auth).json()["reserved_credits"] == 0
+
+    legacy = client.post(
+        f"/capture/missions/{demand.json()['id']}/discover",
+        headers=auth,
+        json={"portal": "lello", "limit": 5},
+    )
+    assert legacy.status_code == 410
+
+
 def test_property_image_upload_validates_and_serves_file(client: TestClient) -> None:
     token = _provision(client, "tenant-a", "a@example.com")
     auth = {"Authorization": f"Bearer {token}"}
@@ -299,6 +414,7 @@ def test_property_media_can_be_staged_committed_and_discarded(client: TestClient
             "purpose": "buy",
             "property_type": "casa",
             "category": "residential",
+            "sale_price": "750000.00",
             "address": {
                 "street": "Rua Staging",
                 "neighborhood": "Centro",
