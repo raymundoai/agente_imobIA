@@ -19,6 +19,7 @@ class FakeMessageChannel(MessageChannelPort):
     def __init__(self, delegate: MessageChannelPort) -> None:
         self._delegate = delegate
         self.sent: list[tuple[str, str]] = []
+        self.sent_media: list[dict[str, Any]] = []
 
     def receive_message(self, payload: dict[str, Any]) -> InboundChannelMessage:
         return self._delegate.receive_message(payload)
@@ -28,6 +29,29 @@ class FakeMessageChannel(MessageChannelPort):
     ) -> SentChannelMessage:
         self.sent.append((phone, text))
         return SentChannelMessage(external_message_id=f"sent-{len(self.sent)}")
+
+    def send_media(
+        self,
+        credentials: ChannelCredentials,
+        phone: str,
+        *,
+        content: bytes,
+        media_type: str,
+        mimetype: str,
+        filename: str,
+        caption: str = "",
+    ) -> SentChannelMessage:
+        self.sent_media.append(
+            {
+                "phone": phone,
+                "content": content,
+                "media_type": media_type,
+                "mimetype": mimetype,
+                "filename": filename,
+                "caption": caption,
+            }
+        )
+        return SentChannelMessage(external_message_id=f"media-{len(self.sent_media)}")
 
 
 def _provision(client: TestClient, slug: str) -> tuple[str, str]:
@@ -119,6 +143,27 @@ def test_conversations_handoff_and_messages_are_tenant_isolated(
     assert sent.json()["author_type"] == "human"
     assert fake_channel.sent == [("5511888888888", "Olá, sou o corretor responsável.")]
 
+    property_photo = b"\x89PNG\r\n\x1a\nproperty-photo"
+    media = client.post(
+        f"/conversations/{conversation_a}/media",
+        headers=auth_a,
+        data={"caption": "Casa com 3 quartos em Porto Alegre"},
+        files={"file": ("fachada.png", property_photo, "image/png")},
+    )
+    assert media.status_code == 201, media.text
+    assert media.json()["text"] == "Casa com 3 quartos em Porto Alegre"
+    assert media.json()["attachments"][0]["type"] == "image"
+    assert fake_channel.sent_media == [
+        {
+            "phone": "5511888888888",
+            "content": property_photo,
+            "media_type": "image",
+            "mimetype": "image/png",
+            "filename": "fachada.png",
+            "caption": "Casa com 3 quartos em Porto Alegre",
+        }
+    ]
+
     detail_b = client.get(f"/conversations/{conversation_b}", headers=auth_b)
     assert detail_b.status_code == 200
     assert len(detail_b.json()["messages"]) == 1
@@ -136,4 +181,4 @@ def test_conversations_handoff_and_messages_are_tenant_isolated(
             ).all()
         )
     engine.dispose()
-    assert usage_counts == {tenant_a: 2, tenant_b: 1}
+    assert usage_counts == {tenant_a: 3, tenant_b: 1}

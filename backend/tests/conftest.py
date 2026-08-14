@@ -106,6 +106,7 @@ def client(migrated_database: str, tmp_path: Path) -> Generator[TestClient, None
         ai_message_part_pause_ms=0,
         platform_bootstrap_token=TEST_PLATFORM_BOOTSTRAP_TOKEN,
         telegram_auto_reply_enabled=False,
+        conversation_media_root=tmp_path / "conversation-media",
         property_media_root=tmp_path / "property-images",
         openai_api_key=None,
         telegram_tenant_configs={

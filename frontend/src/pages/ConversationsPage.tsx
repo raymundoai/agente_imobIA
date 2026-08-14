@@ -26,6 +26,11 @@ import { Badge } from "../components/Badge";
 import { DemandModal } from "../components/DemandModal";
 import { mergeUserContactTags, TagInput, userContactTags } from "../components/TagInput";
 import { formatCurrency, labelOrDash } from "../lib/format";
+import {
+  propertyShareFilename,
+  propertyShareMimeType,
+  shareablePropertyImages,
+} from "../lib/propertySharing";
 
 type ChatMessage = Message & { sharedProperty?: Property };
 
@@ -52,6 +57,7 @@ export function ConversationsPage() {
   const [listLoading, setListLoading] = useState(true);
   const [togglingAi, setTogglingAi] = useState(false);
   const [sendingMedia, setSendingMedia] = useState(false);
+  const [sharingPropertyId, setSharingPropertyId] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [globalAgentActive, setGlobalAgentActive] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -450,32 +456,109 @@ export function ConversationsPage() {
       return;
     }
     setActionError(null);
+    setSharingPropertyId(property.id);
+    let deliveredImageCount = 0;
     try {
-      if (selected.mode !== "human") {
-        await request(
-          `/conversations/${selected.id}/mode`,
-          { method: "PATCH", body: JSON.stringify({ mode: "human" }) },
+      await ensureHumanMode(selected);
+      const shareText = buildPropertyShareText(property);
+      let images: PropertyImage[] = [];
+      let unavailableImages = 0;
+      try {
+        images = shareablePropertyImages(
+          await request<PropertyImage[]>(`/properties/${property.id}/images`, {}, token),
+        );
+      } catch {
+        unavailableImages += 1;
+      }
+
+      const createdMessages: ChatMessage[] = [];
+      let sentImageCount = 0;
+      for (const [index, image] of images.entries()) {
+        let blob: Blob;
+        try {
+          const cachedCover = image.is_primary ? propertyCovers[property.id] : null;
+          if (cachedCover) {
+            const response = await fetch(cachedCover);
+            if (!response.ok) throw new Error("Cached property image is unavailable");
+            blob = await response.blob();
+          } else {
+            blob = await requestBlob(image.display_url, token);
+          }
+        } catch {
+          unavailableImages += 1;
+          continue;
+        }
+        const mimeType = propertyShareMimeType(blob.type, image.original_content_type);
+        const file = new File(
+          [blob],
+          propertyShareFilename(image.original_name, mimeType, index),
+          { type: mimeType },
+        );
+        const form = new FormData();
+        form.append("file", file);
+        if (sentImageCount === 0) form.append("caption", shareText);
+        const created = await request<Message>(
+          `/conversations/${selected.id}/media`,
+          { method: "POST", body: form },
           token,
         );
+        createdMessages.push(created);
+        sentImageCount += 1;
+        deliveredImageCount += 1;
+        setMessagesById((current) => ({
+          ...current,
+          [selected.id]: [...(current[selected.id] ?? []), created],
+        }));
       }
-      const created = await request<Message>(
-        `/conversations/${selected.id}/messages`,
-        { method: "POST", body: JSON.stringify({ text: buildPropertyShareText(property) }) },
-        token,
-      );
-      setMessagesById((current) => ({
-        ...current,
-        [selected.id]: [...(current[selected.id] ?? []), { ...created, sharedProperty: property }],
-      }));
+
+      if (sentImageCount === 0) {
+        const created = await request<Message>(
+          `/conversations/${selected.id}/messages`,
+          { method: "POST", body: JSON.stringify({ text: shareText }) },
+          token,
+        );
+        const sharedMessage = { ...created, sharedProperty: property };
+        createdMessages.push(sharedMessage);
+        setMessagesById((current) => ({
+          ...current,
+          [selected.id]: [...(current[selected.id] ?? []), sharedMessage],
+        }));
+      }
+      const latest = createdMessages[createdMessages.length - 1];
       setItems((current) =>
         current.map((item) =>
-          item.id === selected.id ? { ...item, mode: "human", status: "waiting_human" } : item,
+          item.id === selected.id
+            ? {
+                ...item,
+                mode: "human",
+                status: "waiting_human",
+                last_message_text: latest?.text ?? item.last_message_text,
+                last_message_attachments: latest?.attachments ?? item.last_message_attachments,
+                last_message_direction: "outbound",
+              }
+            : item,
         ),
       );
       setAiEnabledById((current) => ({ ...current, [selected.id]: false }));
       setPropertyShareOpen(false);
+      if (unavailableImages) {
+        setActionError(
+          sentImageCount
+            ? `${unavailableImages} foto${unavailableImages > 1 ? "s" : ""} não pôde ser enviada. As demais foram entregues.`
+            : "Os dados do imóvel foram enviados, mas as fotos estavam indisponíveis.",
+        );
+      }
     } catch (error) {
-      setActionError(readActionError(error));
+      if (deliveredImageCount) {
+        setPropertyShareOpen(false);
+        setActionError(
+          `${deliveredImageCount} foto${deliveredImageCount > 1 ? "s foram enviadas" : " foi enviada"}, mas o compartilhamento não foi concluído. Confira a conversa antes de tentar novamente.`,
+        );
+      } else {
+        setActionError(readActionError(error));
+      }
+    } finally {
+      setSharingPropertyId(null);
     }
   }
 
@@ -844,8 +927,12 @@ export function ConversationsPage() {
                         {labelOrDash(property.purpose)}
                       </small>
                     </div>
-                    <button onClick={() => void shareProperty(property)} type="button">
-                      Enviar
+                    <button
+                      disabled={sharingPropertyId !== null}
+                      onClick={() => void shareProperty(property)}
+                      type="button"
+                    >
+                      {sharingPropertyId === property.id ? "Enviando fotos..." : "Enviar"}
                     </button>
                   </article>
                 ))}
