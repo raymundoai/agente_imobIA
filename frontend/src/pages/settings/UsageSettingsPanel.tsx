@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { request } from "../../api/client";
-import type { CreditAccount, CreditLedgerItem, UsageSummaryItem } from "../../api/types";
+import type { CommercialResourceUsage, CommercialUsage } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { Card } from "../../components/Card";
 import { DataTable } from "../../components/DataTable";
@@ -8,29 +8,20 @@ import { formatNumber } from "../../lib/format";
 
 export function UsageSettingsPanel() {
   const { token } = useAuth();
-  const [items, setItems] = useState<UsageSummaryItem[]>([]);
-  const [account, setAccount] = useState<CreditAccount | null>(null);
-  const [ledger, setLedger] = useState<CreditLedgerItem[]>([]);
+  const [usage, setUsage] = useState<CommercialUsage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   async function loadUsage() {
     setLoading(true);
-    const results = await Promise.allSettled([
-      request<UsageSummaryItem[]>("/usage/summary", {}, token),
-      request<CreditAccount>("/usage/credits", {}, token),
-      request<CreditLedgerItem[]>("/usage/credits/ledger", {}, token),
-    ]);
-    const failures: string[] = [];
-    const [usage, credits, transactions] = results;
-    if (usage.status === "fulfilled") setItems(usage.value);
-    else failures.push("resumo de uso");
-    if (credits.status === "fulfilled") setAccount(credits.value);
-    else failures.push("saldo de créditos");
-    if (transactions.status === "fulfilled") setLedger(transactions.value);
-    else failures.push("extrato");
-    setError(failures.length ? `Não foi possível atualizar: ${failures.join(", ")}. Os demais dados continuam disponíveis.` : null);
-    setLoading(false);
+    try {
+      setUsage(await request<CommercialUsage>("/usage/commercial", {}, token));
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível carregar o uso.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -38,83 +29,85 @@ export function UsageSettingsPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const total = items.reduce((sum, item) => sum + Number(item.estimated_cost || 0), 0);
-  const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
+  if (loading && !usage) {
+    return <Card className="settings-panel-card"><div className="empty-state" aria-live="polite">Carregando franquias e uso...</div></Card>;
+  }
 
-  if (loading) return <Card className="settings-panel-card"><div className="empty-state" aria-live="polite">Carregando uso e créditos...</div></Card>;
+  const visibleResources = (usage?.resources ?? []).filter((item) => (
+    item.resource !== "property_search_ai"
+    || item.granted > 0
+    || item.measured > 0
+  ));
+  const exhausted = visibleResources.filter((item) => item.available <= 0);
+
   return (
     <Card className="settings-panel-card">
       <div className="settings-panel-header">
         <div>
-          <h2>Uso e custos</h2>
-          <p>Acompanhe volume de atendimento, automações e custo estimado da IA.</p>
+          <h2>Plano e uso</h2>
+          <p>Acompanhe atendimentos da IA, buscas e otimizações incluídos no ciclo.</p>
         </div>
         <div className="settings-header-actions">
           <span className="settings-status">
-            {account ? `${formatNumber(account.available_credits)} créditos disponíveis` : "Saldo indisponível"}
+            {usage ? `${usage.plan.name} · ${modeLabel(usage.enforcement_mode)}` : "Plano indisponível"}
           </span>
-          <button className="button-outline" disabled={loading} onClick={() => void loadUsage()} type="button">Atualizar</button>
+          <button className="button-outline" disabled={loading} onClick={() => void loadUsage()} type="button">
+            {loading ? "Atualizando..." : "Atualizar"}
+          </button>
         </div>
       </div>
 
       {error ? <div className="error-box" role="alert">{error}</div> : null}
+      {usage?.enforcement_mode === "meter_only" ? (
+        <div className="info-box" role="status">
+          Piloto de medição ativo: todo uso está sendo registrado, mas nenhuma função será bloqueada ao terminar a franquia.
+        </div>
+      ) : null}
+      {usage?.enforcement_mode === "enforce" && exhausted.length ? (
+        <div className="error-box" role="alert">
+          Sem franquia disponível para {exhausted.map((item) => item.label).join(", ")}. O chat humano e os demais recursos continuam funcionando normalmente.
+        </div>
+      ) : null}
 
-      <div className="settings-grid">
-        {account && account.enforcement_mode === "enforce" && account.available_credits <= 0 ? (
-          <div className="error-box form-span-2" role="alert">Saldo indisponível. Atendimento por IA e tratamento de imagens podem ser bloqueados.</div>
-        ) : null}
-        <div className="settings-summary">
-          <span>Saldo total</span>
-          <strong>{formatNumber(account?.balance_credits ?? 0)}</strong>
+      {usage ? (
+        <div className="settings-grid">
+          <div className="settings-summary">
+            <span>Plano atual</span>
+            <strong>{usage.plan.name}</strong>
+          </div>
+          <div className="settings-summary">
+            <span>Ciclo atual</span>
+            <strong>{formatCycle(usage.cycle_started_at, usage.cycle_ends_at)}</strong>
+          </div>
+          <div className="settings-summary">
+            <span>Atendimentos ativos agora</span>
+            <strong>{formatNumber(usage.active_ai_attendances)}</strong>
+          </div>
         </div>
-        <div className="settings-summary">
-          <span>Créditos reservados</span>
-          <strong>{formatNumber(account?.reserved_credits ?? 0)}</strong>
-        </div>
-        <div className="settings-summary">
-          <span>Créditos disponíveis</span>
-          <strong>{formatNumber(account?.available_credits ?? 0)}</strong>
-        </div>
-        <div className="settings-summary">
-          <span>Custo OpenAI estimado</span>
-          <strong>{formatUsd(total)}</strong>
-        </div>
-        <div className="settings-summary">
-          <span>Eventos medidos</span>
-          <strong>{formatNumber(quantity)}</strong>
-        </div>
-        <div className="settings-summary">
-          <span>Política</span>
-          <strong>
-            {account?.unlimited_messages
-              ? "Mensagens ilimitadas"
-              : account?.enforcement_mode === "enforce"
-                ? "Bloqueio sem saldo"
-                : "Somente medição"}
-          </strong>
-        </div>
-      </div>
+      ) : null}
 
       <DataTable
-        data={items}
-        empty="Sem uso registrado ainda."
+        data={visibleResources}
+        empty="Nenhuma franquia comercial disponível."
         columns={[
-          { key: "module", label: "Área", render: (item) => moduleLabels[item.module] ?? item.module },
-          { key: "type", label: "Evento", render: (item) => typeLabels[item.type] ?? item.type },
-          { key: "quantity", label: "Quantidade", render: (item) => item.quantity },
+          { key: "resource", label: "Recurso", render: (item) => resourceName(item) },
+          { key: "included", label: "Franquia", render: (item) => formatNumber(item.granted) },
+          { key: "used", label: "Usado no ciclo", render: (item) => formatNumber(item.measured) },
+          { key: "reserved", label: "Em processamento", render: (item) => formatNumber(item.reserved) },
+          { key: "available", label: "Disponível", render: (item) => formatNumber(item.available) },
           {
-            key: "cost",
-            label: "Custo estimado",
-            render: (item) => formatUsd(Number(item.estimated_cost)),
+            key: "overage",
+            label: "Fora da franquia",
+            render: (item) => item.overage ? formatNumber(item.overage) : "—",
           },
         ]}
       />
 
       <div className="settings-subsection">
-        <h3>Extrato de créditos</h3>
+        <h3>Uso comercial recente</h3>
         <DataTable
-          data={ledger}
-          empty="Nenhum lançamento de crédito ainda."
+          data={usage?.recent_events ?? []}
+          empty="Nenhum consumo comercial registrado neste ciclo."
           columns={[
             {
               key: "date",
@@ -122,23 +115,15 @@ export function UsageSettingsPanel() {
               render: (item) => new Date(item.created_at).toLocaleString("pt-BR"),
             },
             {
-              key: "event",
-              label: "Evento",
-              render: (item) =>
-                item.kind === "grant"
-                  ? item.description ?? "Crédito concedido"
-                  : resourceLabels[item.resource ?? ""] ?? item.resource ?? item.kind,
+              key: "resource",
+              label: "Recurso",
+              render: (item) => resourceLabels[item.resource] ?? item.resource,
             },
-            { key: "model", label: "Modelo", render: (item) => item.model ?? "—" },
+            { key: "units", label: "Unidades", render: (item) => formatNumber(item.units) },
             {
-              key: "delta",
-              label: "Créditos",
-              render: (item) => `${item.delta_credits > 0 ? "+" : ""}${formatNumber(item.delta_credits)}`,
-            },
-            {
-              key: "balance",
-              label: "Saldo",
-              render: (item) => formatNumber(item.balance_after),
+              key: "allowance",
+              label: "Situação",
+              render: (item) => item.within_allowance ? "Dentro da franquia" : "Medição excedente",
             },
           ]}
         />
@@ -147,29 +132,22 @@ export function UsageSettingsPanel() {
   );
 }
 
-const moduleLabels: Record<string, string> = {
-  ai: "IA",
-  conversations: "Conversas",
-};
-
-const typeLabels: Record<string, string> = {
-  conversation: "Conversa",
-  message: "Mensagem",
-  ai_call: "Chamada de IA",
-  handoff: "Passagem para equipe",
-};
-
 const resourceLabels: Record<string, string> = {
-  ai_message: "Atendimento por IA",
-  image_edit: "Tratamento de imagem",
-  property_search_standard: "Busca convencional de imóveis",
+  ai_attendance: "Atendimento da IA (janela de 24h)",
+  image_optimization: "Otimização de foto com IA",
   property_search_ai: "Descoberta web com IA",
+  property_search_standard: "Busca de imóveis",
 };
 
-function formatUsd(value: number) {
-  return new Intl.NumberFormat("pt-BR", {
-    currency: "USD",
-    minimumFractionDigits: 4,
-    style: "currency",
-  }).format(value);
+function resourceName(item: CommercialResourceUsage) {
+  return resourceLabels[item.resource] ?? item.label;
+}
+
+function modeLabel(mode: CommercialUsage["enforcement_mode"]) {
+  return mode === "meter_only" ? "piloto sem bloqueio" : "franquias ativas";
+}
+
+function formatCycle(start: string, end: string) {
+  const formatter = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" });
+  return `${formatter.format(new Date(start))} a ${formatter.format(new Date(end))}`;
 }

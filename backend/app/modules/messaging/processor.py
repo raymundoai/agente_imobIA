@@ -20,6 +20,11 @@ from app.modules.ai.domain.ports import (
     AiProviderDispatchUncertainError,
     AiProviderRejectedError,
 )
+from app.modules.billing_usage.commercial import (
+    AiAttendanceService,
+    CommercialAllowanceExhausted,
+    CommercialEntitlementService,
+)
 from app.modules.billing_usage.service import (
     CreditLedgerService,
     chat_charge,
@@ -29,7 +34,12 @@ from app.modules.contacts.service import ContactUpsertService
 from app.modules.conversations.adapters.models import MessageModel
 from app.modules.conversations.adapters.repositories import SqlAlchemyConversationRepository
 from app.modules.conversations.application.use_cases import lead_agent_is_active
-from app.modules.conversations.domain.entities import ConversationMode
+from app.modules.conversations.domain.entities import (
+    ConversationMode,
+    Message,
+    MessageAuthor,
+    MessageDirection,
+)
 from app.modules.conversations.media import media_path
 from app.modules.integrations.ports.credentials import ChannelCredentialsPort
 from app.modules.integrations.ports.message_channel import MessageChannelPort
@@ -39,6 +49,7 @@ from app.modules.messaging.models import MessageJobModel
 from app.modules.messaging.service import MessageJobRepository
 from app.modules.properties.adapters.repositories import SqlAlchemyPropertyRepository
 from app.modules.tenants.adapters.repositories import SqlAlchemyTenantRepository
+from app.shared.events.models import DomainEvent
 
 
 class AmbiguousAiCall(RuntimeError):
@@ -57,6 +68,8 @@ class MessageJobProcessor:
     def process_next(self, tenant_id: UUID | None = None) -> dict[str, Any] | None:
         with self.container.database.session_factory() as session:
             CreditLedgerService(session).reconcile_expired()
+            CommercialEntitlementService(session).reconcile_expired()
+            AiAttendanceService(session).close_expired()
             job = MessageJobRepository(session).claim_next(
                 self.container.settings.message_job_stale_seconds,
                 self.worker_id,
@@ -78,7 +91,15 @@ class MessageJobProcessor:
                     raise RuntimeError("Message job not found")
                 recovered = repository.recover_generated(persisted)
             if recovered is not None:
-                result = {"response_text": recovered, "recovered": True}
+                with self.container.database.session_factory() as session:
+                    attendance_id = AiAttendanceService(session).find_for_job(
+                        job["tenant_id"], job["id"]
+                    )
+                result = {
+                    "response_text": recovered,
+                    "recovered": True,
+                    "commercial_attendance_id": (str(attendance_id) if attendance_id else None),
+                }
             else:
                 self._assert_lease(job)
                 with self._heartbeat(job):
@@ -89,9 +110,10 @@ class MessageJobProcessor:
                     job["lease_token"],
                     str(result.get("response_text") or ""),
                     result,
-                    should_deliver=job["send_to_channel"]
-                    and not bool(result.get("skipped")),
+                    should_deliver=job["send_to_channel"] and not bool(result.get("skipped")),
                 )
+                if not job["send_to_channel"]:
+                    AiAttendanceService(session).release_for_job(job["tenant_id"], job["id"])
             return {"id": str(job["id"]), "status": status, **result}
         except Exception as exc:
             with self.container.database.session_factory() as session:
@@ -99,6 +121,7 @@ class MessageJobProcessor:
                     CreditLedgerService(session).release_reservation(
                         job["tenant_id"], self._reservation_key(job["id"])
                     )
+                    AiAttendanceService(session).release_for_job(job["tenant_id"], job["id"])
                 status = MessageJobRepository(session).fail_generation(
                     job["id"],
                     job["lease_token"],
@@ -124,15 +147,31 @@ class MessageJobProcessor:
                 raise RuntimeError("Conversation not found")
             if conversation.mode is not ConversationMode.AI:
                 return {"response_text": "", "skipped": "human_handoff"}
+            try:
+                attendance = AiAttendanceService(session).prepare(
+                    job["tenant_id"],
+                    conversation_id=job["conversation_id"],
+                    contact_id=conversation.contact_id,
+                    phone=conversation.phone,
+                    channel=str(job["channel"]),
+                    opening_job_id=job["id"],
+                    max_responses=(self.container.settings.commercial_ai_attendance_max_responses),
+                )
+            except CommercialAllowanceExhausted as exc:
+                session.rollback()
+                self._handoff_for_allowance(session, job, exc)
+                return {
+                    "response_text": "",
+                    "skipped": "commercial_allowance_exhausted",
+                    "commercial_resource": exc.resource,
+                }
             self._enrich_media_context(session, job)
             ledger = CreditLedgerService(session)
             reservation = ledger.reserve(
                 job["tenant_id"],
                 resource="ai_message",
                 model=self.container.settings.openai_chat_model,
-                estimate=estimated_chat_charge(
-                    self.container.settings.openai_chat_model
-                ),
+                estimate=estimated_chat_charge(self.container.settings.openai_chat_model),
                 idempotency_key=self._reservation_key(job["id"]),
                 reference_id=job["id"],
             )
@@ -175,9 +214,7 @@ class MessageJobProcessor:
                     outbound_message_id=job["id"],
                     side_effect_guard=lambda: self._assert_lease(job),
                     dispatch_guard=lambda: self._mark_dispatched(job),
-                    usage_observer=lambda response: self._record_accepted_call(
-                        job, response
-                    ),
+                    usage_observer=lambda response: self._record_accepted_call(job, response),
                 )
             except AiProviderRejectedError as exc:
                 if self._accepted_call_count(job) > 0:
@@ -189,9 +226,7 @@ class MessageJobProcessor:
             except AiProviderDispatchUncertainError as exc:
                 if self._accepted_call_count(job) > 0:
                     self._settle_partial_usage(job)
-                raise AmbiguousAiCall(
-                    "Dispatch OpenAI ambíguo; reconciliação necessária"
-                ) from exc
+                raise AmbiguousAiCall("Dispatch OpenAI ambíguo; reconciliação necessária") from exc
             except Exception as exc:
                 if self._reservation_started(job):
                     if self._accepted_call_count(job) > 0:
@@ -205,6 +240,8 @@ class MessageJobProcessor:
                 "response_parts": result.response_parts,
                 "model": result.model,
                 "tokens_used": result.tokens_used,
+                "commercial_attendance_id": str(attendance.session_id),
+                "commercial_attendance_new": attendance.is_new_attendance,
             }
 
     def _enrich_media_context(self, session: Any, job: dict[str, Any]) -> None:
@@ -241,9 +278,7 @@ class MessageJobProcessor:
                     content = media_path(
                         self.container.settings.conversation_media_root, storage_key
                     ).read_bytes()
-                    content_type = str(
-                        attachment.get("mimetype") or "application/octet-stream"
-                    )
+                    content_type = str(attachment.get("mimetype") or "application/octet-stream")
                     if media_type == "audio":
                         text = provider.transcribe_audio(
                             content,
@@ -255,9 +290,7 @@ class MessageJobProcessor:
                             if text
                             else "[Áudio recebido sem fala reconhecível]"
                         )
-                        attachment["ai_model"] = (
-                            self.container.settings.openai_transcription_model
-                        )
+                        attachment["ai_model"] = self.container.settings.openai_transcription_model
                     else:
                         text = provider.describe_image(content, content_type=content_type)
                         attachment["ai_text"] = (
@@ -293,9 +326,7 @@ class MessageJobProcessor:
                 tenants = SqlAlchemyTenantRepository(session)
                 tenant = tenants.get_by_id(job["tenant_id"])
                 conversations = SqlAlchemyConversationRepository(session)
-                conversation = conversations.get_by_id(
-                    job["tenant_id"], job["conversation_id"]
-                )
+                conversation = conversations.get_by_id(job["tenant_id"], job["conversation_id"])
                 if tenant is None or conversation is None:
                     raise RuntimeError("Tenant or conversation not found")
                 credentials_provider, channel = self._channel(job["channel"])
@@ -333,9 +364,7 @@ class MessageJobProcessor:
                             conversation.phone,
                             part,
                             idempotency_key=(
-                                f"{job['id']}:{index}"
-                                if job["channel"] == "whatsapp"
-                                else None
+                                f"{job['id']}:{index}" if job["channel"] == "whatsapp" else None
                             ),
                         )
                         message_id = job["id"] if index == 0 else uuid5(job["id"], str(index))
@@ -347,12 +376,30 @@ class MessageJobProcessor:
                                 index,
                                 sent.external_message_id,
                             )
+                            attendance_id = job["result"].get("commercial_attendance_id")
+                            if attendance_id:
+                                AiAttendanceService(part_session).settle_delivery(
+                                    job["tenant_id"],
+                                    UUID(str(attendance_id)),
+                                    delivery_id=job["id"],
+                                    window_hours=(
+                                        self.container.settings.commercial_ai_attendance_window_hours
+                                    ),
+                                )
                         external_ids.append(sent.external_message_id)
                         if index < len(parts) - 1:
-                            time.sleep(
-                                self.container.settings.ai_message_part_pause_ms / 1000
-                            )
+                            time.sleep(self.container.settings.ai_message_part_pause_ms / 1000)
             with self.container.database.session_factory() as session:
+                attendance_id = job["result"].get("commercial_attendance_id")
+                if attendance_id:
+                    AiAttendanceService(session).settle_delivery(
+                        job["tenant_id"],
+                        UUID(str(attendance_id)),
+                        delivery_id=job["id"],
+                        window_hours=(
+                            self.container.settings.commercial_ai_attendance_window_hours
+                        ),
+                    )
                 MessageJobRepository(session).finish_delivery(job["id"], job["lease_token"])
             return {
                 "id": str(job["id"]),
@@ -373,9 +420,7 @@ class MessageJobProcessor:
                 "error": str(exc),
             }
 
-    def _channel(
-        self, channel_name: str
-    ) -> tuple[ChannelCredentialsPort, MessageChannelPort]:
+    def _channel(self, channel_name: str) -> tuple[ChannelCredentialsPort, MessageChannelPort]:
         if channel_name == "telegram":
             return self.container.telegram_credentials, self.container.telegram_channel
         return self.container.channel_credentials, self.container.message_channel
@@ -410,6 +455,7 @@ class MessageJobProcessor:
                     CreditLedgerService(session).touch_reservation(
                         job["tenant_id"], self._reservation_key(job["id"])
                     )
+                    AiAttendanceService(session).touch_for_job(job["tenant_id"], job["id"])
 
         thread = threading.Thread(target=maintain, daemon=True)
         thread.start()
@@ -429,6 +475,7 @@ class MessageJobProcessor:
             CreditLedgerService(session).touch_reservation(
                 job["tenant_id"], self._reservation_key(job["id"])
             )
+            AiAttendanceService(session).touch_for_job(job["tenant_id"], job["id"])
 
     @staticmethod
     def _reservation_key(job_id: UUID) -> str:
@@ -471,18 +518,14 @@ class MessageJobProcessor:
     def _settle_partial_usage(self, job: dict[str, Any]) -> None:
         with self.container.database.session_factory() as session:
             ledger = CreditLedgerService(session)
-            extra = ledger.reservation_extra(
-                job["tenant_id"], self._reservation_key(job["id"])
-            )
+            extra = ledger.reservation_extra(job["tenant_id"], self._reservation_key(job["id"]))
             if not extra:
                 return
             try:
                 charge = chat_charge(
                     str(extra["accepted_model"]),
                     input_tokens=int(extra.get("accepted_input_tokens", 0)),
-                    cached_input_tokens=int(
-                        extra.get("accepted_cached_input_tokens", 0)
-                    ),
+                    cached_input_tokens=int(extra.get("accepted_cached_input_tokens", 0)),
                     output_tokens=int(extra.get("accepted_output_tokens", 0)),
                 )
             except (KeyError, ValueError):
@@ -497,10 +540,53 @@ class MessageJobProcessor:
                     "partial_usage": True,
                     "accepted_call_count": int(extra["accepted_call_count"]),
                     "input_tokens": int(extra.get("accepted_input_tokens", 0)),
-                    "cached_input_tokens": int(
-                        extra.get("accepted_cached_input_tokens", 0)
-                    ),
+                    "cached_input_tokens": int(extra.get("accepted_cached_input_tokens", 0)),
                     "output_tokens": int(extra.get("accepted_output_tokens", 0)),
                 },
             )
             session.commit()
+
+    def _handoff_for_allowance(
+        self,
+        session: Any,
+        job: dict[str, Any],
+        error: CommercialAllowanceExhausted,
+    ) -> None:
+        conversations = SqlAlchemyConversationRepository(session)
+        conversation = conversations.get_by_id(job["tenant_id"], job["conversation_id"])
+        if conversation is None:
+            raise RuntimeError("Conversation not found during commercial handoff")
+        conversations.update_mode(
+            job["tenant_id"],
+            job["conversation_id"],
+            ConversationMode.HUMAN,
+            None,
+            commit=False,
+        )
+        conversations.record_outbound(
+            job["tenant_id"],
+            Message(
+                tenant_id=job["tenant_id"],
+                conversation_id=job["conversation_id"],
+                channel=conversation.channel,
+                direction=MessageDirection.OUTBOUND,
+                author_type=MessageAuthor.SYSTEM,
+                text=(
+                    "Franquia de atendimentos da IA encerrada. A conversa foi "
+                    "encaminhada para a equipe e o cliente não recebeu resposta automática."
+                ),
+            ),
+            commit=False,
+        )
+        session.commit()
+        self.container.event_bus.publish(
+            DomainEvent(
+                name="HumanHandoffRequested",
+                tenant_id=job["tenant_id"],
+                payload={
+                    "conversation_id": str(job["conversation_id"]),
+                    "reason": "commercial_allowance_exhausted",
+                    "resource": error.resource,
+                },
+            )
+        )

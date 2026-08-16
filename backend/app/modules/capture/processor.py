@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.container import Container
+from app.modules.billing_usage.commercial import CommercialEntitlementService
 from app.modules.billing_usage.service import (
     CreditLedgerService,
     chat_charge,
@@ -127,25 +128,24 @@ class CaptureJobProcessor:
 
     def _start_billing(self, job: Any) -> None:
         with self.container.database.session_factory() as session:
-            run = FederatedSearchRepository(session).get_run(
-                job.tenant_id, job.search_run_id
-            )
+            run = FederatedSearchRepository(session).get_run(job.tenant_id, job.search_run_id)
             if run is None or not run.billing_reservation_key:
                 return
             ledger = CreditLedgerService(session)
-            status = ledger.reservation_status(
-                job.tenant_id, run.billing_reservation_key
-            )
+            status = ledger.reservation_status(job.tenant_id, run.billing_reservation_key)
             if status in {"reserved", "started"}:
                 ledger.start_reservation(job.tenant_id, run.billing_reservation_key)
+            CommercialEntitlementService(session).touch(
+                job.tenant_id,
+                f"commercial:{run.billing_reservation_key}",
+                max(self.container.settings.capture_job_stale_seconds * 5, 900),
+            )
 
     def _record_provider_usage(self, job: Any, usage: object) -> None:
         if not isinstance(usage, dict) or not any(int(value or 0) for value in usage.values()):
             return
         with self.container.database.session_factory() as session:
-            run = FederatedSearchRepository(session).get_run(
-                job.tenant_id, job.search_run_id
-            )
+            run = FederatedSearchRepository(session).get_run(job.tenant_id, job.search_run_id)
             if run is None or not run.billing_reservation_key:
                 return
             ledger = CreditLedgerService(session)
@@ -163,9 +163,7 @@ class CaptureJobProcessor:
 
     def _finalize_billing(self, job: Any) -> None:
         with self.container.database.session_factory() as session:
-            run = FederatedSearchRepository(session).get_run(
-                job.tenant_id, job.search_run_id
-            )
+            run = FederatedSearchRepository(session).get_run(job.tenant_id, job.search_run_id)
             if (
                 run is None
                 or not run.billing_reservation_key
@@ -177,22 +175,20 @@ class CaptureJobProcessor:
                 job.tenant_id, run.billing_reservation_key
             )
             if reservation_status in {None, "released", "settled"}:
+                self._finalize_commercial_billing(session, run)
                 return
-            extra = ledger.reservation_extra(
-                job.tenant_id, run.billing_reservation_key
-            ) or {}
+            extra = ledger.reservation_extra(job.tenant_id, run.billing_reservation_key) or {}
             accepted_calls = int(extra.get("accepted_call_count", 0))
             is_ai = job.source_id == "web_discovery"
             if run.status in {"failed", "cancelled"} and not (is_ai and accepted_calls):
                 ledger.release_reservation(job.tenant_id, run.billing_reservation_key)
+                self._finalize_commercial_billing(session, run)
                 return
             if is_ai:
                 charge = chat_charge(
                     self.container.settings.capture_web_discovery_model,
                     input_tokens=int(extra.get("accepted_input_tokens", 0)),
-                    cached_input_tokens=int(
-                        extra.get("accepted_cached_input_tokens", 0)
-                    ),
+                    cached_input_tokens=int(extra.get("accepted_cached_input_tokens", 0)),
                     output_tokens=int(extra.get("accepted_output_tokens", 0)),
                 )
                 model = self.container.settings.capture_web_discovery_model
@@ -215,3 +211,31 @@ class CaptureJobProcessor:
                 },
             )
             session.commit()
+            self._finalize_commercial_billing(session, run)
+
+    @staticmethod
+    def _finalize_commercial_billing(session: Any, run: Any) -> None:
+        if not run.billing_reservation_key:
+            return
+        key = f"commercial:{run.billing_reservation_key}"
+        commercial = CommercialEntitlementService(session)
+        if commercial.reservation_status(run.tenant_id, key) in {
+            None,
+            "released",
+            "settled",
+        }:
+            return
+        if run.status in {"completed", "partial"}:
+            commercial.settle(
+                run.tenant_id,
+                key,
+                reference_id=run.id,
+                extra={
+                    "search_run_id": str(run.id),
+                    "source_count": run.source_count,
+                    "result_count": run.result_count,
+                    "status": run.status,
+                },
+            )
+        elif run.status in {"failed", "cancelled"}:
+            commercial.release(run.tenant_id, key)

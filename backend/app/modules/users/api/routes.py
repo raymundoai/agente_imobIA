@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
@@ -9,6 +10,9 @@ from app.modules.auth.api.dependencies import (
     get_current_principal,
     require_roles,
 )
+from app.modules.billing_usage.adapters.models import CommercialPlanModel
+from app.modules.billing_usage.commercial import CommercialEntitlementService
+from app.modules.users.adapters.models import UserModel
 from app.modules.users.adapters.repositories import SqlAlchemyUserRepository
 from app.modules.users.api.schemas import (
     CreateUserRequest,
@@ -30,7 +34,7 @@ from app.modules.users.application.use_cases import (
     UpdateUserUseCase,
 )
 from app.modules.users.domain.entities import UserRole, UserStatus
-from app.shared.errors.exceptions import NotFoundError
+from app.shared.errors.exceptions import ConflictError, NotFoundError
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -42,6 +46,7 @@ def create_user(
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
 ) -> UserResponse:
+    _ensure_user_capacity(session, principal.tenant_id)
     user = CreateUserUseCase(
         SqlAlchemyUserRepository(session), container.password_hasher, container.event_bus
     ).execute(
@@ -62,6 +67,7 @@ def invite_user(
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
 ) -> PasswordSetupResponse:
+    _ensure_user_capacity(session, principal.tenant_id)
     setup = InviteUserUseCase(
         SqlAlchemyUserRepository(session),
         container.password_hasher,
@@ -186,3 +192,27 @@ def delete_user(
     DeleteUserUseCase(SqlAlchemyUserRepository(session)).execute(
         principal.tenant_id, principal.user_id, user_id
     )
+
+
+def _ensure_user_capacity(session: Session, tenant_id: UUID) -> None:
+    commercial = CommercialEntitlementService(session)
+    subscription = commercial.subscription(tenant_id)
+    session.commit()
+    if subscription.enforcement_mode != "enforce":
+        return
+    plan = session.get(CommercialPlanModel, subscription.plan_id)
+    if plan is None:
+        raise RuntimeError("Commercial plan not found")
+    occupied = int(
+        session.scalar(
+            select(func.count()).where(
+                UserModel.tenant_id == tenant_id,
+                UserModel.status != UserStatus.INACTIVE.value,
+            )
+        )
+        or 0
+    )
+    if occupied >= plan.max_users:
+        raise ConflictError(
+            f"O plano {plan.name} permite até {plan.max_users} usuários ativos ou convidados"
+        )

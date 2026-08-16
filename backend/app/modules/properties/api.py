@@ -19,6 +19,10 @@ from app.modules.ai.domain.ports import (
     AiProviderRejectedError,
 )
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
+from app.modules.billing_usage.commercial import (
+    IMAGE_OPTIMIZATION,
+    CommercialEntitlementService,
+)
 from app.modules.billing_usage.service import (
     CreditLedgerService,
     estimated_image_charge,
@@ -253,8 +257,6 @@ class CommitStagedPropertyMediaRequest(BaseModel):
         return self
 
 
-
-
 @router.post("", response_model=PropertyResponse, status_code=status.HTTP_201_CREATED)
 def create_property(
     payload: CreatePropertyRequest,
@@ -436,11 +438,11 @@ def delete_property(
     keys = [
         key
         for key in session.scalars(
-        select(PropertyImageModel.original_storage_key).where(
-            PropertyImageModel.tenant_id == principal.tenant_id,
-            PropertyImageModel.property_id == property_id,
-            PropertyImageModel.original_storage_key.is_not(None),
-        )
+            select(PropertyImageModel.original_storage_key).where(
+                PropertyImageModel.tenant_id == principal.tenant_id,
+                PropertyImageModel.property_id == property_id,
+                PropertyImageModel.original_storage_key.is_not(None),
+            )
         ).all()
         if key
     ]
@@ -457,9 +459,7 @@ def delete_property(
     ]
     for key in keys:
         session.add(
-            PropertyMediaCleanupModel(
-                id=uuid4(), tenant_id=principal.tenant_id, storage_key=key
-            )
+            PropertyMediaCleanupModel(id=uuid4(), tenant_id=principal.tenant_id, storage_key=key)
         )
     session.delete(model)
     session.commit()
@@ -577,9 +577,7 @@ def commit_staged_property_media(
 ) -> list[LinkedPropertyImageResponse]:
     property_model = _property_model(session, principal.tenant_id, property_id)
     session.execute(
-        select(PropertyModel.id)
-        .where(PropertyModel.id == property_model.id)
-        .with_for_update()
+        select(PropertyModel.id).where(PropertyModel.id == property_model.id).with_for_update()
     )
     staged_by_id = {
         item.id: item
@@ -594,12 +592,17 @@ def commit_staged_property_media(
     }
     if len(staged_by_id) != len(payload.staging_ids):
         raise HTTPException(status_code=404, detail="Uma ou mais mídias temporárias expiraram.")
-    current_count = session.scalar(
-        select(func.count()).select_from(PropertyImageModel).where(
-            PropertyImageModel.tenant_id == principal.tenant_id,
-            PropertyImageModel.property_id == property_id,
+    current_count = (
+        session.scalar(
+            select(func.count())
+            .select_from(PropertyImageModel)
+            .where(
+                PropertyImageModel.tenant_id == principal.tenant_id,
+                PropertyImageModel.property_id == property_id,
+            )
         )
-    ) or 0
+        or 0
+    )
     max_sort_order = session.scalar(
         select(func.max(PropertyImageModel.sort_order)).where(
             PropertyImageModel.tenant_id == principal.tenant_id,
@@ -689,18 +692,21 @@ async def add_property_images(
 ) -> list[LinkedPropertyImageResponse]:
     property_model = _property_model(session, principal.tenant_id, property_id)
     session.execute(
-        select(PropertyModel.id)
-        .where(PropertyModel.id == property_model.id)
-        .with_for_update()
+        select(PropertyModel.id).where(PropertyModel.id == property_model.id).with_for_update()
     )
     if not files or len(files) > container.settings.property_image_max_files:
         raise HTTPException(status_code=422, detail="Quantidade de mídias inválida.")
-    current_count = session.scalar(
-        select(func.count()).select_from(PropertyImageModel).where(
-            PropertyImageModel.tenant_id == principal.tenant_id,
-            PropertyImageModel.property_id == property_id,
+    current_count = (
+        session.scalar(
+            select(func.count())
+            .select_from(PropertyImageModel)
+            .where(
+                PropertyImageModel.tenant_id == principal.tenant_id,
+                PropertyImageModel.property_id == property_id,
+            )
         )
-    ) or 0
+        or 0
+    )
     max_sort_order = session.scalar(
         select(func.max(PropertyImageModel.sort_order)).where(
             PropertyImageModel.tenant_id == principal.tenant_id,
@@ -872,9 +878,7 @@ def reorder_property_images(
     return [_linked_image_response(image) for image in ordered]
 
 
-@router.patch(
-    "/{property_id}/images/{image_id}", response_model=LinkedPropertyImageResponse
-)
+@router.patch("/{property_id}/images/{image_id}", response_model=LinkedPropertyImageResponse)
 def update_property_image(
     property_id: UUID,
     image_id: UUID,
@@ -884,9 +888,7 @@ def update_property_image(
 ) -> LinkedPropertyImageResponse:
     property_model = _property_model(session, principal.tenant_id, property_id)
     session.execute(
-        select(PropertyModel.id)
-        .where(PropertyModel.id == property_model.id)
-        .with_for_update()
+        select(PropertyModel.id).where(PropertyModel.id == property_model.id).with_for_update()
     )
     image = _image_model(session, principal.tenant_id, property_id, image_id)
     if payload.is_primary:
@@ -918,6 +920,8 @@ def update_property_image(
     session.commit()
     session.refresh(image)
     return _linked_image_response(image)
+
+
 @router.delete(
     "/{property_id}/images/{image_id}",
     response_model=list[LinkedPropertyImageResponse],
@@ -967,9 +971,7 @@ def delete_property_image(
         keys.append(image.derived_storage_key)
     for key in keys:
         session.add(
-            PropertyMediaCleanupModel(
-                id=uuid4(), tenant_id=principal.tenant_id, storage_key=key
-            )
+            PropertyMediaCleanupModel(id=uuid4(), tenant_id=principal.tenant_id, storage_key=key)
         )
     session.delete(image)
     session.commit()
@@ -1018,6 +1020,36 @@ def reprocess_property_image(
             status_code=409,
             detail=f"Operação já registrada com status {existing_operation.status}.",
         )
+    commercial_reservation_key = f"commercial:{reservation_key}"
+    commercial = CommercialEntitlementService(session)
+    commercial.reserve(
+        principal.tenant_id,
+        resource=IMAGE_OPTIMIZATION,
+        idempotency_key=commercial_reservation_key,
+        reference_id=image.id,
+        extra={"property_id": str(property_id), "image_id": str(image.id)},
+    )
+    ledger = CreditLedgerService(session)
+    try:
+        reservation = ledger.reserve(
+            principal.tenant_id,
+            resource="image_edit",
+            model=container.settings.openai_image_model,
+            estimate=estimated_image_charge(container.settings.openai_image_model),
+            idempotency_key=reservation_key,
+            reference_id=image.id,
+        )
+    except Exception:
+        commercial.release(principal.tenant_id, commercial_reservation_key)
+        raise
+    if reservation.status == "settled":
+        commercial.release(principal.tenant_id, commercial_reservation_key)
+        raise HTTPException(status_code=409, detail="Este tratamento já foi concluído.")
+    if reservation.status == "started":
+        commercial.release(principal.tenant_id, commercial_reservation_key)
+        raise HTTPException(
+            status_code=409, detail="Este tratamento está em processamento ou reconciliação."
+        )
     operation = PropertyImageOperationModel(
         id=payload.operation_id,
         tenant_id=principal.tenant_id,
@@ -1027,21 +1059,6 @@ def reprocess_property_image(
         status="processing",
     )
     session.add(operation)
-    ledger = CreditLedgerService(session)
-    reservation = ledger.reserve(
-        principal.tenant_id,
-        resource="image_edit",
-        model=container.settings.openai_image_model,
-        estimate=estimated_image_charge(container.settings.openai_image_model),
-        idempotency_key=reservation_key,
-        reference_id=image.id,
-    )
-    if reservation.status == "settled":
-        raise HTTPException(status_code=409, detail="Este tratamento já foi concluído.")
-    if reservation.status == "started":
-        raise HTTPException(
-            status_code=409, detail="Este tratamento está em processamento ou reconciliação."
-        )
     ledger.start_reservation(principal.tenant_id, reservation_key)
     image.status = "processing"
     image.optimization_prompt = prompt
@@ -1054,6 +1071,9 @@ def reprocess_property_image(
             with container.database.session_factory() as heartbeat_session:
                 CreditLedgerService(heartbeat_session).touch_reservation(
                     principal.tenant_id, reservation_key
+                )
+                CommercialEntitlementService(heartbeat_session).touch(
+                    principal.tenant_id, commercial_reservation_key
                 )
 
     heartbeat_thread = threading.Thread(target=renew_reservation, daemon=True)
@@ -1111,9 +1131,17 @@ def reprocess_property_image(
                     id=uuid4(), tenant_id=principal.tenant_id, storage_key=old_key
                 )
             )
+        commercial.settle(
+            principal.tenant_id,
+            commercial_reservation_key,
+            reference_id=image.id,
+            extra={"property_id": str(property_id), "image_id": str(image.id)},
+            commit=False,
+        )
         session.commit()
     except AiProviderRejectedError as exc:
         ledger.release_reservation(principal.tenant_id, reservation_key)
+        commercial.release(principal.tenant_id, commercial_reservation_key)
         image.status = "failed"
         image.error = "A OpenAI rejeitou o tratamento solicitado."
         operation.status = "failed"
@@ -1142,9 +1170,10 @@ def reprocess_property_image(
                 )
                 cleanup_session.commit()
         with container.database.session_factory() as failure_session:
-            failed = _image_model(
-                failure_session, principal.tenant_id, property_id, image_id
+            CommercialEntitlementService(failure_session).release(
+                principal.tenant_id, commercial_reservation_key
             )
+            failed = _image_model(failure_session, principal.tenant_id, property_id, image_id)
             failed.status = "failed"
             failed.error = f"Falha ao persistir o tratamento: {exc}"[:1000]
             failed_operation = failure_session.get(

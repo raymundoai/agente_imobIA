@@ -43,9 +43,35 @@ type Tenant = {
   credit_balance: number;
   credit_enforcement: "meter_only" | "enforce";
   unlimited_messages: boolean;
+  commercial_plan: string;
+  commercial_status: "pilot" | "active" | "past_due" | "cancelled";
+  commercial_enforcement: "meter_only" | "enforce";
+  commercial_cycle_ends_at: string;
+  commercial_available: Record<string, number>;
   credit_reserved: number;
   credit_available: number;
   integrations: Record<string, string>;
+};
+type CommercialPlan = {
+  code: string;
+  name: string;
+  version: number;
+  monthly_price_cents: number;
+  currency: string;
+  ai_attendances: number;
+  property_searches: number;
+  image_optimizations: number;
+  max_users: number;
+  is_public: boolean;
+};
+type CommercialPack = {
+  code: string;
+  name: string;
+  resource: string;
+  units: number;
+  price_cents: number | null;
+  currency: string;
+  active: boolean;
 };
 type TenantForm = {
   name: string;
@@ -69,6 +95,8 @@ export function PlatformApp() {
   );
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [plans, setPlans] = useState<CommercialPlan[]>([]);
+  const [packs, setPacks] = useState<CommercialPack[]>([]);
   const [selected, setSelected] = useState<Tenant | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<TenantForm>(emptyTenant);
@@ -83,12 +111,16 @@ export function PlatformApp() {
     await runWithLoading(
       setLoading,
       async () => {
-        const [stats, clients] = await Promise.all([
+        const [stats, clients, planCatalog, packCatalog] = await Promise.all([
           request<Dashboard>("/platform/dashboard", {}, activeToken),
           request<Tenant[]>("/platform/tenants", {}, activeToken),
+          request<CommercialPlan[]>("/platform/commercial/plans", {}, activeToken),
+          request<CommercialPack[]>("/platform/commercial/packs", {}, activeToken),
         ]);
         setDashboard(stats);
         setTenants(clients);
+        setPlans(planCatalog);
+        setPacks(packCatalog);
         setSelected((current) =>
           current ? clients.find((item) => item.id === current.id) ?? null : null,
         );
@@ -303,6 +335,8 @@ export function PlatformApp() {
             <TenantDetail
               tenant={selected}
               token={token}
+              plans={plans}
+              packs={packs}
               onChanged={() => void load()}
               onToggle={() => void toggleStatus(selected)}
             />
@@ -372,76 +406,94 @@ function PlatformLogin({
 function TenantDetail({
   tenant,
   token,
+  plans,
+  packs,
   onToggle,
   onChanged,
 }: {
   tenant: Tenant;
   token: string;
+  plans: CommercialPlan[];
+  packs: CommercialPack[];
   onToggle: () => void;
   onChanged: () => void;
 }) {
-  const [credits, setCredits] = useState("10000");
-  const [description, setDescription] = useState("Créditos do plano");
+  const [planCode, setPlanCode] = useState(tenant.commercial_plan);
+  const [enforcement, setEnforcement] = useState(tenant.commercial_enforcement);
+  const [resource, setResource] = useState("ai_attendance");
+  const [units, setUnits] = useState("100");
+  const [packCode, setPackCode] = useState(packs[0]?.code ?? "");
   const [feedback, setFeedback] = useState<string | null>(null);
-  async function grant(event: FormEvent) {
-    event.preventDefault();
-    if (!window.confirm(`Adicionar ${Number(credits).toLocaleString("pt-BR")} créditos para ${tenant.name}?`)) return;
+
+  useEffect(() => {
+    setPlanCode(tenant.commercial_plan);
+    setEnforcement(tenant.commercial_enforcement);
+  }, [tenant.id, tenant.commercial_enforcement, tenant.commercial_plan]);
+
+  async function saveSubscription() {
+    if (!window.confirm("Atualizar o plano e a política comercial deste cliente?")) return;
     setFeedback(null);
     try {
       await request(
-        `/platform/tenants/${tenant.id}/credits/grants`,
+        `/platform/tenants/${tenant.id}/commercial-subscription`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            plan_code: planCode,
+            enforcement_mode: enforcement,
+          }),
+        },
+        token,
+      );
+      setFeedback("Plano comercial atualizado.");
+      onChanged();
+    } catch (reason) {
+      setFeedback(readError(reason));
+    }
+  }
+
+  async function grantUnits(event: FormEvent) {
+    event.preventDefault();
+    if (!window.confirm(`Adicionar ${Number(units).toLocaleString("pt-BR")} unidades para ${tenant.name}?`)) return;
+    setFeedback(null);
+    try {
+      await request(
+        `/platform/tenants/${tenant.id}/commercial-grants`,
         {
           method: "POST",
           body: JSON.stringify({
-            credits: Number(credits),
-            description,
+            resource,
+            quantity: Number(units),
+            source: "manual",
+            reference: "Ajuste administrativo",
             idempotency_key: crypto.randomUUID(),
           }),
         },
         token,
       );
-      setFeedback("Créditos adicionados.");
+      setFeedback("Franquia adicional concedida.");
       onChanged();
     } catch (reason) {
       setFeedback(readError(reason));
     }
   }
-  async function savePolicy() {
-    if (!window.confirm("Alterar a política de bloqueio por saldo deste cliente?")) return;
+
+  async function grantPack() {
+    if (!packCode || !window.confirm("Conceder este pacote ao cliente?")) return;
+    setFeedback(null);
     try {
       await request(
-        `/platform/tenants/${tenant.id}/credits/settings`,
+        `/platform/tenants/${tenant.id}/commercial-packs`,
         {
-          method: "PATCH",
+          method: "POST",
           body: JSON.stringify({
-            enforcement_mode:
-              tenant.credit_enforcement === "enforce"
-                ? "meter_only"
-                : "enforce",
-            unlimited_messages: tenant.unlimited_messages,
+            pack_code: packCode,
+            idempotency_key: crypto.randomUUID(),
           }),
         },
         token,
       );
-      onChanged();
-    } catch (reason) {
-      setFeedback(readError(reason));
-    }
-  }
-  async function toggleUnlimited() {
-    if (!window.confirm(tenant.unlimited_messages ? "Voltar a cobrar mensagens deste cliente?" : "Tornar as mensagens ilimitadas para este cliente?")) return;
-    try {
-      await request(
-        `/platform/tenants/${tenant.id}/credits/settings`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            enforcement_mode: tenant.credit_enforcement,
-            unlimited_messages: !tenant.unlimited_messages,
-          }),
-        },
-        token,
-      );
+      setFeedback("Pacote concedido.");
       onChanged();
     } catch (reason) {
       setFeedback(readError(reason));
@@ -481,70 +533,76 @@ function TenantDetail({
         </div>
       </div>
       <div className="settings-subsection">
-        <h3>Créditos</h3>
+        <h3>Plano e franquias comerciais</h3>
         <div className="contact-info-grid">
           <div>
             <Coins size={15} />
-            <span>
-              {tenant.credit_balance.toLocaleString("pt-BR")} totais
-            </span>
+            <span>Plano {planName(plans, tenant.commercial_plan)}</span>
           </div>
           <div>
-            <span>
-              {tenant.credit_reserved.toLocaleString("pt-BR")} reservados
-            </span>
+            <span>{tenant.commercial_enforcement === "enforce" ? "Bloqueio por franquia" : "Piloto sem bloqueio"}</span>
           </div>
           <div>
-            <span>
-              {tenant.credit_available.toLocaleString("pt-BR")} disponíveis
-            </span>
+            <span>{formatCommercialAvailable(tenant.commercial_available, "ai_attendance")} atendimentos IA</span>
           </div>
           <div>
-            <span>
-              {tenant.credit_enforcement === "enforce"
-                ? "Bloqueio sem saldo"
-                : "Somente medição"}
-            </span>
+            <span>{formatCommercialAvailable(tenant.commercial_available, "property_search_standard")} buscas</span>
           </div>
           <div>
-            <span>
-              {tenant.unlimited_messages
-                ? "Mensagens ilimitadas"
-                : "Mensagens consomem créditos"}
-            </span>
+            <span>{formatCommercialAvailable(tenant.commercial_available, "image_optimization")} otimizações</span>
+          </div>
+          <div>
+            <span>Ciclo até {new Date(tenant.commercial_cycle_ends_at).toLocaleDateString("pt-BR")}</span>
           </div>
         </div>
-        <form className="form-grid" onSubmit={grant}>
-          <Field
-            label="Adicionar créditos"
-            type="number"
-            value={credits}
-            onChange={setCredits}
-          />
-          <Field label="Motivo" value={description} onChange={setDescription} />
-          <button type="submit">Lançar créditos</button>
+        <div className="form-grid">
+          <label>
+            Plano
+            <select value={planCode} onChange={(event) => setPlanCode(event.target.value)}>
+              {plans.map((plan) => <option key={`${plan.code}:${plan.version}`} value={plan.code}>{plan.name} · {formatBrl(plan.monthly_price_cents)}</option>)}
+            </select>
+          </label>
+          <label>
+            Política
+            <select value={enforcement} onChange={(event) => setEnforcement(event.target.value as "meter_only" | "enforce")}>
+              <option value="meter_only">Somente medir (piloto)</option>
+              <option value="enforce">Aplicar franquias</option>
+            </select>
+          </label>
+          <button onClick={() => void saveSubscription()} type="button">Salvar plano</button>
+        </div>
+
+        <form className="form-grid" onSubmit={grantUnits}>
+          <label>
+            Recurso adicional
+            <select value={resource} onChange={(event) => setResource(event.target.value)}>
+              <option value="ai_attendance">Atendimentos da IA</option>
+              <option value="property_search_standard">Buscas de imóveis</option>
+              <option value="image_optimization">Otimizações de fotos</option>
+            </select>
+          </label>
+          <Field label="Unidades" type="number" value={units} onChange={setUnits} />
+          <button type="submit">Conceder franquia</button>
         </form>
-        <div className="settings-actions">
-          <button
-            className="button-outline"
-            onClick={() => void savePolicy()}
-            type="button"
-          >
-            {tenant.credit_enforcement === "enforce"
-              ? "Desativar bloqueio"
-              : "Bloquear ao zerar"}
-          </button>
-          <button
-            className="button-outline"
-            onClick={() => void toggleUnlimited()}
-            type="button"
-          >
-            {tenant.unlimited_messages
-              ? "Cobrar mensagens"
-              : "Mensagens ilimitadas"}
+
+        <div className="form-grid">
+          <label>
+            Pacote preparado para o gateway
+            <select value={packCode} onChange={(event) => setPackCode(event.target.value)}>
+              {packs.map((pack) => <option key={pack.code} value={pack.code}>{pack.name}</option>)}
+            </select>
+          </label>
+          <button className="button-outline" disabled={!packCode} onClick={() => void grantPack()} type="button">
+            Conceder pacote manualmente
           </button>
         </div>
         {feedback ? <p>{feedback}</p> : null}
+      </div>
+      <div className="settings-subsection">
+        <h3>Telemetria técnica interna</h3>
+        <p>
+          US$ {tenant.estimated_ai_cost} de custo OpenAI registrado · {tenant.credit_balance.toLocaleString("pt-BR")} créditos técnicos · {tenant.credit_reserved.toLocaleString("pt-BR")} reservados.
+        </p>
       </div>
       <div>
         <h3>Integrações</h3>
@@ -591,4 +649,19 @@ function readError(error: unknown) {
   return error instanceof Error
     ? error.message
     : "Falha na administração da plataforma.";
+}
+
+function planName(plans: CommercialPlan[], code: string) {
+  return plans.find((plan) => plan.code === code)?.name ?? code;
+}
+
+function formatCommercialAvailable(values: Record<string, number>, resource: string) {
+  return (values[resource] ?? 0).toLocaleString("pt-BR");
+}
+
+function formatBrl(cents: number) {
+  return new Intl.NumberFormat("pt-BR", {
+    currency: "BRL",
+    style: "currency",
+  }).format(cents / 100);
 }

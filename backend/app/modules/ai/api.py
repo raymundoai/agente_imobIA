@@ -2,7 +2,7 @@ import base64
 import binascii
 from pathlib import Path
 from typing import Annotated, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -24,6 +24,7 @@ from app.modules.ai.application.use_cases import (
 )
 from app.modules.ai.domain.entities import KnowledgeDocument
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal, require_roles
+from app.modules.billing_usage.commercial import AiAttendanceService
 from app.modules.billing_usage.service import CreditLedgerService
 from app.modules.contacts.service import ContactUpsertService
 from app.modules.conversations.adapters.repositories import SqlAlchemyConversationRepository
@@ -235,31 +236,58 @@ def generate_ai_reply(
     container: Container = Depends(get_container),
 ) -> AiReplyResponse:
     CreditLedgerService(session).ensure_available(principal.tenant_id, resource="ai_message")
-    result = GenerateAiReplyUseCase(
-        SqlAlchemyTenantRepository(session),
-        SqlAlchemyConversationRepository(session),
-        _ai_provider(container),
-        SqlAlchemyKnowledgeRepository(session),
-        SqlAlchemyAiAuditLogRepository(session),
-        container.channel_credentials,
-        container.message_channel,
-        container.event_bus,
-        LeadQualificationService(
-            SqlAlchemyTenantRepository(session),
-            SqlAlchemyLeadDemandRepository(session),
-            container.crm_credentials,
-            container.crm,
-            container.event_bus,
-            ContactUpsertService(session),
-        ),
-        properties=SqlAlchemyPropertyRepository(session),
-        lead_demands=SqlAlchemyLeadDemandRepository(session),
-    ).execute(
+    conversations = SqlAlchemyConversationRepository(session)
+    conversation = conversations.get_by_id(principal.tenant_id, conversation_id)
+    if conversation is None:
+        raise NotFoundError("Conversation not found")
+    operation_id = uuid4()
+    attendance = AiAttendanceService(session).prepare(
         principal.tenant_id,
-        conversation_id,
-        payload.input_text,
-        send_to_channel=payload.send_to_channel,
+        conversation_id=conversation_id,
+        contact_id=conversation.contact_id,
+        phone=conversation.phone,
+        channel=conversation.channel.value,
+        opening_job_id=operation_id,
+        max_responses=container.settings.commercial_ai_attendance_max_responses,
     )
+    try:
+        result = GenerateAiReplyUseCase(
+            SqlAlchemyTenantRepository(session),
+            conversations,
+            _ai_provider(container),
+            SqlAlchemyKnowledgeRepository(session),
+            SqlAlchemyAiAuditLogRepository(session),
+            container.channel_credentials,
+            container.message_channel,
+            container.event_bus,
+            LeadQualificationService(
+                SqlAlchemyTenantRepository(session),
+                SqlAlchemyLeadDemandRepository(session),
+                container.crm_credentials,
+                container.crm,
+                container.event_bus,
+                ContactUpsertService(session),
+            ),
+            properties=SqlAlchemyPropertyRepository(session),
+            lead_demands=SqlAlchemyLeadDemandRepository(session),
+        ).execute(
+            principal.tenant_id,
+            conversation_id,
+            payload.input_text,
+            send_to_channel=payload.send_to_channel,
+        )
+    except Exception:
+        AiAttendanceService(session).release_for_job(principal.tenant_id, operation_id)
+        raise
+    if payload.send_to_channel:
+        AiAttendanceService(session).settle_delivery(
+            principal.tenant_id,
+            attendance.session_id,
+            delivery_id=operation_id,
+            window_hours=container.settings.commercial_ai_attendance_window_hours,
+        )
+    elif attendance.is_new_attendance:
+        AiAttendanceService(session).release_for_job(principal.tenant_id, operation_id)
     return AiReplyResponse(
         response_text=result.response_text,
         detected_intent=result.detected_intent,

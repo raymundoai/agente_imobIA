@@ -3866,6 +3866,14 @@ label small {
   padding: 12px;
 }
 
+.info-box {
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--text-secondary);
+  padding: 12px 14px;
+}
+
 .modal-backdrop {
   align-items: center;
   background: rgba(7, 12, 22, 0.48);

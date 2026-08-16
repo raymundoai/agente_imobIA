@@ -13,9 +13,16 @@ from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
 from app.modules.billing_usage.adapters.models import (
+    CommercialEntitlementGrantModel,
+    CommercialPackModel,
+    CommercialPlanModel,
     CreditAccountModel,
     CreditLedgerModel,
     UsageRecordModel,
+)
+from app.modules.billing_usage.commercial import (
+    COMMERCIAL_RESOURCES,
+    CommercialEntitlementService,
 )
 from app.modules.billing_usage.service import CreditLedgerService
 from app.modules.contacts.models import ContactModel
@@ -80,6 +87,11 @@ class PlatformTenantSummary(BaseModel):
     credit_available: int
     credit_enforcement: str
     unlimited_messages: bool
+    commercial_plan: str
+    commercial_status: str
+    commercial_enforcement: str
+    commercial_cycle_ends_at: datetime
+    commercial_available: dict[str, int]
     integrations: dict[str, str]
 
 
@@ -96,6 +108,66 @@ class CreditGrantRequest(BaseModel):
 class CreditSettingsRequest(BaseModel):
     enforcement_mode: str = Field(pattern="^(meter_only|enforce)$")
     unlimited_messages: bool = False
+
+
+class CommercialPlanItem(BaseModel):
+    code: str
+    name: str
+    version: int
+    monthly_price_cents: int
+    currency: str
+    ai_attendances: int
+    property_searches: int
+    image_optimizations: int
+    max_users: int
+    is_public: bool
+
+
+class CommercialPackItem(BaseModel):
+    code: str
+    name: str
+    resource: str
+    units: int
+    price_cents: int | None
+    currency: str
+    active: bool
+
+
+class CommercialSubscriptionRequest(BaseModel):
+    plan_code: str = Field(min_length=2, max_length=80)
+    enforcement_mode: str = Field(pattern="^(meter_only|enforce)$")
+    status: str | None = Field(default=None, pattern="^(pilot|active|past_due|cancelled)$")
+
+
+class CommercialGrantRequest(BaseModel):
+    resource: str
+    quantity: int = Field(gt=0, le=1_000_000)
+    source: str = Field(default="manual", pattern="^(manual|promotion)$")
+    idempotency_key: str = Field(min_length=8, max_length=200)
+    reference: str | None = Field(default=None, max_length=300)
+    expires_at: datetime | None = None
+
+
+class CommercialPackGrantRequest(BaseModel):
+    pack_code: str = Field(min_length=2, max_length=80)
+    idempotency_key: str = Field(min_length=8, max_length=200)
+    expires_at: datetime | None = None
+
+
+class CommercialGrantResponse(BaseModel):
+    id: UUID
+    resource: str
+    source: str
+    quantity: int
+    consumed_units: int
+    reserved_units: int
+    reference: str | None
+    expires_at: datetime | None
+    created_at: datetime
+
+    @classmethod
+    def from_model(cls, model: CommercialEntitlementGrantModel) -> "CommercialGrantResponse":
+        return cls.model_validate(model, from_attributes=True)
 
 
 class PlatformCreditTransaction(BaseModel):
@@ -369,6 +441,111 @@ def platform_credit_ledger(
     return [PlatformCreditTransaction.from_model(item) for item in items]
 
 
+@router.get("/commercial/plans", response_model=list[CommercialPlanItem])
+def platform_commercial_plans(
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> list[CommercialPlanItem]:
+    items = session.scalars(
+        select(CommercialPlanModel)
+        .where(CommercialPlanModel.is_current.is_(True))
+        .order_by(CommercialPlanModel.monthly_price_cents, CommercialPlanModel.name)
+    ).all()
+    return [CommercialPlanItem.model_validate(item, from_attributes=True) for item in items]
+
+
+@router.get("/commercial/packs", response_model=list[CommercialPackItem])
+def platform_commercial_packs(
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> list[CommercialPackItem]:
+    items = session.scalars(
+        select(CommercialPackModel).order_by(
+            CommercialPackModel.resource, CommercialPackModel.units
+        )
+    ).all()
+    return [CommercialPackItem.model_validate(item, from_attributes=True) for item in items]
+
+
+@router.put(
+    "/tenants/{tenant_id}/commercial-subscription",
+    response_model=PlatformTenantSummary,
+)
+def platform_assign_commercial_plan(
+    tenant_id: UUID,
+    payload: CommercialSubscriptionRequest,
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> PlatformTenantSummary:
+    tenant = session.get(TenantModel, tenant_id)
+    if tenant is None:
+        raise NotFoundError("Tenant not found")
+    try:
+        CommercialEntitlementService(session).assign_plan(
+            tenant_id,
+            plan_code=payload.plan_code,
+            enforcement_mode=payload.enforcement_mode,
+            status=payload.status,
+        )
+    except ValueError as exc:
+        raise NotFoundError(str(exc)) from exc
+    return _tenant_summary(session, tenant)
+
+
+@router.post(
+    "/tenants/{tenant_id}/commercial-grants",
+    response_model=CommercialGrantResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def platform_grant_commercial_units(
+    tenant_id: UUID,
+    payload: CommercialGrantRequest,
+    principal: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> CommercialGrantResponse:
+    if session.get(TenantModel, tenant_id) is None:
+        raise NotFoundError("Tenant not found")
+    if payload.resource not in COMMERCIAL_RESOURCES:
+        raise NotFoundError("Commercial resource not found")
+    item = CommercialEntitlementService(session).grant(
+        tenant_id,
+        resource=payload.resource,
+        quantity=payload.quantity,
+        source=payload.source,
+        idempotency_key=payload.idempotency_key,
+        reference=payload.reference,
+        expires_at=payload.expires_at,
+        created_by=principal.user_id,
+    )
+    return CommercialGrantResponse.from_model(item)
+
+
+@router.post(
+    "/tenants/{tenant_id}/commercial-packs",
+    response_model=CommercialGrantResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def platform_grant_commercial_pack(
+    tenant_id: UUID,
+    payload: CommercialPackGrantRequest,
+    principal: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> CommercialGrantResponse:
+    if session.get(TenantModel, tenant_id) is None:
+        raise NotFoundError("Tenant not found")
+    try:
+        item = CommercialEntitlementService(session).grant_pack(
+            tenant_id,
+            pack_code=payload.pack_code,
+            idempotency_key=payload.idempotency_key,
+            expires_at=payload.expires_at,
+            created_by=principal.user_id,
+        )
+    except ValueError as exc:
+        raise NotFoundError(str(exc)) from exc
+    return CommercialGrantResponse.from_model(item)
+
+
 def _tenant_summary(session: Session, tenant: TenantModel) -> PlatformTenantSummary:
     def scoped_count(model: Any) -> int:
         return int(session.scalar(select(func.count()).where(model.tenant_id == tenant.id)) or 0)
@@ -394,6 +571,13 @@ def _tenant_summary(session: Session, tenant: TenantModel) -> PlatformTenantSumm
         if isinstance(value, dict)
     }
     account = session.get(CreditAccountModel, tenant.id)
+    commercial_service = CommercialEntitlementService(session)
+    commercial_subscription = commercial_service.subscription(tenant.id)
+    session.commit()
+    commercial_plan = session.get(CommercialPlanModel, commercial_subscription.plan_id)
+    if commercial_plan is None:
+        raise RuntimeError("Commercial plan not found")
+    commercial_resources = commercial_service.resource_summary(tenant.id)
     return PlatformTenantSummary(
         id=tenant.id,
         name=tenant.name,
@@ -409,10 +593,15 @@ def _tenant_summary(session: Session, tenant: TenantModel) -> PlatformTenantSumm
         estimated_ai_cost=cost,
         credit_balance=account.balance_credits if account else 0,
         credit_reserved=account.reserved_credits if account else 0,
-        credit_available=(
-            account.balance_credits - account.reserved_credits if account else 0
-        ),
+        credit_available=(account.balance_credits - account.reserved_credits if account else 0),
         credit_enforcement=account.enforcement_mode if account else "meter_only",
         unlimited_messages=account.unlimited_messages if account else False,
+        commercial_plan=commercial_plan.code,
+        commercial_status=commercial_subscription.status,
+        commercial_enforcement=commercial_subscription.enforcement_mode,
+        commercial_cycle_ends_at=commercial_subscription.cycle_ends_at,
+        commercial_available={
+            resource: values["available"] for resource, values in commercial_resources.items()
+        },
         integrations=safe_integrations,
     )

@@ -109,18 +109,14 @@ def test_manual_property_and_contacts_are_persisted_and_tenant_isolated(
         },
     )
     assert demand.status_code == 201, demand.text
-    filtered = client.get(
-        f"/leads/demands?contact_id={lead_contact['id']}", headers=auth_a
-    )
+    filtered = client.get(f"/leads/demands?contact_id={lead_contact['id']}", headers=auth_a)
     assert filtered.status_code == 200, filtered.text
     assert [item["id"] for item in filtered.json()] == [demand.json()["id"]]
     assert (
-        client.get(f"/leads/demands?contact_id={contact.json()['id']}", headers=auth_a).json()
-        == []
+        client.get(f"/leads/demands?contact_id={contact.json()['id']}", headers=auth_a).json() == []
     )
     assert (
-        client.get(f"/leads/demands?contact_id={lead_contact['id']}", headers=auth_b).json()
-        == []
+        client.get(f"/leads/demands?contact_id={lead_contact['id']}", headers=auth_b).json() == []
     )
 
 
@@ -238,12 +234,23 @@ def test_federated_search_reuses_cache_and_releases_unstarted_reservation(
     credits = client.get("/usage/credits", headers=auth)
     assert credits.status_code == 200, credits.text
     assert credits.json()["reserved_credits"] == 10
+    commercial = client.get("/usage/commercial", headers=auth).json()
+    standard = next(
+        item for item in commercial["resources"] if item["resource"] == "property_search_standard"
+    )
+    assert standard["reserved"] == 1
+    assert standard["measured"] == 0
 
     repeated = client.post("/capture/search-runs", headers=auth, json=payload)
     assert repeated.status_code == 202, repeated.text
     assert repeated.json()["id"] == first.json()["id"]
     assert repeated.json()["cache_hit"] is True
     assert client.get("/usage/credits", headers=auth).json()["reserved_credits"] == 10
+    commercial = client.get("/usage/commercial", headers=auth).json()
+    standard = next(
+        item for item in commercial["resources"] if item["resource"] == "property_search_standard"
+    )
+    assert standard["reserved"] == 1
 
     cancelled = client.post(
         f"/capture/search-runs/{first.json()['id']}/cancel",
@@ -252,6 +259,12 @@ def test_federated_search_reuses_cache_and_releases_unstarted_reservation(
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["status"] == "cancelled"
     assert client.get("/usage/credits", headers=auth).json()["reserved_credits"] == 0
+    commercial = client.get("/usage/commercial", headers=auth).json()
+    standard = next(
+        item for item in commercial["resources"] if item["resource"] == "property_search_standard"
+    )
+    assert standard["reserved"] == 0
+    assert standard["measured"] == 0
 
     legacy = client.post(
         f"/capture/missions/{demand.json()['id']}/discover",
@@ -441,9 +454,7 @@ def test_property_media_can_be_staged_committed_and_discarded(client: TestClient
     media = committed.json()[0]
     assert client.get(media["display_url"], headers=auth).content == mp4
     assert (
-        client.delete(
-            f"/properties/media/staging/{staged.json()['id']}", headers=auth
-        ).status_code
+        client.delete(f"/properties/media/staging/{staged.json()['id']}", headers=auth).status_code
         == 204
     )
 
@@ -502,9 +513,7 @@ def test_property_image_order_and_primary_delete_are_atomic_and_isolated(
         json={"images": [{"id": uploaded[0]["id"], "sort_order": 9}]},
     )
     assert incomplete.status_code == 409
-    unchanged = client.get(
-        f"/properties/{property_id}/images", headers=auth
-    ).json()
+    unchanged = client.get(f"/properties/{property_id}/images", headers=auth).json()
     assert {item["id"]: item["sort_order"] for item in unchanged} == original_order
 
     isolated = client.put(
@@ -533,9 +542,7 @@ def test_property_image_order_and_primary_delete_are_atomic_and_isolated(
     assert {item["sort_order"] for item in reordered.json()} == {0, 1, 2}
 
     primary = next(item for item in reordered.json() if item["is_primary"])
-    deleted = client.delete(
-        f"/properties/{property_id}/images/{primary['id']}", headers=auth
-    )
+    deleted = client.delete(f"/properties/{property_id}/images/{primary['id']}", headers=auth)
     assert deleted.status_code == 200, deleted.text
     remaining = deleted.json()
     assert len(remaining) == 2

@@ -8,7 +8,7 @@ import {
   Users,
 } from "lucide-react";
 import { ApiError, request } from "../api/client";
-import type { CreditAccount, DashboardStats, EvolutionWhatsappConnection, TelegramConnection } from "../api/types";
+import type { CommercialUsage, DashboardStats, EvolutionWhatsappConnection, TelegramConnection } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { Badge } from "../components/Badge";
 import { Card } from "../components/Card";
@@ -26,7 +26,7 @@ export function DashboardPage() {
     setLoading(true);
     void Promise.allSettled([
       request<DashboardStats>("/dashboard/stats", {}, token),
-      request<CreditAccount>("/usage/credits", {}, token),
+      request<CommercialUsage>("/usage/commercial", {}, token),
       request<EvolutionWhatsappConnection>("/integrations/evolution/whatsapp/status", {}, token),
       request<TelegramConnection>("/integrations/telegram/status", {}, token),
       request<Array<{ status: string }>>("/message-jobs?limit=50", {}, token),
@@ -39,9 +39,18 @@ export function DashboardPage() {
         setError(null);
       }
       const operational: string[] = [];
-      if (creditResult.status === "rejected") operational.push("Não foi possível verificar o saldo de créditos.");
-      if (creditResult.status === "fulfilled" && creditResult.value.enforcement_mode === "enforce" && creditResult.value.available_credits <= 0) {
-        operational.push("Saldo de créditos indisponível: automações cobradas podem ser bloqueadas.");
+      if (creditResult.status === "rejected") operational.push("Não foi possível verificar as franquias do plano.");
+      if (creditResult.status === "fulfilled" && creditResult.value.enforcement_mode === "enforce") {
+        const exhausted = creditResult.value.resources.filter((item) => item.available <= 0);
+        if (exhausted.some((item) => item.resource === "ai_attendance")) {
+          operational.push("Franquia da IA encerrada: novas conversas serão encaminhadas para atendimento humano.");
+        }
+        if (exhausted.some((item) => item.resource === "property_search_standard")) {
+          operational.push("Franquia de buscas de imóveis encerrada.");
+        }
+        if (exhausted.some((item) => item.resource === "image_optimization")) {
+          operational.push("Franquia de otimização de fotos encerrada.");
+        }
       }
       if (whatsappResult.status === "fulfilled" && whatsappResult.value.status !== "connected") {
         operational.push("WhatsApp não está conectado.");

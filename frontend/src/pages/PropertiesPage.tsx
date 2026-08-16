@@ -822,7 +822,7 @@ export function PropertiesPage() {
     images = optimizableImages;
     const count = images.length;
     if (!window.confirm(
-      `Otimizar ${count} ${count === 1 ? "imagem" : "imagens"} com IA? Cada imagem processada pode consumir créditos.`,
+      `Otimizar ${count} ${count === 1 ? "imagem" : "imagens"} com IA? Cada imagem concluída usa uma unidade da franquia de otimização.`,
     )) return;
     setImageBusy(count === 1 ? images[0].id : "batch");
     setOptimizationProgress(`Otimizando 1 de ${count}...`);

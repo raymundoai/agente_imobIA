@@ -277,9 +277,7 @@ def test_second_call_rejection_settles_first_call_without_retrying_it(
         ).one()
     engine.dispose()
     assert state == ("settled", "1", "true", 1)
-    assert MessageJobProcessor(
-        client.app.state.container, "second-worker"
-    ).process_next() is None
+    assert MessageJobProcessor(client.app.state.container, "second-worker").process_next() is None
     assert ai.chat_calls == 2
 
 
@@ -383,6 +381,13 @@ def test_image_billing_idempotency_prevents_duplicate_openai_cost(
     assert second.status_code == 409
     assert retry.status_code == 200, retry.text
     assert ai.image_calls == 2
+    commercial = client.get("/usage/commercial", headers=auth).json()
+    image_usage = next(
+        item for item in commercial["resources"] if item["resource"] == "image_optimization"
+    )
+    assert image_usage["measured"] == 2
+    assert image_usage["consumed"] == 2
+    assert image_usage["available"] == 28
 
 
 def _create_property_for_image(client: TestClient, headers: dict[str, str]) -> str:
@@ -458,9 +463,7 @@ def test_expired_started_reservation_is_conservatively_charged(
             idempotency_key="crashed-after-provider-call",
             reference_id=None,
         )
-        ledger.start_reservation(
-            UUID(tenant["id"]), "crashed-after-provider-call"
-        )
+        ledger.start_reservation(UUID(tenant["id"]), "crashed-after-provider-call")
     engine = create_engine(migrated_database)
     with engine.begin() as connection:
         connection.execute(
@@ -634,10 +637,7 @@ def test_settlement_uses_frozen_unlimited_snapshot(
             idempotency_key="snapshot-toggle",
             reference_id=None,
         )
-        assert (
-            reservation.extra["unlimited_messages_snapshot"]
-            is snapshot_unlimited
-        )
+        assert reservation.extra["unlimited_messages_snapshot"] is snapshot_unlimited
         ledger.start_reservation(tenant_id, "snapshot-toggle")
     _account(
         migrated_database,
@@ -661,10 +661,7 @@ def test_settlement_uses_frozen_unlimited_snapshot(
     engine = create_engine(migrated_database)
     with engine.connect() as connection:
         delta = connection.scalar(
-            text(
-                "SELECT delta_credits FROM credit_ledger "
-                "WHERE tenant_id=:tenant_id"
-            ),
+            text("SELECT delta_credits FROM credit_ledger WHERE tenant_id=:tenant_id"),
             {"tenant_id": tenant["id"]},
         )
     engine.dispose()

@@ -15,6 +15,11 @@ from app.modules.auth.api.dependencies import (
     get_current_principal,
     require_roles,
 )
+from app.modules.billing_usage.commercial import (
+    PROPERTY_SEARCH_AI,
+    PROPERTY_SEARCH_STANDARD,
+    CommercialEntitlementService,
+)
 from app.modules.billing_usage.service import (
     CreditLedgerService,
     estimated_chat_charge,
@@ -220,9 +225,7 @@ def get_demand_search_history(
     standard_source_ids = sorted(
         item.id for item in available if item.automatic and not item.premium
     )
-    ai_source_ids = [
-        item.id for item in available if item.id == "web_discovery" and item.premium
-    ]
+    ai_source_ids = [item.id for item in available if item.id == "web_discovery" and item.premium]
     standard = (
         repository.latest_compatible_run(
             principal.tenant_id,
@@ -318,37 +321,48 @@ def create_search_run(
         raise HTTPException(status_code=422, detail="Nenhuma fonte disponível para esta região")
     repository = FederatedSearchRepository(session)
     catalog_version = registry.catalog_version(requested)
-    run = None if payload.force_refresh else repository.find_reusable_run(
-        principal.tenant_id,
-        demand,
-        requested,
-        catalog_version=catalog_version,
+    run = (
+        None
+        if payload.force_refresh
+        else repository.find_reusable_run(
+            principal.tenant_id,
+            demand,
+            requested,
+            catalog_version=catalog_version,
+        )
     )
     cache_hit = run is not None
     if run is None:
         run_id = uuid4()
         premium = any(item.premium for item in selected_descriptors)
         billing_key = f"capture-search:{run_id}"
+        commercial_billing_key = f"commercial:{billing_key}"
         billing_model = (
-            container.settings.capture_web_discovery_model
-            if premium
-            else "federated-standard-v1"
+            container.settings.capture_web_discovery_model if premium else "federated-standard-v1"
         )
         estimate = (
             estimated_chat_charge(billing_model)
             if premium
             else fixed_credit_charge(container.settings.capture_standard_search_credits)
         )
-        CreditLedgerService(session).reserve(
-            principal.tenant_id,
-            resource="property_search_ai" if premium else "property_search_standard",
-            model=billing_model,
-            estimate=estimate,
-            idempotency_key=billing_key,
-            reference_id=run_id,
-            ttl_seconds=max(container.settings.capture_job_stale_seconds * 5, 900),
-        )
         try:
+            CommercialEntitlementService(session).reserve(
+                principal.tenant_id,
+                resource=PROPERTY_SEARCH_AI if premium else PROPERTY_SEARCH_STANDARD,
+                idempotency_key=commercial_billing_key,
+                reference_id=run_id,
+                ttl_seconds=max(container.settings.capture_job_stale_seconds * 5, 900),
+                extra={"premium": premium, "source_ids": requested},
+            )
+            CreditLedgerService(session).reserve(
+                principal.tenant_id,
+                resource="property_search_ai" if premium else "property_search_standard",
+                model=billing_model,
+                estimate=estimate,
+                idempotency_key=billing_key,
+                reference_id=run_id,
+                ttl_seconds=max(container.settings.capture_job_stale_seconds * 5, 900),
+            )
             run = repository.create_run(
                 principal.tenant_id,
                 demand,
@@ -363,8 +377,9 @@ def create_search_run(
             )
         except IntegrityError:
             session.rollback()
-            CreditLedgerService(session).release_reservation(
-                principal.tenant_id, billing_key
+            CreditLedgerService(session).release_reservation(principal.tenant_id, billing_key)
+            CommercialEntitlementService(session).release(
+                principal.tenant_id, commercial_billing_key
             )
             run = repository.find_reusable_run(
                 principal.tenant_id,
@@ -377,8 +392,9 @@ def create_search_run(
             cache_hit = True
         except Exception:
             session.rollback()
-            CreditLedgerService(session).release_reservation(
-                principal.tenant_id, billing_key
+            CreditLedgerService(session).release_reservation(principal.tenant_id, billing_key)
+            CommercialEntitlementService(session).release(
+                principal.tenant_id, commercial_billing_key
             )
             raise
     return _search_run_response(
@@ -461,10 +477,14 @@ def cancel_search_run(
         raise HTTPException(status_code=404, detail="Search run not found")
     if run.billing_reservation_key:
         ledger = CreditLedgerService(session)
-        if ledger.reservation_status(
-            principal.tenant_id, run.billing_reservation_key
-        ) == "reserved":
+        if (
+            ledger.reservation_status(principal.tenant_id, run.billing_reservation_key)
+            == "reserved"
+        ):
             ledger.release_reservation(principal.tenant_id, run.billing_reservation_key)
+        CommercialEntitlementService(session).release(
+            principal.tenant_id, f"commercial:{run.billing_reservation_key}"
+        )
     return _search_run_response(
         session, principal.tenant_id, run.id, _connector_registry(container)
     )
@@ -586,9 +606,7 @@ def unsave_search_result(
     session: Session = Depends(get_db_session),
 ) -> None:
     repository = FederatedSearchRepository(session)
-    result = repository.mark_result_unsaved(
-        principal.tenant_id, run_id, listing_id
-    )
+    result = repository.mark_result_unsaved(principal.tenant_id, run_id, listing_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Search result not found")
     demand_id, property_id = result
@@ -675,9 +693,7 @@ def remove_saved_property(
     ),
     session: Session = Depends(get_db_session),
 ) -> None:
-    demand = SqlAlchemyLeadDemandRepository(session).get_by_id(
-        principal.tenant_id, demand_id
-    )
+    demand = SqlAlchemyLeadDemandRepository(session).get_by_id(principal.tenant_id, demand_id)
     property_model = session.scalar(
         select(PropertyModel).where(
             PropertyModel.tenant_id == principal.tenant_id,

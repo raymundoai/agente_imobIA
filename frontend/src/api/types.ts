@@ -295,6 +295,49 @@ export type CreditLedgerItem = {
   created_at: string;
 };
 
+export type CommercialPlan = {
+  code: string;
+  name: string;
+  version: number;
+  monthly_price_cents: number;
+  currency: string;
+  ai_attendances: number;
+  property_searches: number;
+  image_optimizations: number;
+  max_users: number;
+  is_public: boolean;
+};
+
+export type CommercialResourceUsage = {
+  resource: "ai_attendance" | "property_search_standard" | "property_search_ai" | "image_optimization";
+  label: string;
+  granted: number;
+  consumed: number;
+  reserved: number;
+  available: number;
+  measured: number;
+  overage: number;
+};
+
+export type CommercialUsageEvent = {
+  id: string;
+  resource: CommercialResourceUsage["resource"];
+  units: number;
+  within_allowance: boolean;
+  created_at: string;
+};
+
+export type CommercialUsage = {
+  plan: CommercialPlan;
+  status: "pilot" | "active" | "past_due" | "cancelled";
+  enforcement_mode: "meter_only" | "enforce";
+  cycle_started_at: string;
+  cycle_ends_at: string;
+  active_ai_attendances: number;
+  resources: CommercialResourceUsage[];
+  recent_events: CommercialUsageEvent[];
+};
+
 export type Tenant = {
   id: string;
   name: string;

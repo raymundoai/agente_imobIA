@@ -91,6 +91,8 @@ class Settings(BaseSettings):
     ai_typing_delay_min_ms: int = Field(default=500, ge=0, le=10000)
     ai_typing_delay_max_ms: int = Field(default=4000, ge=0, le=30000)
     ai_message_part_pause_ms: int = Field(default=1200, ge=0, le=10000)
+    commercial_ai_attendance_window_hours: int = Field(default=24, ge=1, le=168)
+    commercial_ai_attendance_max_responses: int = Field(default=50, ge=1, le=500)
     message_job_max_attempts: int = Field(default=5, ge=1, le=20)
     message_job_backoff_seconds: int = Field(default=5, ge=1, le=3600)
     message_job_stale_seconds: int = Field(default=300, ge=30, le=86400)
@@ -101,7 +103,7 @@ class Settings(BaseSettings):
     capture_http_read_timeout_seconds: float = Field(default=20, gt=0, le=120)
     capture_search_cache_ttl_seconds: int = Field(default=86_400, ge=300, le=604_800)
     capture_standard_search_credits: int = Field(default=10, ge=0, le=100_000)
-    capture_web_discovery_enabled: bool = True
+    capture_web_discovery_enabled: bool = False
     capture_web_discovery_model: str = "gpt-5.6-luna"
     capture_web_discovery_max_results: int = Field(default=6, ge=1, le=12)
     capture_web_discovery_max_output_tokens: int = Field(default=4_000, ge=512, le=16_000)

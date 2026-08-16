@@ -189,9 +189,7 @@ def test_group_message_creates_human_conversation_without_lead_or_ai_job(
     assert response.json()["status"] == "processed"
     assert response.json()["job_id"] is None
     auth = {"Authorization": f"Bearer {token}"}
-    detail = client.get(
-        f"/conversations/{response.json()['conversation_id']}", headers=auth
-    ).json()
+    detail = client.get(f"/conversations/{response.json()['conversation_id']}", headers=auth).json()
     assert detail["is_group"] is True
     assert detail["group_name"] == "Captações Zona Sul"
     assert detail["mode"] == "human"
@@ -227,6 +225,10 @@ def test_webhook_can_generate_local_ai_reply_without_sending_to_whatsapp(
         "customer",
         "ai",
     ]
+    usage = client.get("/usage/commercial", headers={"Authorization": f"Bearer {token}"}).json()
+    attendance = next(item for item in usage["resources"] if item["resource"] == "ai_attendance")
+    assert attendance["reserved"] == 0
+    assert attendance["measured"] == 0
 
 
 def test_failed_async_reply_is_visible_and_can_be_retried(client: TestClient) -> None:
