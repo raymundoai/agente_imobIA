@@ -5,14 +5,10 @@ organizarem contatos e manterem sua carteira de imóveis.
 
 ## Documentação
 
-- [PRD do MVP](PRD-DEV.md): escopo, estado atual e critérios de aceite.
 - [Operação local](docs/OPERACAO_LOCAL.md): instalação, execução, bootstrap e testes.
-- [Créditos e custos](docs/CREDITOS_E_CUSTOS.md): preços de IA, unidade econômica e cobrança.
-- [Pós-lançamento](docs/ROADMAP_POS_MVP.md): recursos adiados para V2.
+- [Política de segurança](SECURITY.md): como relatar vulnerabilidades sem exposição pública.
 
-Esses quatro documentos são a documentação mantida do projeto. Código, migrations e testes
-prevalecem sobre anotações históricas; divergências devem ser corrigidas no PRD antes de uma
-release.
+Código, migrations e testes são a referência técnica do projeto.
 
 ## Stack
 
@@ -46,8 +42,7 @@ processadas pelo worker.
 
 Os fluxos principais estão implementados, mas “implementado” não significa “homologado”:
 WhatsApp, Telegram, OpenAI, storage S3, HTTPS, backup e restauração ainda precisam ser
-validados juntos em um ambiente semelhante ao de produção. O checklist vinculante está no
-[PRD](PRD-DEV.md#8-checklist-de-homologação).
+validados juntos em um ambiente semelhante ao de produção.
 
 Para produção:
 
@@ -57,3 +52,8 @@ Para produção:
 - mantenha banco e bucket privados, com backup, retenção e teste de restauração;
 - execute API e worker persistente; sem worker não há resposta automática nem limpeza de mídia;
 - restrinja CORS às origens publicadas e configure as URLs públicas exatas dos webhooks.
+
+## Licença
+
+O código é disponibilizado para consulta pública, mas não é software de código aberto. Consulte
+o arquivo [LICENSE](LICENSE) antes de copiar, modificar ou redistribuir qualquer parte do projeto.
