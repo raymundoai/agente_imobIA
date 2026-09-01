@@ -20,6 +20,8 @@ export type Conversation = {
   status: string;
   mode: string;
   last_message_at: string;
+  archived_at: string | null;
+  archived_by_user_id: string | null;
   current_intent?: string | null;
   current_agent?: string;
   channel?: "whatsapp" | "telegram";

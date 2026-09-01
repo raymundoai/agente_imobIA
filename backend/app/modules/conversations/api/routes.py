@@ -16,6 +16,7 @@ from app.modules.conversations.api.schemas import (
     ConversationResponse,
     MessageResponse,
     SendHumanMessageRequest,
+    UpdateConversationArchiveRequest,
     UpdateConversationModeRequest,
     WebhookResponse,
 )
@@ -103,13 +104,14 @@ def telegram_webhook(
 
 @router.get("", response_model=list[ConversationResponse])
 def list_conversations(
+    archived: bool = False,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     principal: CurrentPrincipal = Depends(get_current_principal),
     session: Session = Depends(get_db_session),
 ) -> list[ConversationResponse]:
     conversations = SqlAlchemyConversationRepository(session).list(
-        principal.tenant_id, limit=limit, offset=offset
+        principal.tenant_id, archived=archived, limit=limit, offset=offset
     )
     return [ConversationResponse.from_domain(item) for item in conversations]
 
@@ -153,6 +155,24 @@ def update_conversation_mode(
         payload.mode,
         principal.user_id,
     )
+    return ConversationResponse.from_domain(conversation)
+
+
+@router.patch("/{conversation_id}/archive", response_model=ConversationResponse)
+def update_conversation_archive(
+    conversation_id: UUID,
+    payload: UpdateConversationArchiveRequest,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    session: Session = Depends(get_db_session),
+) -> ConversationResponse:
+    conversation = SqlAlchemyConversationRepository(session).update_archived(
+        principal.tenant_id,
+        conversation_id,
+        payload.archived,
+        principal.user_id,
+    )
+    if conversation is None:
+        raise NotFoundError("Conversation not found")
     return ConversationResponse.from_domain(conversation)
 
 

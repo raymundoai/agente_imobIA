@@ -59,13 +59,20 @@ class ConversationRepositoryPort(ABC):
     ) -> Message: ...
 
     @abstractmethod
-    def list(self, tenant_id: UUID, *, limit: int, offset: int) -> list[Conversation]: ...
+    def list(
+        self, tenant_id: UUID, *, archived: bool, limit: int, offset: int
+    ) -> list[Conversation]: ...
 
     @abstractmethod
     def get_by_id(self, tenant_id: UUID, conversation_id: UUID) -> Conversation | None: ...
 
     @abstractmethod
     def list_messages(self, tenant_id: UUID, conversation_id: UUID) -> list[Message]: ...
+
+    @abstractmethod
+    def update_archived(
+        self, tenant_id: UUID, conversation_id: UUID, archived: bool, user_id: UUID
+    ) -> Conversation | None: ...
 
     @abstractmethod
     def update_mode(

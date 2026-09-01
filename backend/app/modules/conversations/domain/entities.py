@@ -50,6 +50,8 @@ class Conversation:
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_message_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     closed_at: datetime | None = None
+    archived_at: datetime | None = None
+    archived_by_user_id: UUID | None = None
     is_group: bool = False
     group_name: str | None = None
     last_message_text: str | None = None

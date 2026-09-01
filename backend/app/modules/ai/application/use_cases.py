@@ -40,6 +40,11 @@ from app.shared.errors.exceptions import ConfigurationError, NotFoundError
 from app.shared.events.models import DomainEvent
 from app.shared.events.ports import EventBusPort
 
+TECHNICAL_FALLBACK_MESSAGE = (
+    "Desculpe, tive um probleminha técnico aqui, mas vou pedir para um humano "
+    "seguir com o atendimento."
+)
+
 
 @dataclass(frozen=True, slots=True)
 class UploadKnowledgeDocumentInput:
@@ -342,7 +347,13 @@ class GenerateAiReplyUseCase:
             cached_input_tokens += response.cached_input_tokens
             output_tokens += response.output_tokens
 
-        response_parts = split_ai_response(response.text)
+        response_error: str | None = None
+        final_text = response.text
+        if not final_text.strip():
+            final_text = TECHNICAL_FALLBACK_MESSAGE
+            handoff_reason = handoff_reason or "technical_response_failure"
+            response_error = "ai_response_empty_after_retries"
+        response_parts = split_ai_response(final_text)
         response_text = "\n\n".join(response_parts)
         base_message_id = outbound_message_id or uuid4()
         if side_effect_guard is not None:
@@ -407,6 +418,7 @@ class GenerateAiReplyUseCase:
                 cached_input_tokens=cached_input_tokens,
                 output_tokens=output_tokens,
                 handoff_reason=handoff_reason,
+                error=response_error,
                 agent_key=agent_key,
             )
         )
@@ -492,8 +504,6 @@ class GenerateAiReplyUseCase:
                     for item in properties
                 ],
             }
-        if name == "record_usage":
-            return {"status": "recorded"}
         return {"status": "unsupported_tool"}
 
     def _handoff_for_restricted_intent(
@@ -740,21 +750,6 @@ class GenerateAiReplyUseCase:
             },
             {
                 "type": "function",
-                "name": "record_usage",
-                "description": "Registra um uso de IA no módulo atual.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "type": {"type": "string"},
-                        "module": {"type": "string"},
-                    },
-                    "required": ["type", "module"],
-                    "additionalProperties": False,
-                },
-                "strict": True,
-            },
-            {
-                "type": "function",
                 "name": "create_or_update_lead",
                 "description": (
                     "Cria ou atualiza a demanda quando os critérios essenciais estiverem claros."
@@ -847,7 +842,7 @@ def split_ai_response(text: str, *, max_parts: int = 5, target_chars: int = 500)
     cleaned = re.sub(r"\s+[—–]\s+", ", ", cleaned)
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     if not cleaned:
-        return ["Desculpe, não consegui preparar uma resposta agora. Pode repetir sua mensagem?"]
+        return [TECHNICAL_FALLBACK_MESSAGE]
 
     paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", cleaned) if part.strip()]
     parts: list[str] = []

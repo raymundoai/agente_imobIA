@@ -38,6 +38,11 @@ class ConversationModel(Base):
             ["contacts.tenant_id", "contacts.id"],
             name="fk_conversations_tenant_contact",
         ),
+        ForeignKeyConstraint(
+            ["tenant_id", "archived_by_user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_conversations_tenant_archived_by_user",
+        ),
         UniqueConstraint("tenant_id", "id", name="uq_conversations_tenant_id_id"),
         Index("ix_conversations_tenant_id", "tenant_id"),
         Index(
@@ -61,6 +66,12 @@ class ConversationModel(Base):
             postgresql_where=sql_text("assigned_user_id IS NOT NULL"),
         ),
         Index("ix_conversations_tenant_contact", "tenant_id", "contact_id"),
+        Index(
+            "ix_conversations_tenant_archived_last_message",
+            "tenant_id",
+            "archived_at",
+            sql_text("last_message_at DESC"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
@@ -90,6 +101,8 @@ class ConversationModel(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_by_user_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     is_group: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
     group_name: Mapped[str | None] = mapped_column(Text)
 

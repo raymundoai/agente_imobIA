@@ -28,6 +28,8 @@ class ConversationResponse(BaseModel):
     assigned_user_id: UUID | None
     started_at: datetime
     last_message_at: datetime
+    archived_at: datetime | None
+    archived_by_user_id: UUID | None
     is_group: bool
     group_name: str | None
     last_message_text: str | None
@@ -50,6 +52,8 @@ class ConversationResponse(BaseModel):
             assigned_user_id=conversation.assigned_user_id,
             started_at=conversation.started_at,
             last_message_at=conversation.last_message_at,
+            archived_at=conversation.archived_at,
+            archived_by_user_id=conversation.archived_by_user_id,
             is_group=conversation.is_group,
             group_name=conversation.group_name,
             last_message_text=conversation.last_message_text,
@@ -98,6 +102,10 @@ class ConversationDetailResponse(ConversationResponse):
 
 class UpdateConversationModeRequest(BaseModel):
     mode: ConversationMode
+
+
+class UpdateConversationArchiveRequest(BaseModel):
+    archived: bool
 
 
 class SendHumanMessageRequest(BaseModel):

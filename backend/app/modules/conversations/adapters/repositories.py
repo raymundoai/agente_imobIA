@@ -42,6 +42,8 @@ def _conversation_to_domain(model: ConversationModel) -> Conversation:
         started_at=model.started_at,
         last_message_at=model.last_message_at,
         closed_at=model.closed_at,
+        archived_at=model.archived_at,
+        archived_by_user_id=model.archived_by_user_id,
         is_group=model.is_group,
         group_name=model.group_name,
     )
@@ -141,6 +143,9 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
             self._session.flush()
         else:
             conversation.last_message_at = now
+            if incoming.direction is MessageDirection.INBOUND:
+                conversation.archived_at = None
+                conversation.archived_by_user_id = None
             conversation.contact_id = incoming.contact_id or conversation.contact_id
             conversation.external_contact_id = incoming.external_contact_id
             if incoming.customer_name:
@@ -236,10 +241,17 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
             self._session.flush()
         return message
 
-    def list(self, tenant_id: UUID, *, limit: int, offset: int) -> list[Conversation]:
+    def list(
+        self, tenant_id: UUID, *, archived: bool, limit: int, offset: int
+    ) -> list[Conversation]:
+        archive_filter = (
+            ConversationModel.archived_at.is_not(None)
+            if archived
+            else ConversationModel.archived_at.is_(None)
+        )
         models = self._session.scalars(
             select(ConversationModel)
-            .where(ConversationModel.tenant_id == tenant_id)
+            .where(ConversationModel.tenant_id == tenant_id, archive_filter)
             .order_by(ConversationModel.last_message_at.desc(), ConversationModel.id)
             .limit(limit)
             .offset(offset)
@@ -279,6 +291,27 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
             )
         )
         return _conversation_to_domain(model) if model else None
+
+    def update_archived(
+        self,
+        tenant_id: UUID,
+        conversation_id: UUID,
+        archived: bool,
+        user_id: UUID,
+    ) -> Conversation | None:
+        model = self._session.scalar(
+            select(ConversationModel).where(
+                ConversationModel.tenant_id == tenant_id,
+                ConversationModel.id == conversation_id,
+            )
+        )
+        if model is None:
+            return None
+        model.archived_at = datetime.now(UTC) if archived else None
+        model.archived_by_user_id = user_id if archived else None
+        self._session.commit()
+        self._session.refresh(model)
+        return _conversation_to_domain(model)
 
     def list_messages(self, tenant_id: UUID, conversation_id: UUID) -> list[Message]:
         models = self._session.scalars(

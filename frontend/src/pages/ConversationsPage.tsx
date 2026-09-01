@@ -1,4 +1,6 @@
 import {
+  Archive,
+  ArchiveRestore,
   Building2,
   Clock,
   Download,
@@ -17,7 +19,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { request, requestBlob } from "../api/client";
 import type { Contact, Conversation, ConversationDetail, LeadDemand, Message, Property, PropertyImage, Tenant } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
@@ -43,7 +45,7 @@ export function ConversationsPage() {
   const [contactEditorOpen, setContactEditorOpen] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
-  const [conversationScope, setConversationScope] = useState<"direct" | "groups">("direct");
+  const [conversationScope, setConversationScope] = useState<"direct" | "groups" | "archived">("direct");
   const [draft, setDraft] = useState("");
   const [propertyShareOpen, setPropertyShareOpen] = useState(false);
   const [propertyShareScope, setPropertyShareScope] = useState<"internal" | "external">("internal");
@@ -90,7 +92,11 @@ export function ConversationsPage() {
     const sync = async () => {
       try {
         const [conversations, loadedContacts] = await Promise.all([
-          request<Conversation[]>("/conversations", {}, token),
+          request<Conversation[]>(
+            `/conversations?archived=${conversationScope === "archived"}`,
+            {},
+            token,
+          ),
           request<Contact[]>("/contacts", {}, token),
         ]);
         if (!active) return;
@@ -117,12 +123,13 @@ export function ConversationsPage() {
         // A próxima rodada tenta novamente; erros de ações continuam visíveis no composer.
       }
     };
+    void sync();
     const interval = window.setInterval(() => void sync(), 3000);
     return () => {
       active = false;
       window.clearInterval(interval);
     };
-  }, [selectedId, token]);
+  }, [conversationScope, selectedId, token]);
 
   useEffect(() => {
     if (!claims?.tenantId) return;
@@ -211,7 +218,11 @@ export function ConversationsPage() {
     const normalized = query.trim().toLowerCase();
     return items.filter((item) => {
       const matchesScope =
-        conversationScope === "groups" ? item.is_group : !item.is_group;
+        conversationScope === "archived"
+          ? Boolean(item.archived_at)
+          : conversationScope === "groups"
+            ? item.is_group
+            : !item.is_group;
       const matchesSearch =
         !normalized ||
         [
@@ -336,6 +347,24 @@ export function ConversationsPage() {
       author_type: "system",
       text: "Conversa assumida pela equipe. A IA foi pausada para este atendimento.",
     });
+  }
+
+  async function toggleArchived() {
+    if (!selected) return;
+    setActionError(null);
+    const archived = !selected.archived_at;
+    try {
+      await request<Conversation>(
+        `/conversations/${selected.id}/archive`,
+        { method: "PATCH", body: JSON.stringify({ archived }) },
+        token,
+      );
+      const remaining = items.filter((item) => item.id !== selected.id);
+      setItems(remaining);
+      setSelectedId(remaining[0]?.id ?? "");
+    } catch (error) {
+      setActionError(readActionError(error));
+    }
   }
 
   async function sendMessage() {
@@ -632,6 +661,19 @@ export function ConversationsPage() {
               <UsersRound size={15} />
               Grupos
             </button>
+            <button
+              aria-selected={conversationScope === "archived"}
+              className={conversationScope === "archived" ? "active" : ""}
+              onClick={() => {
+                setConversationScope("archived");
+                setSelectedId("");
+              }}
+              role="tab"
+              type="button"
+            >
+              <Archive size={15} />
+              Arquivadas
+            </button>
           </div>
           <div className="conversation-list">
             {listLoading ? <div className="empty-state" aria-live="polite">Carregando conversas...</div> : null}
@@ -713,6 +755,15 @@ export function ConversationsPage() {
             <div className="toolbar-actions">
               <button
                 className="button-outline"
+                disabled={!selected}
+                onClick={() => void toggleArchived()}
+                type="button"
+              >
+                {selected?.archived_at ? <ArchiveRestore size={15} /> : <Archive size={15} />}
+                {selected?.archived_at ? "Desarquivar" : "Arquivar"}
+              </button>
+              <button
+                className="button-outline"
                 onClick={() => void assumeConversation()}
                 type="button"
               >
@@ -767,13 +818,32 @@ export function ConversationsPage() {
           {actionError ? <div className="error-box">{actionError}</div> : null}
 
           <div className="chat-list embedded" ref={chatListRef}>
-            {selectedMessages.map((message) => (
-              <article className={`message ${message.direction}`} key={message.id}>
-                <small>
-                  {message.sender_name && message.direction === "inbound"
-                    ? message.sender_name
-                    : authorLabels[message.author_type] ?? message.author_type}
-                </small>
+            {selectedMessages.map((message, index) => {
+              const previousMessage = selectedMessages[index - 1];
+              const startsDay =
+                !previousMessage ||
+                localDateKey(previousMessage.created_at) !== localDateKey(message.created_at);
+              return (
+              <Fragment key={message.id}>
+                {startsDay ? (
+                  <div className="message-day-separator">
+                    <span>{formatMessageDay(message.created_at)}</span>
+                  </div>
+                ) : null}
+                <article className={`message ${message.direction}`}>
+                <div className="message-meta">
+                  <small>
+                    {message.sender_name && message.direction === "inbound"
+                      ? message.sender_name
+                      : authorLabels[message.author_type] ?? message.author_type}
+                  </small>
+                  <time
+                    dateTime={message.created_at}
+                    title={`${message.direction === "inbound" ? "Recebida" : "Enviada"} em ${formatMessageDateTime(message.created_at)}`}
+                  >
+                    {formatMessageTime(message.created_at)}
+                  </time>
+                </div>
                 {message.text ? <p>{message.text}</p> : null}
                 {message.attachments?.map((attachment, index) => (
                   <MessageAttachment
@@ -786,8 +856,10 @@ export function ConversationsPage() {
                   />
                 ))}
                 {message.sharedProperty ? <SharedPropertyPreview imageUrl={propertyCovers[message.sharedProperty.id]} property={message.sharedProperty} /> : null}
-              </article>
-            ))}
+                </article>
+              </Fragment>
+              );
+            })}
           </div>
 
           <div className="chat-composer">
@@ -1281,3 +1353,46 @@ const authorLabels: Record<string, string> = {
   human: "Equipe",
   system: "Sistema",
 };
+
+function formatMessageTime(value: string): string {
+  return new Intl.DateTimeFormat("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function formatMessageDateTime(value: string): string {
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function localDateKey(value: string): string {
+  const date = new Date(value);
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+function formatMessageDay(value: string): string {
+  const messageDate = new Date(value);
+  const messageDay = new Date(
+    messageDate.getFullYear(),
+    messageDate.getMonth(),
+    messageDate.getDate(),
+  );
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const daysAgo = Math.round((today.getTime() - messageDay.getTime()) / 86_400_000);
+
+  if (daysAgo === 0) return "Hoje";
+  if (daysAgo === 1) return "Ontem";
+  if (daysAgo >= 2 && daysAgo <= 6) {
+    const weekday = new Intl.DateTimeFormat("pt-BR", { weekday: "long" }).format(messageDate);
+    return weekday.charAt(0).toUpperCase() + weekday.slice(1);
+  }
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(messageDate);
+}

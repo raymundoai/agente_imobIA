@@ -2163,7 +2163,7 @@ tbody tr:hover {
   border-bottom: 1px solid var(--border);
   display: grid;
   gap: 6px;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   padding: 0 12px 12px;
 }
 
@@ -2665,6 +2665,33 @@ tbody tr:hover {
   padding: 14px;
 }
 
+.message-day-separator {
+  align-items: center;
+  color: var(--muted-foreground);
+  display: flex;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 12px;
+  justify-self: stretch;
+  margin: 10px 0 4px;
+  text-transform: uppercase;
+}
+
+.message-day-separator::before,
+.message-day-separator::after {
+  background: var(--border);
+  content: "";
+  flex: 1;
+  height: 1px;
+}
+
+.message-day-separator span {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 10px;
+}
+
 .message.inbound {
   background: color-mix(in srgb, var(--primary) 12%, var(--secondary));
 }
@@ -2672,6 +2699,19 @@ tbody tr:hover {
 .message.outbound {
   background: var(--secondary);
   justify-self: end;
+}
+
+.message-meta {
+  align-items: center;
+  color: var(--muted-foreground);
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+}
+
+.message-meta time {
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .message p {

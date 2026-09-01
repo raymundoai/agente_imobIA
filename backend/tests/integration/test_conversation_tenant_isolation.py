@@ -75,7 +75,9 @@ def _provision(client: TestClient, slug: str) -> tuple[str, str]:
     return created.json()["id"], login.json()["access_token"]
 
 
-def _receive(client: TestClient, slug: str) -> dict[str, Any]:
+def _receive(
+    client: TestClient, slug: str, external_id: str = "same-external-id"
+) -> dict[str, Any]:
     response = client.post(
         f"/webhooks/whatsapp/{slug}",
         headers={"X-ImobIA-Webhook-Secret": TEST_WEBHOOK_SECRET},
@@ -83,7 +85,7 @@ def _receive(client: TestClient, slug: str) -> dict[str, Any]:
             "event": "MESSAGES_UPSERT",
             "data": {
                 "key": {
-                    "id": "same-external-id",
+                    "id": external_id,
                     "remoteJid": "5511888888888@s.whatsapp.net",
                     "fromMe": False,
                 },
@@ -93,6 +95,49 @@ def _receive(client: TestClient, slug: str) -> dict[str, Any]:
     )
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def test_conversation_can_be_archived_and_inbound_message_restores_it(
+    client: TestClient,
+) -> None:
+    _, token = _provision(client, "tenant-a")
+    conversation_id = _receive(client, "tenant-a")["conversation_id"]
+    auth = {"Authorization": f"Bearer {token}"}
+
+    archived = client.patch(
+        f"/conversations/{conversation_id}/archive",
+        headers=auth,
+        json={"archived": True},
+    )
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["archived_at"] is not None
+    assert archived.json()["archived_by_user_id"] is not None
+    assert client.get("/conversations", headers=auth).json() == []
+    archived_list = client.get("/conversations?archived=true", headers=auth)
+    assert [item["id"] for item in archived_list.json()] == [conversation_id]
+
+    _receive(client, "tenant-a", "new-external-id")
+    active_list = client.get("/conversations", headers=auth).json()
+    assert [item["id"] for item in active_list] == [conversation_id]
+    assert active_list[0]["archived_at"] is None
+    assert client.get("/conversations?archived=true", headers=auth).json() == []
+
+
+def test_conversation_archiving_is_tenant_isolated(client: TestClient) -> None:
+    _, token_a = _provision(client, "tenant-a")
+    _, token_b = _provision(client, "tenant-b")
+    conversation_id = _receive(client, "tenant-a")["conversation_id"]
+
+    response = client.patch(
+        f"/conversations/{conversation_id}/archive",
+        headers={"Authorization": f"Bearer {token_b}"},
+        json={"archived": True},
+    )
+    assert response.status_code == 404
+    active = client.get(
+        "/conversations", headers={"Authorization": f"Bearer {token_a}"}
+    ).json()
+    assert [item["id"] for item in active] == [conversation_id]
 
 
 def test_conversations_handoff_and_messages_are_tenant_isolated(
