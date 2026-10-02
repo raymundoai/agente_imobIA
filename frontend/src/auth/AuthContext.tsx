@@ -12,15 +12,18 @@ import {
   changePassword as apiChangePassword,
   login as apiLogin,
 } from "../api/client";
+import type { CompanyOption } from "../api/types";
 
 type AuthContextValue = {
   token: string | null;
   tenantSlug: string;
   isAuthenticated: boolean;
-  login: (tenantSlug: string, email: string, password: string) => Promise<void>;
+  /** Resolves with the companies to choose from when the email belongs to more than one. */
+  login: (email: string, password: string, tenantSlug?: string) => Promise<CompanyOption[] | null>;
   acceptInvitation: (invitationToken: string, password: string) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   logout: () => void;
+  startSession: (accessToken: string, refreshToken: string, tenantSlug: string) => void;
 };
 
 const STORAGE_KEY = "imobos.auth.v1";
@@ -56,9 +59,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  const login = useCallback(async (slug: string, email: string, password: string) => {
-    const result = await apiLogin(slug, email, password);
-    storeSession(result.access_token, result.refresh_token, slug);
+  const login = useCallback(async (email: string, password: string, slug?: string) => {
+    const result = await apiLogin(email, password, slug);
+    if (result.companies.length) return result.companies;
+    if (!result.access_token || !result.refresh_token || !result.tenant_slug) {
+      throw new Error("Não foi possível entrar. Tente novamente.");
+    }
+    storeSession(result.access_token, result.refresh_token, result.tenant_slug);
+    return null;
   }, [storeSession]);
 
   const acceptInvitation = useCallback(async (invitationToken: string, password: string) => {
@@ -101,8 +109,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       acceptInvitation,
       changePassword,
       logout,
+      startSession: storeSession,
     }),
-    [acceptInvitation, changePassword, login, logout, tenantSlug, token],
+    [acceptInvitation, changePassword, login, logout, storeSession, tenantSlug, token],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

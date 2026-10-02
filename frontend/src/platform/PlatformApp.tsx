@@ -2,7 +2,10 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   Bot,
   Building2,
+  Cable,
   Coins,
+  Home,
+  LayoutDashboard,
   LogOut,
   MessageSquare,
   Plus,
@@ -44,7 +47,7 @@ type Tenant = {
   credit_enforcement: "meter_only" | "enforce";
   unlimited_messages: boolean;
   commercial_plan: string;
-  commercial_status: "pilot" | "active" | "past_due" | "cancelled";
+  commercial_status: "pilot" | "trial" | "active" | "past_due" | "cancelled";
   commercial_enforcement: "meter_only" | "enforce";
   commercial_cycle_ends_at: string;
   commercial_available: Record<string, number>;
@@ -117,6 +120,17 @@ const emptyTenant: TenantForm = {
   admin_password: "",
 };
 const storageKey = "immobia.platform.auth.v1";
+const platformTabs = [
+  { key: "overview", label: "Visão geral", icon: LayoutDashboard },
+  { key: "clients", label: "Clientes", icon: Building2 },
+  { key: "settings", label: "Configurações", icon: Cable },
+] as const;
+type PlatformTab = (typeof platformTabs)[number]["key"];
+
+function platformTabFromUrl(): PlatformTab {
+  const requested = new URLSearchParams(window.location.search).get("aba");
+  return platformTabs.some((tab) => tab.key === requested) ? (requested as PlatformTab) : "overview";
+}
 
 export function PlatformApp() {
   const [token, setToken] = useState(() =>
@@ -131,6 +145,21 @@ export function PlatformApp() {
   const [form, setForm] = useState<TenantForm>(emptyTenant);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<PlatformTab>(() => platformTabFromUrl());
+
+  useEffect(() => {
+    const sync = () => setActiveTab(platformTabFromUrl());
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+
+  function selectTab(tab: PlatformTab) {
+    if (tab === activeTab) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("aba", tab);
+    window.history.pushState({}, "", `${url.pathname}${url.search}`);
+    setActiveTab(tab);
+  }
 
   async function load(activeToken = token) {
     if (!activeToken) {
@@ -231,10 +260,27 @@ export function PlatformApp() {
           Sair
         </button>
       </header>
+      <nav className="platform-tabs" aria-label="Seções da administração">
+        {platformTabs.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button
+              aria-current={activeTab === tab.key ? "page" : undefined}
+              className={activeTab === tab.key ? "platform-tab active" : "platform-tab"}
+              key={tab.key}
+              onClick={() => selectTab(tab.key)}
+              type="button"
+            >
+              <Icon size={16} />
+              {tab.label}
+            </button>
+          );
+        })}
+      </nav>
       {error ? <div className="error-box">{error}</div> : null}
       {loading ? <div className="empty-state large" aria-live="polite">Carregando administração da plataforma...</div> : null}
-      {!loading ? <>
-      <section className="metrics-grid">
+      {!loading && activeTab === "overview" ? (
+      <section className="platform-metrics">
         <MetricCard
           icon={Building2}
           label="Clientes ativos"
@@ -265,8 +311,24 @@ export function PlatformApp() {
           value={dashboard?.credits_outstanding ?? 0}
           detail="Saldo total dos clientes"
         />
+        <MetricCard
+          icon={Home}
+          label="Imóveis"
+          value={dashboard?.properties ?? 0}
+          detail={`${dashboard?.contacts ?? 0} contatos cadastrados`}
+        />
       </section>
-      <AsaasSetup token={token} />
+      ) : null}
+      {!loading && activeTab === "settings" ? (
+        <section className="page-stack">
+          <div>
+            <h2>Integrações</h2>
+            <p>Serviços externos usados por toda a plataforma.</p>
+          </div>
+          <AsaasSetup token={token} />
+        </section>
+      ) : null}
+      {!loading && activeTab === "clients" ? (
       <div className="platform-layout">
         <Card>
           <div className="section-inline-header">
@@ -359,7 +421,7 @@ export function PlatformApp() {
                   }
                 />
               </div>
-              <button type="submit">Criar imobiliária e administrador</button>
+              <button className="primary-button" type="submit">Criar imobiliária e administrador</button>
             </form>
           ) : selected ? (
             <TenantDetail
@@ -378,7 +440,7 @@ export function PlatformApp() {
           )}
         </Card>
       </div>
-      </> : null}
+      ) : null}
     </main>
   );
 }
@@ -513,7 +575,7 @@ function AsaasSetup({ token }: { token: string }) {
       ) : null}
       <form className="form-grid" onSubmit={provisionWebhook}>
         <Field label="E-mail para avisos do webhook" type="email" value={notificationEmail} onChange={setNotificationEmail} />
-        <button disabled={!connection?.configured} type="submit">Configurar webhook</button>
+        <button className="primary-button form-action" disabled={!connection?.configured} type="submit">Configurar webhook</button>
       </form>
       {feedback ? <p>{feedback}</p> : null}
     </Card>
@@ -772,7 +834,9 @@ function TenantDetail({
           <label>
             Plano
             <select value={planCode} onChange={(event) => setPlanCode(event.target.value)}>
-              {plans.map((plan) => <option key={`${plan.code}:${plan.version}`} value={plan.code}>{plan.name} · {formatBrl(plan.monthly_price_cents)}</option>)}
+              {plans
+                .filter((plan) => plan.code !== "teste_gratis" || plan.code === tenant.commercial_plan)
+                .map((plan) => <option key={`${plan.code}:${plan.version}`} value={plan.code}>{plan.name} · {formatBrl(plan.monthly_price_cents)}</option>)}
             </select>
           </label>
           <label>
@@ -782,7 +846,7 @@ function TenantDetail({
               <option value="enforce">Aplicar franquias</option>
             </select>
           </label>
-          <button onClick={() => void saveSubscription()} type="button">Salvar plano</button>
+          <button className="primary-button form-action" onClick={() => void saveSubscription()} type="button">Salvar plano</button>
         </div>
 
         <form className="form-grid" onSubmit={grantUnits}>
@@ -795,7 +859,7 @@ function TenantDetail({
             </select>
           </label>
           <Field label="Unidades" type="number" value={units} onChange={setUnits} />
-          <button type="submit">Conceder franquia</button>
+          <button className="primary-button form-action" type="submit">Conceder franquia</button>
         </form>
 
         <div className="form-grid">
@@ -805,7 +869,7 @@ function TenantDetail({
               {packs.map((pack) => <option key={pack.code} value={pack.code}>{pack.name}</option>)}
             </select>
           </label>
-          <button className="button-outline" disabled={!packCode} onClick={() => void grantPack()} type="button">
+          <button className="button-outline form-action" disabled={!packCode} onClick={() => void grantPack()} type="button">
             Conceder pacote manualmente
           </button>
         </div>
@@ -873,7 +937,7 @@ function TenantDetail({
           <Field label="E-mail financeiro" type="email" value={billingEmail} onChange={setBillingEmail} />
           <Field label="CPF ou CNPJ" value={billingDocument} onChange={setBillingDocument} />
           <Field label="Primeiro vencimento" type="date" value={nextDueDate} onChange={setNextDueDate} />
-          <button disabled={!asaasPlanCode || Boolean(openAsaasSubscription)} type="submit">Criar assinatura PIX</button>
+          <button className="primary-button form-action" disabled={!asaasPlanCode || Boolean(openAsaasSubscription)} type="submit">Criar assinatura PIX</button>
         </form>
       </div>
       <div className="settings-subsection">
@@ -891,7 +955,7 @@ function TenantDetail({
         </p>
       </div>
       <button
-        className={tenant.status === "active" ? "button-danger" : ""}
+        className={tenant.status === "active" ? "primary-button button-danger tenant-status-action" : "primary-button tenant-status-action"}
         onClick={onToggle}
         type="button"
       >

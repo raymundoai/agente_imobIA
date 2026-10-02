@@ -1,4 +1,4 @@
-import type { LoginResponse } from "./types";
+import type { LoginResponse, PasswordLoginResponse } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const AUTH_STORAGE_KEY = "imobos.auth.v1";
@@ -228,6 +228,7 @@ function userFacingMessage(message: string) {
     "Authentication required": "Entre novamente para continuar.",
     "Invalid access token": "Sua sessão expirou. Entre novamente.",
     "Invalid credentials": "E-mail ou senha incorretos.",
+    "Tenant slug or administrator email already exists": "Este endereço de acesso já está em uso. Escolha outro.",
     "Insufficient permissions": "Seu perfil não permite realizar esta ação.",
     "Tenant not found": "Empresa não encontrada.",
     "User not found": "Usuário não encontrado.",
@@ -239,10 +240,11 @@ function userFacingMessage(message: string) {
     .replace(/\bAPI\b/g, "serviço");
 }
 
-export function login(tenantSlug: string, email: string, password: string) {
-  return request<LoginResponse>("/auth/login", {
+/** Email and password are enough; tenantSlug is only sent to pick one of several companies. */
+export function login(email: string, password: string, tenantSlug?: string) {
+  return request<PasswordLoginResponse>("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ tenant_slug: tenantSlug, email, password }),
+    body: JSON.stringify({ email, password, ...(tenantSlug ? { tenant_slug: tenantSlug } : {}) }),
   });
 }
 

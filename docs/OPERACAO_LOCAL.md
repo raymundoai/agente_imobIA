@@ -239,12 +239,10 @@ plataforma.
 
 ### Tenant de teste
 
-Crie a imobiliária pelo painel da plataforma. Defina um slug, e-mail e senha próprios. Entre
-em `http://localhost:5173` com:
-
-- slug escolhido;
-- e-mail do administrador criado;
-- senha escolhida.
+Crie a imobiliária pelo painel da plataforma, definindo slug, e-mail e senha próprios, ou use
+"Criar conta grátis" na tela de login (exige `PUBLIC_SIGNUP_ENABLED=true`). Entre em
+`http://localhost:5173` só com o e-mail e a senha: a empresa é identificada pelo e-mail e, se
+ele pertencer a mais de uma, o login pede para escolher.
 
 Não registre esses valores neste documento ou em commits.
 

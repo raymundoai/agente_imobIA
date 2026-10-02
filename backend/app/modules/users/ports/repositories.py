@@ -18,6 +18,10 @@ class UserRepositoryPort(ABC):
     def get_by_email(self, tenant_id: UUID, email: str) -> User | None: ...
 
     @abstractmethod
+    def list_by_email(self, email: str) -> list[User]:
+        """The same email across every tenant, used by login without a company."""
+
+    @abstractmethod
     def get_by_invitation_hash(self, token_hash: str) -> User | None: ...
 
     @abstractmethod

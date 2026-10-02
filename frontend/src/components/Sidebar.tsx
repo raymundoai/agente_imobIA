@@ -1,6 +1,5 @@
 import {
   BarChart3,
-  Bot,
   ChevronsLeft,
   ChevronsRight,
   Hexagon,
@@ -11,8 +10,8 @@ import {
   UserRoundCog,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useAuth } from "../auth/AuthContext";
 import { appRoutes, type AppPage, shouldHandleClientNavigation } from "../lib/appNavigation";
+import { UserMenu } from "./UserMenu";
 
 export const navigationItems = [
   { key: "dashboard", label: "Visão geral", icon: BarChart3 },
@@ -23,6 +22,9 @@ export const navigationItems = [
   { key: "settings", label: "Configurações", icon: Settings },
 ] as const;
 
+// Settings is reached from the account menu in the sidebar footer.
+const sidebarItems = navigationItems.filter((item) => item.key !== "settings");
+
 export function Sidebar({
   activePage,
   onNavigate,
@@ -30,7 +32,6 @@ export function Sidebar({
   activePage: string;
   onNavigate: (page: AppPage) => void;
 }) {
-  const { tenantSlug } = useAuth();
   const [collapsed, setCollapsed] = useState(
     () => window.localStorage.getItem("imobos.sidebar.collapsed") === "true",
   );
@@ -58,7 +59,7 @@ export function Sidebar({
       </div>
 
       <nav className="nav-v2">
-        {navigationItems.map((item) => {
+        {sidebarItems.map((item) => {
           const Icon = item.icon;
           const isActive = activePage === item.key;
           return (
@@ -82,15 +83,7 @@ export function Sidebar({
         })}
       </nav>
 
-      <div className="sidebar-user">
-        <div className="avatar">
-          <Bot size={16} />
-        </div>
-        <div>
-          <strong>Operação</strong>
-          <small>{tenantSlug || "empresa"}</small>
-        </div>
-      </div>
+      <UserMenu onOpenSettings={() => onNavigate("settings")} />
     </aside>
   );
 }

@@ -15,6 +15,27 @@ class CreateTenantRequest(BaseModel):
     admin_password: str = Field(min_length=12, max_length=128)
 
 
+class SignupRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    company_name: str = Field(min_length=2, max_length=160)
+    admin_name: str = Field(min_length=2, max_length=160)
+    email: EmailStr
+    password: str = Field(min_length=12, max_length=128)
+
+
+class SignupResponse(BaseModel):
+    tenant_id: UUID
+    tenant_slug: str
+    access_token: str
+    refresh_token: str
+    trial_ends_at: datetime
+
+
+class OnboardingStatusRequest(BaseModel):
+    status: Literal["completed", "skipped"]
+
+
 class UpdateTenantSettingsRequest(BaseModel):
     settings: dict[str, Any]
 
@@ -106,8 +127,10 @@ class BusinessDaySettings(BaseModel):
     def validate_schedule(self) -> "BusinessDaySettings":
         if self.enabled and self.start >= self.end:
             raise ValueError("O início do atendimento deve ser anterior ao fim")
-        if self.enabled and self.break_enabled and not (
-            self.start < self.break_start < self.break_end < self.end
+        if (
+            self.enabled
+            and self.break_enabled
+            and not (self.start < self.break_start < self.break_end < self.end)
         ):
             raise ValueError("O intervalo deve ficar dentro do horário de atendimento")
         return self
@@ -196,8 +219,7 @@ def _valid_brazilian_document(digits: str, document_type: str) -> bool:
     if document_type == "cpf":
         for length in (9, 10):
             total = sum(
-                int(digit) * (length + 1 - index)
-                for index, digit in enumerate(digits[:length])
+                int(digit) * (length + 1 - index) for index, digit in enumerate(digits[:length])
             )
             remainder = (total * 10) % 11
             if (0 if remainder == 10 else remainder) != int(digits[length]):
@@ -208,8 +230,7 @@ def _valid_brazilian_document(digits: str, document_type: str) -> bool:
         (13, (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)),
     ):
         total = sum(
-            int(digit) * weight
-            for digit, weight in zip(digits[:length], weights, strict=True)
+            int(digit) * weight for digit, weight in zip(digits[:length], weights, strict=True)
         )
         remainder = total % 11
         if (0 if remainder < 2 else 11 - remainder) != int(digits[length]):

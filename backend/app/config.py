@@ -114,6 +114,9 @@ class Settings(BaseSettings):
     integration_secret_key_version: int = Field(default=1, ge=1, le=1000)
     integration_secret_previous_keys: list[SecretStr] = Field(default_factory=list)
     platform_bootstrap_token: SecretStr | None = None
+    # Self-service signup from the login page. Off unless explicitly enabled per environment.
+    public_signup_enabled: bool = False
+    trial_days: int = Field(default=7, ge=1, le=60)
 
     @field_validator("jwt_secret")
     @classmethod

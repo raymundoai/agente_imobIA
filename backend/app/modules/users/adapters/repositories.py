@@ -79,6 +79,14 @@ class SqlAlchemyUserRepository(UserRepositoryPort):
         )
         return _to_domain(model) if model else None
 
+    def list_by_email(self, email: str) -> list[User]:
+        models = self._session.scalars(
+            select(UserModel)
+            .where(UserModel.email == email.strip().lower())
+            .order_by(UserModel.created_at)
+        ).all()
+        return [_to_domain(model) for model in models]
+
     def get_by_invitation_hash(self, token_hash: str) -> User | None:
         model = self._session.scalar(
             select(UserModel).where(UserModel.invitation_token_hash == token_hash)

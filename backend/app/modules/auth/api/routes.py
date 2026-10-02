@@ -6,7 +6,9 @@ from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_prin
 from app.modules.auth.api.schemas import (
     AcceptInvitationRequest,
     ChangePasswordRequest,
+    CompanyOption,
     LoginRequest,
+    LoginResponse,
     RefreshRequest,
     TokenResponse,
 )
@@ -22,19 +24,28 @@ from app.modules.users.adapters.repositories import SqlAlchemyUserRepository
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=LoginResponse)
 def login(
     payload: LoginRequest,
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
-) -> TokenResponse:
-    result = LoginUseCase(
+) -> LoginResponse:
+    use_case = LoginUseCase(
         SqlAlchemyTenantRepository(session),
         SqlAlchemyUserRepository(session),
         container.password_hasher,
         container.token_service,
-    ).execute(payload.tenant_slug, payload.email, payload.password)
-    return TokenResponse(
+    )
+    if payload.tenant_slug:
+        result = use_case.execute(payload.tenant_slug, payload.email, payload.password)
+    else:
+        outcome = use_case.execute_by_email(payload.email, payload.password)
+        if isinstance(outcome, list):
+            return LoginResponse(
+                companies=[CompanyOption(slug=item.slug, name=item.name) for item in outcome]
+            )
+        result = outcome
+    return LoginResponse(
         access_token=result.access_token,
         refresh_token=result.refresh_token,
         token_type=result.token_type,

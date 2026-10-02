@@ -11,7 +11,7 @@ from app.config import Settings, get_settings
 from app.container import Container
 from app.modules.ai.api import ai_router, knowledge_router
 from app.modules.auth.api.routes import router as auth_router
-from app.modules.billing_usage.api import asaas_webhook_router
+from app.modules.billing_usage.api import asaas_webhook_router, billing_router
 from app.modules.billing_usage.api import router as usage_router
 from app.modules.capture.api import router as capture_router
 from app.modules.contacts.api import router as contacts_router
@@ -24,6 +24,7 @@ from app.modules.messaging.api import router as messaging_router
 from app.modules.platform.api import router as platform_router
 from app.modules.properties.api import router as properties_router
 from app.modules.tenants.api.routes import router as tenants_router
+from app.modules.tenants.api.routes import signup_router
 from app.modules.users.api.routes import router as users_router
 from app.shared.errors.handlers import install_error_handlers
 from app.shared.logging.config import configure_logging
@@ -74,9 +75,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(conversations_router, prefix=resolved.api_prefix)
     application.include_router(contacts_router, prefix=resolved.api_prefix)
     application.include_router(tenants_router, prefix=resolved.api_prefix)
+    application.include_router(signup_router, prefix=resolved.api_prefix)
     application.include_router(usage_router, prefix=resolved.api_prefix)
     application.include_router(users_router, prefix=resolved.api_prefix)
     application.include_router(asaas_webhook_router, prefix=resolved.api_prefix)
+    application.include_router(billing_router, prefix=resolved.api_prefix)
 
     @application.get("/health", tags=["system"])
     def health() -> dict[str, str]:

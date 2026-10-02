@@ -7,7 +7,8 @@ export default defineConfig({
       name: "platform-root-entry",
       configureServer(server) {
         server.middlewares.use((request, _response, next) => {
-          if (request.url === "/") request.url = "/platform.html";
+          const [path, query] = (request.url ?? "").split("?");
+          if (path === "/") request.url = query ? `/platform.html?${query}` : "/platform.html";
           next();
         });
       },

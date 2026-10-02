@@ -10,6 +10,7 @@ import type {
 import { useAuth } from "../../auth/AuthContext";
 import { getTokenClaims } from "../../auth/tokenClaims";
 import { Card } from "../../components/Card";
+import { formatDocument } from "../../lib/format";
 import { isValidBrazilianDocument } from "../../lib/settingsValidation";
 
 type TenantProfileForm = {
@@ -21,7 +22,7 @@ type TenantProfileForm = {
   regions: string;
 };
 
-const weekdays: Array<{ key: BusinessWeekday; label: string }> = [
+export const weekdays: Array<{ key: BusinessWeekday; label: string }> = [
   { key: "monday", label: "Segunda-feira" },
   { key: "tuesday", label: "Terça-feira" },
   { key: "wednesday", label: "Quarta-feira" },
@@ -42,7 +43,7 @@ function day(enabled: boolean): BusinessDaySchedule {
   };
 }
 
-function defaultBusinessHours(): BusinessHours {
+export function defaultBusinessHours(): BusinessHours {
   return {
     timezone: "America/Sao_Paulo",
     days: {
@@ -240,12 +241,6 @@ export function TenantSettingsPanel({
       </div>
     </Card>
   );
-}
-
-function formatDocument(value: string, type: "cpf" | "cnpj") {
-  const digits = value.replace(/\D/g, "").slice(0, type === "cnpj" ? 14 : 11);
-  if (type === "cpf") return digits.replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d{1,2})$/, "$1-$2");
-  return digits.replace(/(\d{2})(\d)/, "$1.$2").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d)/, "$1/$2").replace(/(\d{4})(\d{1,2})$/, "$1-$2");
 }
 
 function validateProfile(form: TenantProfileForm): string | null {

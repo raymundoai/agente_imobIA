@@ -230,7 +230,7 @@ class TenantCommercialSubscriptionModel(Base):
     __tablename__ = "tenant_commercial_subscriptions"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pilot', 'active', 'past_due', 'cancelled')",
+            "status IN ('pilot', 'trial', 'active', 'past_due', 'cancelled')",
             name="status",
         ),
         CheckConstraint(
@@ -261,6 +261,7 @@ class TenantCommercialSubscriptionModel(Base):
     )
     cycle_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     cycle_ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

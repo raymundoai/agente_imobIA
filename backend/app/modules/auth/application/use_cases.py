@@ -1,13 +1,16 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from uuid import UUID
 
 from app.modules.auth.ports.security import PasswordHasherPort, TokenServicePort
+from app.modules.tenants.domain.entities import Tenant
 from app.modules.tenants.ports.repositories import TenantRepositoryPort
 from app.modules.users.application.use_cases import invitation_token_hash
 from app.modules.users.domain.entities import User, UserAuditLog, UserStatus
 from app.modules.users.ports.repositories import UserRepositoryPort
 from app.shared.errors.exceptions import AuthenticationError
+
+_DUMMY_PASSWORD_HASH: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +47,38 @@ class LoginUseCase:
         ):
             raise AuthenticationError("Invalid credentials")
         updated = self._users.record_login(user.tenant_id, user.id) or user
-        return self._issue(updated)
+        return replace(self._issue(updated), tenant_slug=tenant.slug)
+
+    def execute_by_email(self, email: str, password: str) -> TokenPair | list[Tenant]:
+        """Log in without a company; returns the companies when the email has several."""
+
+        matches: list[tuple[User, Tenant]] = []
+        candidates = self._users.list_by_email(email)
+        if not candidates:
+            # Same hashing cost as a real attempt, so response time does not reveal
+            # whether the email exists.
+            self._passwords.verify(password, self._dummy_hash())
+        for user in candidates:
+            if user.status is not UserStatus.ACTIVE or user.must_change_password:
+                continue
+            tenant = self._tenants.get_by_id(user.tenant_id)
+            if tenant is None or tenant.status.value != "active":
+                continue
+            if self._passwords.verify(password, user.hashed_password):
+                matches.append((user, tenant))
+        if not matches:
+            raise AuthenticationError("Invalid credentials")
+        if len(matches) > 1:
+            return [tenant for _, tenant in matches]
+        user, tenant = matches[0]
+        updated = self._users.record_login(user.tenant_id, user.id) or user
+        return replace(self._issue(updated), tenant_slug=tenant.slug)
+
+    def _dummy_hash(self) -> str:
+        global _DUMMY_PASSWORD_HASH
+        if _DUMMY_PASSWORD_HASH is None:
+            _DUMMY_PASSWORD_HASH = self._passwords.hash("immobia-login-timing-guard")
+        return _DUMMY_PASSWORD_HASH
 
     def _issue(self, user: User) -> TokenPair:
         return TokenPair(

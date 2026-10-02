@@ -5,11 +5,29 @@ export type LoginResponse = {
   tenant_slug?: string | null;
 };
 
+export type CompanyOption = { slug: string; name: string };
+
+export type PasswordLoginResponse = {
+  access_token: string | null;
+  refresh_token: string | null;
+  token_type: string;
+  tenant_slug: string | null;
+  companies: CompanyOption[];
+};
+
 export type DashboardStats = {
-  conversations: number;
-  leads: number;
-  handoffs: number;
+  contacts: number;
+  contacts_by_kind: Record<ContactKind, number>;
+  search_demands: number;
   properties: number;
+  conversations: number;
+};
+
+export type ConversationTimeline = {
+  days: number;
+  timezone: string;
+  total: number;
+  points: Array<{ date: string; conversations: number }>;
 };
 
 export type Conversation = {
@@ -331,7 +349,7 @@ export type CommercialUsageEvent = {
 
 export type CommercialUsage = {
   plan: CommercialPlan;
-  status: "pilot" | "active" | "past_due" | "cancelled";
+  status: "pilot" | "trial" | "active" | "past_due" | "cancelled";
   enforcement_mode: "meter_only" | "enforce";
   cycle_started_at: string;
   cycle_ends_at: string;
@@ -466,4 +484,42 @@ export type UserAudit = {
   action: string;
   changes: Record<string, unknown>;
   created_at: string;
+};
+
+export type SignupResponse = {
+  tenant_id: string;
+  tenant_slug: string;
+  access_token: string;
+  refresh_token: string;
+  trial_ends_at: string;
+};
+
+export type BillingPlan = {
+  code: string;
+  name: string;
+  monthly_price_cents: number;
+  ai_attendances: number;
+  property_searches: number;
+  image_optimizations: number;
+  max_users: number;
+};
+
+export type BillingOverview = {
+  status: "pilot" | "trial" | "active" | "past_due" | "cancelled";
+  plan: BillingPlan;
+  trial_ends_at: string | null;
+  cycle_ends_at: string;
+  payments_enabled: boolean;
+  plans: BillingPlan[];
+  subscription: {
+    id: string;
+    plan_code: string;
+    plan_name: string;
+    billing_type: "PIX" | "CREDIT_CARD" | "BOLETO" | "UNDEFINED";
+    status: "creating" | "pending_payment" | "active" | "past_due";
+    value_cents: number;
+    next_due_date: string;
+    invoice_url: string | null;
+  } | null;
+  contact: { name: string; email: string | null; cpf_cnpj: string | null };
 };

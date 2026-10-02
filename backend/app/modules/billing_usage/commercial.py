@@ -29,6 +29,7 @@ COMMERCIAL_RESOURCES = (
     IMAGE_OPTIMIZATION,
 )
 PILOT_PLAN_CODE = "piloto_mvp"
+TRIAL_PLAN_CODE = "teste_gratis"
 
 RESOURCE_LABELS = {
     AI_ATTENDANCE: "atendimentos da IA",
@@ -348,6 +349,9 @@ class CommercialEntitlementService:
         )
         if plan is None:
             raise ValueError("Commercial plan not found")
+        if plan.code == TRIAL_PLAN_CODE:
+            # As a regular plan it would renew every month; trials only start at signup.
+            raise ValueError("The trial plan cannot be assigned")
         now = datetime.now(UTC)
         cycle_start, cycle_end = _calendar_cycle(now)
         subscription = self.subscription(tenant_id, lock=True)
@@ -362,6 +366,46 @@ class CommercialEntitlementService:
         if subscription.status in {"pilot", "active"}:
             self._provision_plan_grants(subscription, plan)
         self._session.commit()
+        return subscription
+
+    def start_trial(
+        self, tenant_id: UUID, *, days: int, commit: bool = True
+    ) -> TenantCommercialSubscriptionModel:
+        """Give a new self-service tenant a short, enforced allowance that does not renew."""
+
+        plan = self._session.scalar(
+            select(CommercialPlanModel).where(
+                CommercialPlanModel.code == TRIAL_PLAN_CODE,
+                CommercialPlanModel.is_current.is_(True),
+            )
+        )
+        if plan is None:
+            raise RuntimeError("Commercial trial plan is not configured")
+        self._advisory_lock(f"commercial-subscription:{tenant_id}")
+        existing = self._session.scalar(
+            select(TenantCommercialSubscriptionModel.tenant_id).where(
+                TenantCommercialSubscriptionModel.tenant_id == tenant_id
+            )
+        )
+        if existing is not None:
+            raise ValueError("Tenant already has a commercial subscription")
+        now = datetime.now(UTC)
+        ends_at = now + timedelta(days=days)
+        subscription = TenantCommercialSubscriptionModel(
+            tenant_id=tenant_id,
+            plan_id=plan.id,
+            status="trial",
+            enforcement_mode="enforce",
+            cycle_started_at=now,
+            cycle_ends_at=ends_at,
+            trial_ends_at=ends_at,
+        )
+        self._session.add(subscription)
+        self._session.flush()
+        # The trial status is not renewed by _roll_cycle, so these grants are all there is.
+        self._provision_plan_grants(subscription, plan)
+        if commit:
+            self._session.commit()
         return subscription
 
     def suspend(

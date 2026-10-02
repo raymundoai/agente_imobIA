@@ -2,7 +2,11 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class LoginRequest(BaseModel):
-    tenant_slug: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9-]+$")
+    # Optional: without it the company is found by email; it is only needed to pick
+    # one when the same email belongs to more than one company.
+    tenant_slug: str | None = Field(
+        default=None, min_length=2, max_length=80, pattern=r"^[a-z0-9-]+$"
+    )
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
 
@@ -19,6 +23,20 @@ class AcceptInvitationRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=8, max_length=128)
     new_password: str = Field(min_length=12, max_length=128)
+
+
+class CompanyOption(BaseModel):
+    slug: str
+    name: str
+
+
+class LoginResponse(BaseModel):
+    access_token: str | None = None
+    refresh_token: str | None = None
+    token_type: str = "bearer"
+    tenant_slug: str | None = None
+    # Filled instead of the tokens when the credentials match more than one company.
+    companies: list[CompanyOption] = Field(default_factory=list)
 
 
 class TokenResponse(BaseModel):

@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import UUID
 
 from app.modules.auth.ports.security import PasswordHasherPort
@@ -27,8 +28,9 @@ class CreateTenantUseCase:
         admin_name: str,
         admin_email: str,
         admin_password: str,
+        settings: dict[str, Any] | None = None,
     ) -> tuple[Tenant, User]:
-        tenant = Tenant(name=name.strip(), slug=slug.strip().lower())
+        tenant = Tenant(name=name.strip(), slug=slug.strip().lower(), settings=dict(settings or {}))
         admin = User(
             tenant_id=tenant.id,
             name=admin_name.strip(),

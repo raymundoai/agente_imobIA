@@ -1,3 +1,6 @@
+import re
+import secrets
+import unicodedata
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -5,9 +8,13 @@ from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal, require_roles
+from app.modules.billing_usage.commercial import CommercialEntitlementService
 from app.modules.tenants.adapters.repositories import SqlAlchemyTenantRepository
 from app.modules.tenants.api.schemas import (
     CreateTenantRequest,
+    OnboardingStatusRequest,
+    SignupRequest,
+    SignupResponse,
     TenantResponse,
     UpdateTenantAgentsRequest,
     UpdateTenantChannelsRequest,
@@ -19,10 +26,76 @@ from app.modules.tenants.application.use_cases import (
     GetTenantUseCase,
     UpdateTenantSettingsUseCase,
 )
+from app.modules.users.adapters.repositories import SqlAlchemyUserRepository
 from app.modules.users.domain.entities import UserRole
-from app.shared.errors.exceptions import ForbiddenError, NotFoundError
+from app.shared.errors.exceptions import ConflictError, ForbiddenError, NotFoundError
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
+signup_router = APIRouter(prefix="/signup", tags=["signup"])
+
+RESERVED_SLUGS = {"admin", "api", "app", "plataforma", "platform", "suporte", "www"}
+
+
+@signup_router.post("", response_model=SignupResponse, status_code=201)
+def signup(
+    payload: SignupRequest,
+    session: Session = Depends(get_db_session),
+    container: Container = Depends(get_container),
+) -> SignupResponse:
+    """Self-service account: tenant, master admin and a free trial, then an open session."""
+
+    if not container.settings.public_signup_enabled:
+        raise ForbiddenError("O cadastro de novas contas está desativado")
+    if SqlAlchemyUserRepository(session).list_by_email(str(payload.email)):
+        raise ConflictError("Este email já tem uma conta. Entre com ele ou use outro email.")
+    repository = SqlAlchemyTenantRepository(session)
+    tenant, admin = CreateTenantUseCase(
+        repository, container.password_hasher, container.event_bus
+    ).execute(
+        payload.company_name,
+        _available_slug(repository, payload.company_name),
+        payload.admin_name,
+        str(payload.email),
+        payload.password,
+        settings={"onboarding": {"status": "pending"}},
+    )
+    trial = CommercialEntitlementService(session).start_trial(
+        tenant.id, days=container.settings.trial_days
+    )
+    tokens = container.token_service
+    return SignupResponse(
+        tenant_id=tenant.id,
+        tenant_slug=tenant.slug,
+        access_token=tokens.create_access_token(
+            admin.id, tenant.id, admin.role.value, admin.session_version
+        ),
+        refresh_token=tokens.create_refresh_token(
+            admin.id, tenant.id, admin.role.value, admin.session_version
+        ),
+        trial_ends_at=trial.trial_ends_at or trial.cycle_ends_at,
+    )
+
+
+def _available_slug(repository: SqlAlchemyTenantRepository, company_name: str) -> str:
+    """Internal company identifier (webhook URLs); users never type it."""
+
+    base = (
+        re.sub(
+            r"[^a-z0-9]+",
+            "-",
+            unicodedata.normalize("NFKD", company_name).encode("ascii", "ignore").decode().lower(),
+        )
+        .strip("-")[:36]
+        .strip("-")
+        or "imobiliaria"
+    )
+    if len(base) < 3:
+        base = f"imob-{base}"
+    for suffix in ["", *(f"-{number}" for number in range(2, 50))]:
+        candidate = f"{base}{suffix}"
+        if candidate not in RESERVED_SLUGS and repository.get_by_slug(candidate) is None:
+            return candidate
+    return f"{base}-{secrets.token_hex(3)}"
 
 
 @router.post("", response_model=TenantResponse, status_code=201)
@@ -125,5 +198,23 @@ def update_profile_settings(
         **current.settings,
         "profile": payload.profile.model_dump(exclude_unset=True),
     }
+    tenant = UpdateTenantSettingsUseCase(repository).execute(principal.tenant_id, settings)
+    return TenantResponse.from_domain(tenant)
+
+
+@router.patch("/{tenant_id}/onboarding", response_model=TenantResponse)
+def update_onboarding(
+    tenant_id: UUID,
+    payload: OnboardingStatusRequest,
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN)),
+    session: Session = Depends(get_db_session),
+) -> TenantResponse:
+    if tenant_id != principal.tenant_id:
+        raise NotFoundError("Tenant not found")
+    repository = SqlAlchemyTenantRepository(session)
+    current = repository.get_by_id(principal.tenant_id)
+    if current is None:
+        raise NotFoundError("Tenant not found")
+    settings = {**current.settings, "onboarding": {"status": payload.status}}
     tenant = UpdateTenantSettingsUseCase(repository).execute(principal.tenant_id, settings)
     return TenantResponse.from_domain(tenant)

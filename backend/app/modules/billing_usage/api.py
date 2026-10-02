@@ -2,16 +2,22 @@ from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
-from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
+from app.modules.auth.api.dependencies import (
+    CurrentPrincipal,
+    get_current_principal,
+    require_roles,
+)
 from app.modules.billing_usage.adapters.models import (
     AiAttendanceSessionModel,
+    AsaasSubscriptionModel,
     CommercialPackModel,
     CommercialPlanModel,
     CommercialUsageEventModel,
@@ -19,7 +25,10 @@ from app.modules.billing_usage.adapters.models import (
     UsageRecordModel,
 )
 from app.modules.billing_usage.asaas import (
+    OPEN_SUBSCRIPTION_STATUSES,
     AsaasBillingService,
+    AsaasCustomerInput,
+    AsaasSubscriptionInput,
     asaas_client_from_settings,
     verify_asaas_webhook_token,
 )
@@ -36,8 +45,13 @@ from app.modules.billing_usage.service import (
     PRICING_CATALOG_VERSION,
     CreditLedgerService,
 )
+from app.modules.tenants.adapters.models import TenantModel
+from app.modules.users.adapters.models import UserModel
+from app.modules.users.domain.entities import UserRole
 
 router = APIRouter(prefix="/usage", tags=["usage"])
+billing_router = APIRouter(prefix="/billing", tags=["billing"])
+BILLING_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 asaas_webhook_router = APIRouter(prefix="/webhooks/asaas", tags=["asaas"])
 
 
@@ -325,3 +339,175 @@ def receive_asaas_webhook(
     )
     result = service.process_webhook(payload)
     return AsaasWebhookResponse(duplicate=result.duplicate, outcome=result.outcome)
+
+
+class BillingPlan(BaseModel):
+    code: str
+    name: str
+    monthly_price_cents: int
+    ai_attendances: int
+    property_searches: int
+    image_optimizations: int
+    max_users: int
+
+
+class BillingSubscription(BaseModel):
+    id: UUID
+    plan_code: str
+    plan_name: str
+    billing_type: str
+    status: str
+    value_cents: int
+    next_due_date: date
+    invoice_url: str | None
+
+
+class BillingContact(BaseModel):
+    name: str
+    email: str | None
+    cpf_cnpj: str | None
+
+
+class BillingOverview(BaseModel):
+    status: str
+    plan: BillingPlan
+    trial_ends_at: datetime | None
+    cycle_ends_at: datetime
+    payments_enabled: bool
+    plans: list[BillingPlan]
+    subscription: BillingSubscription | None
+    contact: BillingContact
+
+
+class SelfServiceCustomer(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    email: EmailStr
+    cpf_cnpj: str = Field(min_length=11, max_length=18)
+    mobile_phone: str | None = Field(default=None, max_length=24)
+
+    @field_validator("cpf_cnpj")
+    @classmethod
+    def normalize_cpf_cnpj(cls, value: str) -> str:
+        digits = "".join(character for character in value if character.isdigit())
+        if len(digits) not in {11, 14}:
+            raise ValueError("Informe um CPF ou CNPJ válido")
+        return digits
+
+
+class SelfServiceSubscriptionRequest(BaseModel):
+    plan_code: str = Field(min_length=2, max_length=80)
+    billing_type: str = Field(pattern="^(PIX|CREDIT_CARD)$")
+    idempotency_key: str = Field(min_length=8, max_length=200)
+    customer: SelfServiceCustomer
+
+
+def _billing_plan(plan: CommercialPlanModel) -> BillingPlan:
+    return BillingPlan.model_validate(plan, from_attributes=True)
+
+
+def _billing_overview(session: Session, tenant_id: UUID, container: Container) -> BillingOverview:
+    commercial = CommercialEntitlementService(session).subscription(tenant_id)
+    session.commit()
+    current_plan = session.get(CommercialPlanModel, commercial.plan_id)
+    if current_plan is None:
+        raise RuntimeError("Commercial plan not found")
+    plans = session.scalars(
+        select(CommercialPlanModel)
+        .where(
+            CommercialPlanModel.is_current.is_(True),
+            CommercialPlanModel.is_public.is_(True),
+            CommercialPlanModel.monthly_price_cents > 0,
+        )
+        .order_by(CommercialPlanModel.monthly_price_cents)
+    ).all()
+    latest = session.execute(
+        select(AsaasSubscriptionModel, CommercialPlanModel)
+        .join(CommercialPlanModel, CommercialPlanModel.id == AsaasSubscriptionModel.plan_id)
+        .where(
+            AsaasSubscriptionModel.tenant_id == tenant_id,
+            AsaasSubscriptionModel.status.in_(OPEN_SUBSCRIPTION_STATUSES),
+        )
+        .order_by(AsaasSubscriptionModel.created_at.desc())
+        .limit(1)
+    ).first()
+    tenant = session.get(TenantModel, tenant_id)
+    settings = tenant.settings if tenant is not None and isinstance(tenant.settings, dict) else {}
+    profile = settings.get("profile") if isinstance(settings.get("profile"), dict) else {}
+    admin_email = session.scalar(
+        select(UserModel.email)
+        .where(UserModel.tenant_id == tenant_id, UserModel.is_master.is_(True))
+        .limit(1)
+    )
+    return BillingOverview(
+        status=commercial.status,
+        plan=_billing_plan(current_plan),
+        trial_ends_at=commercial.trial_ends_at,
+        cycle_ends_at=commercial.cycle_ends_at,
+        payments_enabled=container.settings.asaas_api_key is not None,
+        plans=[_billing_plan(plan) for plan in plans],
+        subscription=(
+            BillingSubscription(
+                id=latest[0].id,
+                plan_code=latest[1].code,
+                plan_name=latest[1].name,
+                billing_type=latest[0].billing_type,
+                status=latest[0].status,
+                value_cents=latest[0].value_cents,
+                next_due_date=latest[0].next_due_date,
+                invoice_url=latest[0].invoice_url,
+            )
+            if latest
+            else None
+        ),
+        contact=BillingContact(
+            name=profile.get("legal_name")
+            or profile.get("display_name")
+            or (tenant.name if tenant else ""),
+            email=admin_email,
+            cpf_cnpj=profile.get("document_number"),
+        ),
+    )
+
+
+@billing_router.get("", response_model=BillingOverview)
+def billing_overview(
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> BillingOverview:
+    return _billing_overview(session, principal.tenant_id, container)
+
+
+@billing_router.post("/subscription", response_model=BillingOverview, status_code=201)
+def subscribe(
+    payload: SelfServiceSubscriptionRequest,
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN)),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> BillingOverview:
+    """The agency subscribes itself; the plan is activated by the payment webhook."""
+
+    service = AsaasBillingService(
+        session,
+        asaas_client_from_settings(container.settings, container.http_client),
+        container.settings,
+    )
+    service.create_subscription(
+        principal.tenant_id,
+        AsaasSubscriptionInput(
+            plan_code=payload.plan_code,
+            billing_type=payload.billing_type,
+            next_due_date=datetime.now(BILLING_TIMEZONE).date(),
+            enforcement_mode="enforce",
+            idempotency_key=payload.idempotency_key,
+            customer=AsaasCustomerInput(
+                name=payload.customer.name,
+                email=str(payload.customer.email),
+                cpf_cnpj=payload.customer.cpf_cnpj,
+                mobile_phone=payload.customer.mobile_phone,
+                # Self-service customers get the monthly charge e-mails from Asaas.
+                notification_disabled=False,
+            ),
+        ),
+    )
+    return _billing_overview(session, principal.tenant_id, container)
