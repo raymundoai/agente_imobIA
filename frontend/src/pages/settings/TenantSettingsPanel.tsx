@@ -220,8 +220,8 @@ export function TenantSettingsPanel({
               <label className="business-break-toggle">
                 <span>Intervalo</span>
                 <select disabled={!schedule.enabled} value={schedule.break_enabled ? "yes" : "no"} onChange={(event) => updateDay(key, { break_enabled: event.target.value === "yes" })}>
-                  <option value="no">Sem intervalo</option>
-                  <option value="yes">Com intervalo</option>
+                  <option value="no">Não</option>
+                  <option value="yes">Sim</option>
                 </select>
               </label>
               {schedule.break_enabled && schedule.enabled ? <>

@@ -4383,3 +4383,27 @@ label small {
 .login-card .company-choice:hover { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 6%, var(--card)); }
 .company-choice svg:first-child { color: var(--primary); }
 .company-choice span { flex: 1; font-size: 14px; font-weight: 700; text-align: left; }
+
+/* Configurações > Empresa: um fieldset não encolhe abaixo do conteúdo por padrão,
+   e a linha de horários (6 colunas mínimas) empurrava todo o formulário para fora do card. */
+.settings-form-fieldset { min-width: 0; }
+.business-day { align-items: end; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); }
+.business-day > label { min-width: 0; }
+.business-day > .business-day-toggle { grid-column: 1 / -1; }
+.business-day > .business-break-toggle { grid-column: auto; min-width: 0; }
+.business-day select, .business-day input[type="time"] { min-width: 0; width: 100%; }
+
+/* Pagamento PIX embutido e confirmação automática */
+.pix-payment { align-items: start; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; display: grid; gap: 20px; grid-template-columns: 220px minmax(0, 1fr); padding: 18px; }
+.pix-qr { background: #fff; border: 1px solid var(--border); border-radius: 10px; height: 220px; image-rendering: pixelated; padding: 8px; width: 220px; }
+.pix-details { display: grid; gap: 10px; justify-items: start; }
+.pix-details > span, .pix-details small { color: var(--muted-foreground); }
+.pix-code { display: grid; gap: 6px; font-size: 13px; font-weight: 700; width: 100%; }
+.pix-code textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; resize: none; width: 100%; word-break: break-all; }
+.billing-waiting { align-items: center; color: var(--muted-foreground); display: flex; font-size: 13px; gap: 8px; margin: 0; }
+.billing-waiting svg { color: var(--primary); flex: 0 0 auto; }
+.billing-confirmed { align-items: center; background: color-mix(in srgb, var(--success) 12%, var(--card)); border: 1px solid color-mix(in srgb, var(--success) 40%, var(--border)); border-radius: 10px; display: flex; gap: 12px; padding: 14px 16px; }
+.billing-confirmed svg { color: var(--success); flex: 0 0 auto; }
+.billing-confirmed div { display: grid; gap: 2px; }
+.billing-confirmed span { color: var(--muted-foreground); }
+@media (max-width: 640px) { .pix-payment { grid-template-columns: 1fr; justify-items: center; } }

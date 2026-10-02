@@ -42,7 +42,23 @@ class FakeAsaasClient:
         return None
 
     def subscription_payments(self, subscription_id: str) -> list[dict]:
-        return [{"id": "pay_self", "invoiceUrl": "https://sandbox.asaas.com/i/pay_self"}]
+        return [
+            {
+                "id": "pay_self",
+                "status": "PENDING",
+                "dueDate": "2026-10-02",
+                "value": 399.0,
+                "invoiceUrl": "https://sandbox.asaas.com/i/pay_self",
+            }
+        ]
+
+    def pix_qr_code(self, payment_id: str) -> dict:
+        assert payment_id == "pay_self"
+        return {
+            "encodedImage": "iVBORw0KGgo=",
+            "payload": "00020101021226820014br.gov.bcb.pix",
+            "expirationDate": "2026-10-02 23:59:59",
+        }
 
 
 @pytest.fixture
@@ -215,3 +231,55 @@ def test_trial_plan_cannot_be_assigned_as_regular_plan(signup_enabled: TestClien
         json={"plan_code": "teste_gratis", "enforcement_mode": "enforce"},
     )
     assert response.status_code == 404
+
+
+def _subscribe(client: TestClient, body: dict[str, Any], billing_type: str, key: str):
+    return client.post(
+        "/billing/subscription",
+        headers=_auth(body),
+        json={
+            "plan_code": "ia_essencial",
+            "billing_type": billing_type,
+            "idempotency_key": key,
+            "customer": {
+                "name": "Imobiliária Horizonte Ltda",
+                "email": "financeiro@horizonte.example.com",
+                "cpf_cnpj": "11.222.333/0001-81",
+            },
+        },
+    )
+
+
+def test_pix_qr_code_is_served_inside_the_app(
+    signup_enabled: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.modules.billing_usage import api as billing_api
+
+    client = signup_enabled
+    monkeypatch.setattr(billing_api, "asaas_client_from_settings", lambda *_: FakeAsaasClient())
+    body = _signup(client)
+    assert client.get("/billing/pix", headers=_auth(body)).status_code == 404
+
+    assert _subscribe(client, body, "PIX", "self-service-pix-1").status_code == 201
+    pix = client.get("/billing/pix", headers=_auth(body))
+    assert pix.status_code == 200, pix.text
+    assert pix.json() == {
+        "payment_id": "pay_self",
+        "value_cents": 39900,
+        "due_date": "2026-10-02",
+        "payload": "00020101021226820014br.gov.bcb.pix",
+        "encoded_image": "iVBORw0KGgo=",
+        "expiration_date": "2026-10-02T23:59:59",
+    }
+
+
+def test_pix_qr_code_is_refused_for_card_subscription(
+    signup_enabled: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.modules.billing_usage import api as billing_api
+
+    client = signup_enabled
+    monkeypatch.setattr(billing_api, "asaas_client_from_settings", lambda *_: FakeAsaasClient())
+    body = _signup(client)
+    assert _subscribe(client, body, "CREDIT_CARD", "self-service-card-1").status_code == 201
+    assert client.get("/billing/pix", headers=_auth(body)).status_code == 409

@@ -4,6 +4,8 @@ import { request } from "../api/client";
 import type { BillingOverview } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 
+export const BILLING_CHANGED_EVENT = "immobia:billing-changed";
+
 export function openBillingSettings() {
   window.history.pushState({}, "", "/configuracoes?aba=billing");
   window.dispatchEvent(new PopStateEvent("popstate"));
@@ -14,7 +16,11 @@ export function TrialBanner() {
   const [overview, setOverview] = useState<BillingOverview | null>(null);
 
   useEffect(() => {
-    request<BillingOverview>("/billing", {}, token).then(setOverview).catch(() => setOverview(null));
+    const load = () =>
+      request<BillingOverview>("/billing", {}, token).then(setOverview).catch(() => setOverview(null));
+    void load();
+    window.addEventListener(BILLING_CHANGED_EVENT, load);
+    return () => window.removeEventListener(BILLING_CHANGED_EVENT, load);
   }, [token]);
 
   if (!overview || overview.subscription?.status === "active") return null;

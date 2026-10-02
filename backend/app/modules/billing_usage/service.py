@@ -257,17 +257,11 @@ class CreditLedgerService:
         if reservation.status == "settled":
             raise CreditReservationClosed("Settled reservation is missing its ledger entry")
         account = self.account(tenant_id, lock=True)
-        account.reserved_credits = max(
-            account.reserved_credits - reservation.reserved_credits, 0
-        )
+        account.reserved_credits = max(account.reserved_credits - reservation.reserved_credits, 0)
         reservation.status = "settled"
-        unlimited_snapshot = bool(
-            reservation.extra.get("unlimited_messages_snapshot", False)
-        )
+        unlimited_snapshot = bool(reservation.extra.get("unlimited_messages_snapshot", False))
         reservation.actual_credits = (
-            0
-            if reservation.resource == "ai_message" and unlimited_snapshot
-            else charge.credits
+            0 if reservation.resource == "ai_message" and unlimited_snapshot else charge.credits
         )
         reservation.reference_id = reference_id
         reservation.settled_at = datetime.now(UTC)
@@ -350,15 +344,13 @@ class CreditLedgerService:
         extra = dict(reservation.extra)
         extra["accepted_call_count"] = int(extra.get("accepted_call_count", 0)) + 1
         extra["accepted_model"] = model
-        extra["accepted_input_tokens"] = int(
-            extra.get("accepted_input_tokens", 0)
-        ) + input_tokens
-        extra["accepted_cached_input_tokens"] = int(
-            extra.get("accepted_cached_input_tokens", 0)
-        ) + cached_input_tokens
-        extra["accepted_output_tokens"] = int(
-            extra.get("accepted_output_tokens", 0)
-        ) + output_tokens
+        extra["accepted_input_tokens"] = int(extra.get("accepted_input_tokens", 0)) + input_tokens
+        extra["accepted_cached_input_tokens"] = (
+            int(extra.get("accepted_cached_input_tokens", 0)) + cached_input_tokens
+        )
+        extra["accepted_output_tokens"] = (
+            int(extra.get("accepted_output_tokens", 0)) + output_tokens
+        )
         reservation.extra = extra
         reservation.expires_at = datetime.now(UTC) + timedelta(seconds=900)
         self._session.commit()
@@ -386,9 +378,7 @@ class CreditLedgerService:
         if reservation is None or reservation.status not in ("reserved", "started"):
             return False
         account = self.account(tenant_id, lock=True)
-        account.reserved_credits = max(
-            account.reserved_credits - reservation.reserved_credits, 0
-        )
+        account.reserved_credits = max(account.reserved_credits - reservation.reserved_credits, 0)
         reservation.status = "released"
         reservation.settled_at = datetime.now(UTC)
         if commit:
@@ -413,12 +403,8 @@ class CreditLedgerService:
             )
             if reservation.status == "started":
                 charge = CreditCharge(
-                    provider_cost_usd=Decimal(
-                        reservation.extra["estimated_provider_cost_usd"]
-                    ),
-                    retail_cost_usd=Decimal(
-                        reservation.extra["estimated_retail_cost_usd"]
-                    ),
+                    provider_cost_usd=Decimal(reservation.extra["estimated_provider_cost_usd"]),
+                    retail_cost_usd=Decimal(reservation.extra["estimated_retail_cost_usd"]),
                     credits=reservation.reserved_credits,
                 )
                 self.consume(

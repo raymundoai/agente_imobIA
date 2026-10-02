@@ -89,6 +89,9 @@ class AsaasClient:
         items = payload.get("data")
         return [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
 
+    def pix_qr_code(self, payment_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/payments/{payment_id}/pixQrCode")
+
     def create_webhook(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/webhooks", json=payload)
 
@@ -298,6 +301,42 @@ class AsaasBillingService:
         self._end_subscription(subscription, extra_event="cancelled_by_platform")
         self._session.commit()
         return subscription
+
+    def pix_for_open_charge(self, tenant_id: UUID) -> dict[str, Any]:
+        """QR code of the tenant's oldest unpaid PIX charge, shown inside the app."""
+
+        subscription = self._session.scalar(
+            select(AsaasSubscriptionModel)
+            .where(
+                AsaasSubscriptionModel.tenant_id == tenant_id,
+                AsaasSubscriptionModel.status.in_(("pending_payment", "past_due")),
+                AsaasSubscriptionModel.provider_subscription_id.is_not(None),
+            )
+            .order_by(AsaasSubscriptionModel.created_at.desc())
+        )
+        if subscription is None or subscription.provider_subscription_id is None:
+            raise NotFoundError("Não há cobrança em aberto para pagar")
+        if subscription.billing_type != "PIX":
+            raise ConflictError("Esta assinatura é paga com cartão de crédito")
+        unpaid = [
+            payment
+            for payment in self._client.subscription_payments(subscription.provider_subscription_id)
+            if payment.get("status") in {"PENDING", "OVERDUE"} and _string(payment.get("id"))
+        ]
+        if not unpaid:
+            raise NotFoundError("Não há cobrança em aberto para pagar")
+        payment = min(unpaid, key=lambda item: str(item.get("dueDate") or ""))
+        qr_code = self._client.pix_qr_code(str(payment["id"]))
+        if not _string(qr_code.get("payload")) or not _string(qr_code.get("encodedImage")):
+            raise ExternalServiceError("Asaas não retornou o QR Code do PIX")
+        return {
+            "payment_id": payment["id"],
+            "value": payment.get("value"),
+            "due_date": payment.get("dueDate"),
+            "payload": qr_code["payload"],
+            "encoded_image": qr_code["encodedImage"],
+            "expiration_date": qr_code.get("expirationDate"),
+        }
 
     def provision_webhook(self, notification_email: str) -> AsaasWebhookConfigModel:
         url = asaas_webhook_url(self._settings)

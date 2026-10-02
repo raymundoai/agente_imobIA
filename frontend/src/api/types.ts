@@ -504,6 +504,15 @@ export type BillingPlan = {
   max_users: number;
 };
 
+export type PixCharge = {
+  payment_id: string;
+  value_cents: number;
+  due_date: string;
+  payload: string;
+  encoded_image: string;
+  expiration_date: string | null;
+};
+
 export type BillingOverview = {
   status: "pilot" | "trial" | "active" | "past_due" | "cancelled";
   plan: BillingPlan;

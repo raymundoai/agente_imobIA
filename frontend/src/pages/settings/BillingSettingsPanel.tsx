@@ -1,11 +1,15 @@
-import { FormEvent, useEffect, useState } from "react";
-import { CreditCard, ExternalLink, QrCode, RefreshCw } from "lucide-react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { CheckCircle2, Copy, CreditCard, ExternalLink, Loader2, QrCode, RefreshCw } from "lucide-react";
 import { request } from "../../api/client";
-import type { BillingOverview, BillingPlan } from "../../api/types";
+import type { BillingOverview, BillingPlan, PixCharge } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { getTokenClaims } from "../../auth/tokenClaims";
 import { Card } from "../../components/Card";
+import { BILLING_CHANGED_EVENT } from "../../components/TrialBanner";
 import { formatDocument, formatNumber } from "../../lib/format";
+
+const POLL_INTERVAL_MS = 5000;
+const awaitingPayment = new Set(["creating", "pending_payment", "past_due"]);
 
 const subscriptionStatusLabels: Record<string, string> = {
   creating: "Confirmando com o Asaas",
@@ -26,12 +30,24 @@ export function BillingSettingsPanel() {
   // Kept across retries so an uncertain response never creates a second subscription.
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
   const [submitting, setSubmitting] = useState(false);
+  const [justActivated, setJustActivated] = useState(false);
+  const previousStatus = useRef<string | null>(null);
+
+  function applyOverview(next: BillingOverview) {
+    const status = next.subscription?.status ?? null;
+    if (previousStatus.current && awaitingPayment.has(previousStatus.current) && status === "active") {
+      setJustActivated(true);
+      window.dispatchEvent(new Event(BILLING_CHANGED_EVENT));
+    }
+    previousStatus.current = status;
+    setOverview(next);
+  }
 
   async function load() {
     setLoading(true);
     try {
       const next = await request<BillingOverview>("/billing", {}, token);
-      setOverview(next);
+      applyOverview(next);
       setPlanCode((current) => current || next.plans[1]?.code || next.plans[0]?.code || "");
       setContact((current) => ({
         name: current.name || next.contact.name,
@@ -51,6 +67,18 @@ export function BillingSettingsPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // While a charge is open, keep checking so the screen flips to "active" on its own
+  // as soon as the payment webhook is processed.
+  const waiting = Boolean(overview?.subscription && awaitingPayment.has(overview.subscription.status));
+  useEffect(() => {
+    if (!waiting) return;
+    const handle = window.setInterval(() => {
+      request<BillingOverview>("/billing", {}, token).then(applyOverview).catch(() => undefined);
+    }, POLL_INTERVAL_MS);
+    return () => window.clearInterval(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waiting, token]);
+
   async function subscribe(event: FormEvent) {
     event.preventDefault();
     const digits = contact.cpf_cnpj.replace(/\D/g, "");
@@ -58,6 +86,9 @@ export function BillingSettingsPanel() {
       setError("Informe o CPF ou CNPJ de quem vai pagar.");
       return;
     }
+    // Opened during the click so the browser does not block it as a popup;
+    // it receives the Asaas card page once the subscription exists.
+    const cardWindow = billingType === "CREDIT_CARD" ? window.open("", "_blank") : null;
     setSubmitting(true);
     setError(null);
     try {
@@ -74,9 +105,13 @@ export function BillingSettingsPanel() {
         },
         token,
       );
-      setOverview(next);
+      applyOverview(next);
       setIdempotencyKey(crypto.randomUUID());
+      const invoiceUrl = next.subscription?.invoice_url;
+      if (cardWindow && invoiceUrl) cardWindow.location.href = invoiceUrl;
+      else cardWindow?.close();
     } catch (reason) {
+      cardWindow?.close();
       setError(reason instanceof Error ? reason.message : "Não foi possível criar a assinatura.");
     } finally {
       setSubmitting(false);
@@ -111,6 +146,16 @@ export function BillingSettingsPanel() {
         <span>{statusDetail(overview)}</span>
       </div>
 
+      {justActivated && subscription?.status === "active" ? (
+        <div className="billing-confirmed" role="status">
+          <CheckCircle2 size={20} />
+          <div>
+            <strong>Pagamento confirmado!</strong>
+            <span>O plano {subscription.plan_name} já está ativo. Obrigado!</span>
+          </div>
+        </div>
+      ) : null}
+
       {subscription ? (
         <div className="billing-subscription">
           <div>
@@ -121,13 +166,21 @@ export function BillingSettingsPanel() {
               {subscriptionStatusLabels[subscription.status] ?? subscription.status}
             </span>
           </div>
-          {subscription.invoice_url && subscription.status !== "active" ? (
+          {subscription.billing_type === "CREDIT_CARD" && subscription.invoice_url && waiting ? (
             <a className="primary-button" href={subscription.invoice_url} rel="noreferrer" target="_blank">
-              Pagar agora
+              Pagar com cartão
               <ExternalLink size={14} />
             </a>
           ) : null}
         </div>
+      ) : null}
+
+      {subscription && waiting && subscription.billing_type === "PIX" ? <PixPayment token={token} /> : null}
+      {subscription && waiting && subscription.billing_type === "CREDIT_CARD" ? (
+        <p className="billing-waiting" aria-live="polite">
+          <Loader2 className="spin" size={16} />
+          Aguardando a confirmação do pagamento. Esta tela atualiza sozinha quando o cartão for aprovado na página do Asaas.
+        </p>
       ) : null}
 
       {!subscription && !overview.payments_enabled ? (
@@ -200,6 +253,60 @@ export function BillingSettingsPanel() {
         <div className="error-box">{error}</div>
       ) : null}
     </Card>
+  );
+}
+
+function PixPayment({ token }: { token: string | null }) {
+  const [pix, setPix] = useState<PixCharge | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    request<PixCharge>("/billing/pix", {}, token)
+      .then((value) => {
+        setPix(value);
+        setError(null);
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Não foi possível gerar o QR Code."));
+  }, [token]);
+
+  async function copy() {
+    if (!pix) return;
+    try {
+      await navigator.clipboard.writeText(pix.payload);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2500);
+    } catch {
+      setError("Não foi possível copiar. Selecione o código e copie manualmente.");
+    }
+  }
+
+  if (error) return <div className="error-box">{error}</div>;
+  if (!pix) return <div className="empty-state" aria-live="polite">Gerando QR Code do PIX...</div>;
+
+  return (
+    <div className="pix-payment">
+      <img alt="QR Code do PIX para pagamento" className="pix-qr" src={`data:image/png;base64,${pix.encoded_image}`} />
+      <div className="pix-details">
+        <strong>Pague {formatBrl(pix.value_cents)} com PIX</strong>
+        <span>Abra o app do seu banco, escolha pagar com PIX e leia o QR Code, ou use o código abaixo.</span>
+        <label className="pix-code">
+          <span>PIX copia e cola</span>
+          <textarea readOnly rows={3} value={pix.payload} onFocus={(event) => event.target.select()} />
+        </label>
+        <button className="secondary-button" onClick={() => void copy()} type="button">
+          {copied ? <CheckCircle2 size={15} /> : <Copy size={15} />}
+          {copied ? "Código copiado" : "Copiar código"}
+        </button>
+        {pix.expiration_date ? (
+          <small>Válido até {new Date(pix.expiration_date.replace(" ", "T")).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}.</small>
+        ) : null}
+        <p className="billing-waiting" aria-live="polite">
+          <Loader2 className="spin" size={16} />
+          Aguardando o pagamento. Esta tela atualiza sozinha.
+        </p>
+      </div>
+    </div>
   );
 }
 

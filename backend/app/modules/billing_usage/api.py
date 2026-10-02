@@ -478,6 +478,38 @@ def billing_overview(
     return _billing_overview(session, principal.tenant_id, container)
 
 
+class PixCharge(BaseModel):
+    payment_id: str
+    value_cents: int
+    due_date: date
+    payload: str
+    encoded_image: str
+    expiration_date: datetime | None
+
+
+@billing_router.get("/pix", response_model=PixCharge)
+def billing_pix(
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> PixCharge:
+    """PIX QR code for the open charge, so the agency pays without leaving the app."""
+
+    charge = AsaasBillingService(
+        session,
+        asaas_client_from_settings(container.settings, container.http_client),
+        container.settings,
+    ).pix_for_open_charge(principal.tenant_id)
+    return PixCharge(
+        payment_id=charge["payment_id"],
+        value_cents=round(Decimal(str(charge["value"] or 0)) * 100),
+        due_date=charge["due_date"],
+        payload=charge["payload"],
+        encoded_image=charge["encoded_image"],
+        expiration_date=charge["expiration_date"],
+    )
+
+
 @billing_router.post("/subscription", response_model=BillingOverview, status_code=201)
 def subscribe(
     payload: SelfServiceSubscriptionRequest,
