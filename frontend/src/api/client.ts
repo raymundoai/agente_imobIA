@@ -201,6 +201,7 @@ function readErrorMessage(text: string) {
   try {
     const parsed = JSON.parse(text) as { detail?: unknown; error?: string };
     if (parsed.error === "authentication_failed") {
+      if (parsed.detail === "Invalid credentials") return userFacingMessage(parsed.detail);
       return "Sua sessão expirou. Entre novamente.";
     }
     if (typeof parsed.detail === "string") return userFacingMessage(parsed.detail);
@@ -226,6 +227,7 @@ function userFacingMessage(message: string) {
     "Conversation not found": "Conversa não encontrada.",
     "Authentication required": "Entre novamente para continuar.",
     "Invalid access token": "Sua sessão expirou. Entre novamente.",
+    "Invalid credentials": "E-mail ou senha incorretos.",
     "Insufficient permissions": "Seu perfil não permite realizar esta ação.",
     "Tenant not found": "Empresa não encontrada.",
     "User not found": "Usuário não encontrado.",

@@ -45,7 +45,7 @@ export function Sidebar({
         <div className="brand-icon">
           <Hexagon size={18} strokeWidth={2.4} />
         </div>
-        <span>ImobIA</span>
+        <span>ImmobIA</span>
         <button
           aria-label={collapsed ? "Exibir menu" : "Esconder menu"}
           className="sidebar-toggle"

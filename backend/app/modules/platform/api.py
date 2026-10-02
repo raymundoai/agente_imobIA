@@ -1,24 +1,31 @@
 import hmac
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 import jwt
 from fastapi import APIRouter, Depends, Header, Query, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
 from app.modules.billing_usage.adapters.models import (
+    AsaasSubscriptionModel,
     CommercialEntitlementGrantModel,
     CommercialPackModel,
     CommercialPlanModel,
     CreditAccountModel,
     CreditLedgerModel,
     UsageRecordModel,
+)
+from app.modules.billing_usage.asaas import (
+    AsaasBillingService,
+    AsaasCustomerInput,
+    AsaasSubscriptionInput,
+    asaas_client_from_settings,
 )
 from app.modules.billing_usage.commercial import (
     COMMERCIAL_RESOURCES,
@@ -152,6 +159,75 @@ class CommercialPackGrantRequest(BaseModel):
     pack_code: str = Field(min_length=2, max_length=80)
     idempotency_key: str = Field(min_length=8, max_length=200)
     expires_at: datetime | None = None
+
+
+class AsaasCustomerRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    email: EmailStr
+    cpf_cnpj: str = Field(min_length=11, max_length=18)
+    mobile_phone: str | None = Field(default=None, max_length=24)
+    notification_disabled: bool = True
+
+    @field_validator("cpf_cnpj")
+    @classmethod
+    def normalize_cpf_cnpj(cls, value: str) -> str:
+        normalized = "".join(character for character in value if character.isdigit())
+        if len(normalized) not in {11, 14}:
+            raise ValueError("cpf_cnpj deve conter 11 ou 14 dígitos")
+        return normalized
+
+
+class AsaasSubscriptionRequest(BaseModel):
+    plan_code: str = Field(min_length=2, max_length=80)
+    billing_type: str = Field(default="PIX", pattern="^(UNDEFINED|BOLETO|CREDIT_CARD|PIX)$")
+    next_due_date: date
+    enforcement_mode: str = Field(default="enforce", pattern="^(meter_only|enforce)$")
+    idempotency_key: str = Field(min_length=8, max_length=200)
+    customer: AsaasCustomerRequest
+
+    @field_validator("next_due_date")
+    @classmethod
+    def next_due_date_must_not_be_past(cls, value: date) -> date:
+        if value < datetime.now(UTC).date():
+            raise ValueError("next_due_date não pode estar no passado")
+        return value
+
+
+class AsaasSubscriptionResponse(BaseModel):
+    id: UUID
+    provider_customer_id: str
+    provider_subscription_id: str | None
+    provider_payment_id: str | None
+    plan_code: str
+    billing_type: str
+    value_cents: int
+    next_due_date: date
+    enforcement_mode: str
+    status: str
+    invoice_url: str | None
+    last_error: str | None
+    created_at: datetime
+
+
+class AsaasIntegrationStatusResponse(BaseModel):
+    configured: bool
+    environment_url: str | None = None
+    account_id: str | None = None
+    account_name: str | None = None
+    webhook_url: str | None = None
+    webhook_notification_email: str | None = None
+    # Where the webhook must point now; differs from webhook_url after BACKEND_PUBLIC_URL changes.
+    expected_webhook_url: str | None = None
+
+
+class AsaasWebhookProvisionRequest(BaseModel):
+    notification_email: EmailStr
+
+
+class AsaasWebhookProvisionResponse(BaseModel):
+    provider_webhook_id: str
+    url: str
+    enabled: bool
 
 
 class CommercialGrantResponse(BaseModel):
@@ -465,6 +541,171 @@ def platform_commercial_packs(
         )
     ).all()
     return [CommercialPackItem.model_validate(item, from_attributes=True) for item in items]
+
+
+@router.get("/asaas/status", response_model=AsaasIntegrationStatusResponse)
+def platform_asaas_status(
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> AsaasIntegrationStatusResponse:
+    try:
+        service = AsaasBillingService(
+            session,
+            asaas_client_from_settings(container.settings, container.http_client),
+            container.settings,
+        )
+    except ConfigurationError:
+        return AsaasIntegrationStatusResponse(configured=False)
+    return AsaasIntegrationStatusResponse(**service.account_status())
+
+
+@router.post(
+    "/asaas/webhook",
+    response_model=AsaasWebhookProvisionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def platform_provision_asaas_webhook(
+    payload: AsaasWebhookProvisionRequest,
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> AsaasWebhookProvisionResponse:
+    service = AsaasBillingService(
+        session,
+        asaas_client_from_settings(container.settings, container.http_client),
+        container.settings,
+    )
+    webhook = service.provision_webhook(str(payload.notification_email))
+    return AsaasWebhookProvisionResponse(
+        provider_webhook_id=webhook.provider_webhook_id,
+        url=webhook.url,
+        enabled=webhook.enabled,
+    )
+
+
+@router.post(
+    "/tenants/{tenant_id}/asaas/subscriptions",
+    response_model=AsaasSubscriptionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def platform_create_asaas_subscription(
+    tenant_id: UUID,
+    payload: AsaasSubscriptionRequest,
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> AsaasSubscriptionResponse:
+    if session.get(TenantModel, tenant_id) is None:
+        raise NotFoundError("Tenant not found")
+    service = AsaasBillingService(
+        session,
+        asaas_client_from_settings(container.settings, container.http_client),
+        container.settings,
+    )
+    subscription = service.create_subscription(
+        tenant_id,
+        AsaasSubscriptionInput(
+            plan_code=payload.plan_code,
+            billing_type=payload.billing_type,
+            next_due_date=payload.next_due_date,
+            enforcement_mode=payload.enforcement_mode,
+            idempotency_key=payload.idempotency_key,
+            customer=AsaasCustomerInput(
+                name=payload.customer.name,
+                email=str(payload.customer.email),
+                cpf_cnpj=payload.customer.cpf_cnpj,
+                mobile_phone=payload.customer.mobile_phone,
+                notification_disabled=payload.customer.notification_disabled,
+            ),
+        ),
+    )
+    return _asaas_subscription_response(subscription, payload.plan_code)
+
+
+@router.get(
+    "/tenants/{tenant_id}/asaas/subscriptions",
+    response_model=list[AsaasSubscriptionResponse],
+)
+def platform_list_asaas_subscriptions(
+    tenant_id: UUID,
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> list[AsaasSubscriptionResponse]:
+    if session.get(TenantModel, tenant_id) is None:
+        raise NotFoundError("Tenant not found")
+    rows = session.execute(
+        select(AsaasSubscriptionModel, CommercialPlanModel.code)
+        .join(CommercialPlanModel, CommercialPlanModel.id == AsaasSubscriptionModel.plan_id)
+        .where(AsaasSubscriptionModel.tenant_id == tenant_id)
+        .order_by(AsaasSubscriptionModel.created_at.desc())
+    ).all()
+    return [_asaas_subscription_response(item, plan_code) for item, plan_code in rows]
+
+
+@router.post(
+    "/tenants/{tenant_id}/asaas/subscriptions/{subscription_id}/reconcile",
+    response_model=AsaasSubscriptionResponse,
+)
+def platform_reconcile_asaas_subscription(
+    tenant_id: UUID,
+    subscription_id: UUID,
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> AsaasSubscriptionResponse:
+    service = AsaasBillingService(
+        session,
+        asaas_client_from_settings(container.settings, container.http_client),
+        container.settings,
+    )
+    subscription = service.reconcile_subscription(tenant_id, subscription_id)
+    return _asaas_subscription_response(subscription, _plan_code(session, subscription))
+
+
+@router.post(
+    "/tenants/{tenant_id}/asaas/subscriptions/{subscription_id}/cancel",
+    response_model=AsaasSubscriptionResponse,
+)
+def platform_cancel_asaas_subscription(
+    tenant_id: UUID,
+    subscription_id: UUID,
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> AsaasSubscriptionResponse:
+    service = AsaasBillingService(
+        session,
+        asaas_client_from_settings(container.settings, container.http_client),
+        container.settings,
+    )
+    subscription = service.cancel_subscription(tenant_id, subscription_id)
+    return _asaas_subscription_response(subscription, _plan_code(session, subscription))
+
+
+def _plan_code(session: Session, subscription: AsaasSubscriptionModel) -> str:
+    plan = session.get(CommercialPlanModel, subscription.plan_id)
+    return plan.code if plan else ""
+
+
+def _asaas_subscription_response(
+    subscription: AsaasSubscriptionModel, plan_code: str
+) -> AsaasSubscriptionResponse:
+    return AsaasSubscriptionResponse(
+        id=subscription.id,
+        provider_customer_id=subscription.provider_customer_id,
+        provider_subscription_id=subscription.provider_subscription_id,
+        provider_payment_id=subscription.provider_payment_id,
+        plan_code=plan_code,
+        billing_type=subscription.billing_type,
+        value_cents=subscription.value_cents,
+        next_due_date=subscription.next_due_date,
+        enforcement_mode=subscription.enforcement_mode,
+        status=subscription.status,
+        invoice_url=subscription.invoice_url,
+        last_error=subscription.last_error,
+        created_at=subscription.created_at,
+    )
 
 
 @router.put(

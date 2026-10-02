@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: list[str] = Field(default_factory=list)
     backend_public_url: HttpUrl | None = None
+    asaas_api_base_url: HttpUrl | None = None
+    asaas_api_key: SecretStr | None = None
+    asaas_webhook_token: SecretStr | None = None
     evolution_base_url: HttpUrl | None = None
     evolution_api_key: SecretStr | None = None
     evolution_version: str | None = None
@@ -128,18 +131,24 @@ class Settings(BaseSettings):
             return value.replace("postgresql://", "postgresql+psycopg://", 1)
         return value
 
-    @field_validator("backend_public_url", "evolution_base_url", mode="before")
+    @field_validator(
+        "backend_public_url", "evolution_base_url", "asaas_api_base_url", mode="before"
+    )
     @classmethod
     def empty_url_to_none(cls, value: object) -> object:
         if value == "":
             return None
         return value
 
-    @field_validator("evolution_api_key", mode="before")
+    @field_validator("evolution_api_key", "asaas_api_key", "asaas_webhook_token", mode="before")
     @classmethod
     def empty_secret_to_none(cls, value: object) -> object:
         if value == "":
             return None
+        # `$$` is how a leading `$` is escaped in a Docker Compose env file.
+        # Accept it for direct local Settings() runs too.
+        if isinstance(value, str) and value.startswith("$$"):
+            return value[1:]
         return value
 
     @field_validator(

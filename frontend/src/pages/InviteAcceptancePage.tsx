@@ -46,7 +46,7 @@ export function InviteAcceptancePage() {
       <div className="login-glow" />
       <div className="login-heading">
         <div className="login-logo"><Hexagon size={28} strokeWidth={2.4} /></div>
-        <h1>ImobIA</h1>
+        <h1>ImmobIA</h1>
         <p>Ative seu acesso à equipe</p>
       </div>
       {completed ? (

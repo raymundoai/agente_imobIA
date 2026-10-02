@@ -16,7 +16,7 @@ export function Topbar({ activePage }: { activePage: string }) {
   const { logout } = useAuth();
   const [theme, setTheme] = useState(getActiveTheme);
   const title = useMemo(
-    () => navigationItems.find((item) => item.key === activePage)?.label ?? "ImobIA",
+    () => navigationItems.find((item) => item.key === activePage)?.label ?? "ImmobIA",
     [activePage],
   );
   const subtitle = subtitles[activePage];

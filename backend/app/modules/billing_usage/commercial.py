@@ -353,18 +353,7 @@ class CommercialEntitlementService:
         subscription = self.subscription(tenant_id, lock=True)
         next_status = status or ("pilot" if plan.code == PILOT_PLAN_CODE else "active")
         if subscription.plan_id != plan.id or next_status not in {"pilot", "active"}:
-            old_plan_grants = self._session.scalars(
-                select(CommercialEntitlementGrantModel).where(
-                    CommercialEntitlementGrantModel.tenant_id == tenant_id,
-                    CommercialEntitlementGrantModel.source == "plan",
-                    or_(
-                        CommercialEntitlementGrantModel.expires_at.is_(None),
-                        CommercialEntitlementGrantModel.expires_at > now,
-                    ),
-                )
-            ).all()
-            for grant in old_plan_grants:
-                grant.expires_at = now
+            self._expire_plan_grants(tenant_id, now)
         subscription.plan_id = plan.id
         subscription.status = next_status
         subscription.enforcement_mode = enforcement_mode
@@ -374,6 +363,41 @@ class CommercialEntitlementService:
             self._provision_plan_grants(subscription, plan)
         self._session.commit()
         return subscription
+
+    def suspend(
+        self, tenant_id: UUID, *, status: str, expire_plan_grants: bool, commit: bool = True
+    ) -> TenantCommercialSubscriptionModel:
+        """Stop plan renewal for a billing problem, keeping the plan for reactivation.
+
+        `past_due` keeps what is left of the current cycle as a grace period;
+        `cancelled` with `expire_plan_grants` removes the remaining plan allowance.
+        """
+
+        if status not in {"past_due", "cancelled"}:
+            raise ValueError("Invalid commercial suspension status")
+        subscription = self.subscription(tenant_id, lock=True)
+        subscription.status = status
+        if expire_plan_grants:
+            self._expire_plan_grants(tenant_id, datetime.now(UTC))
+        if commit:
+            self._session.commit()
+        else:
+            self._session.flush()
+        return subscription
+
+    def _expire_plan_grants(self, tenant_id: UUID, now: datetime) -> None:
+        grants = self._session.scalars(
+            select(CommercialEntitlementGrantModel).where(
+                CommercialEntitlementGrantModel.tenant_id == tenant_id,
+                CommercialEntitlementGrantModel.source == "plan",
+                or_(
+                    CommercialEntitlementGrantModel.expires_at.is_(None),
+                    CommercialEntitlementGrantModel.expires_at > now,
+                ),
+            )
+        ).all()
+        for grant in grants:
+            grant.expires_at = now
 
     def grant(
         self,

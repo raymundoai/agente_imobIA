@@ -30,12 +30,12 @@ export function LoginPage() {
         <div className="login-logo">
           <Hexagon size={28} strokeWidth={2.4} />
         </div>
-        <h1>ImobIA</h1>
+        <h1>ImmobIA</h1>
         <p>O sistema operacional da sua imobiliária</p>
       </div>
       <form className="login-card" onSubmit={submit}>
         <div>
-          <span className="eyebrow">ImobIA</span>
+          <span className="eyebrow">ImmobIA</span>
           <h1>Acesse o painel</h1>
           <p>Informe sua empresa, email e senha.</p>
         </div>

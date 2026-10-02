@@ -1,14 +1,14 @@
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.container import get_db_session
+from app.container import Container, get_container, get_db_session
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
 from app.modules.billing_usage.adapters.models import (
     AiAttendanceSessionModel,
@@ -17,6 +17,11 @@ from app.modules.billing_usage.adapters.models import (
     CommercialUsageEventModel,
     CreditLedgerModel,
     UsageRecordModel,
+)
+from app.modules.billing_usage.asaas import (
+    AsaasBillingService,
+    asaas_client_from_settings,
+    verify_asaas_webhook_token,
 )
 from app.modules.billing_usage.commercial import (
     COMMERCIAL_RESOURCES,
@@ -33,6 +38,7 @@ from app.modules.billing_usage.service import (
 )
 
 router = APIRouter(prefix="/usage", tags=["usage"])
+asaas_webhook_router = APIRouter(prefix="/webhooks/asaas", tags=["asaas"])
 
 
 class UsageSummaryItem(BaseModel):
@@ -134,6 +140,12 @@ class CommercialUsageResponse(BaseModel):
 class CommercialCatalogResponse(BaseModel):
     plans: list[CommercialPlanResponse]
     packs: list[CommercialPackResponse]
+
+
+class AsaasWebhookResponse(BaseModel):
+    received: bool = True
+    duplicate: bool = False
+    outcome: str
 
 
 @router.get("/summary", response_model=list[UsageSummaryItem])
@@ -296,3 +308,20 @@ def pricing_catalog(
             model: list(rates) for model, rates in IMAGE_TOKEN_RATES_USD_PER_MILLION.items()
         },
     )
+
+
+@asaas_webhook_router.post("", response_model=AsaasWebhookResponse)
+def receive_asaas_webhook(
+    payload: dict[str, Any],
+    asaas_access_token: Annotated[str | None, Header(alias="asaas-access-token")] = None,
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> AsaasWebhookResponse:
+    verify_asaas_webhook_token(container.settings, asaas_access_token)
+    service = AsaasBillingService(
+        session,
+        asaas_client_from_settings(container.settings, container.http_client),
+        container.settings,
+    )
+    result = service.process_webhook(payload)
+    return AsaasWebhookResponse(duplicate=result.duplicate, outcome=result.outcome)

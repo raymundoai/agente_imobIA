@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   Bot,
   Building2,
@@ -73,6 +73,35 @@ type CommercialPack = {
   currency: string;
   active: boolean;
 };
+type AsaasStatus = {
+  configured: boolean;
+  environment_url: string | null;
+  account_id: string | null;
+  account_name: string | null;
+  webhook_url: string | null;
+  webhook_notification_email: string | null;
+  expected_webhook_url: string | null;
+};
+type AsaasSubscription = {
+  id: string;
+  provider_subscription_id: string | null;
+  plan_code: string;
+  value_cents: number;
+  next_due_date: string;
+  status: string;
+  invoice_url: string | null;
+  last_error: string | null;
+  created_at: string;
+};
+const openAsaasStatuses = ["creating", "pending_payment", "active", "past_due"];
+const asaasStatusLabels: Record<string, string> = {
+  creating: "Criação não confirmada",
+  pending_payment: "Aguardando pagamento",
+  active: "Ativa",
+  past_due: "Em atraso",
+  cancelled: "Cancelada",
+  failed: "Recusada pelo Asaas",
+};
 type TenantForm = {
   name: string;
   slug: string;
@@ -87,7 +116,7 @@ const emptyTenant: TenantForm = {
   admin_email: "",
   admin_password: "",
 };
-const storageKey = "imobia.platform.auth.v1";
+const storageKey = "immobia.platform.auth.v1";
 
 export function PlatformApp() {
   const [token, setToken] = useState(() =>
@@ -184,7 +213,7 @@ export function PlatformApp() {
     <main className="platform-page page-stack">
       <header className="page-header platform-header">
         <div>
-          <span className="eyebrow">ImobIA Platform</span>
+          <span className="eyebrow">ImmobIA Platform</span>
           <h1>Administração da plataforma</h1>
           <p>
             Clientes, operação, integrações e consumo em um ambiente separado.
@@ -237,6 +266,7 @@ export function PlatformApp() {
           detail="Saldo total dos clientes"
         />
       </section>
+      <AsaasSetup token={token} />
       <div className="platform-layout">
         <Card>
           <div className="section-inline-header">
@@ -377,7 +407,7 @@ function PlatformLogin({
     <main className="login-page">
       <div className="login-heading">
         <ShieldCheck size={36} />
-        <h1>ImobIA Platform</h1>
+        <h1>ImmobIA Platform</h1>
         <p>Acesso exclusivo da administração</p>
       </div>
       <form className="login-card" onSubmit={submit}>
@@ -403,6 +433,93 @@ function PlatformLogin({
     </main>
   );
 }
+
+function AsaasSetup({ token }: { token: string }) {
+  const [connection, setConnection] = useState<AsaasStatus | null>(null);
+  const [notificationEmail, setNotificationEmail] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  async function loadStatus() {
+    setLoading(true);
+    try {
+      const status = await request<AsaasStatus>("/platform/asaas/status", {}, token);
+      setConnection(status);
+      setNotificationEmail((current) => current || status.webhook_notification_email || "");
+      setFeedback(null);
+    } catch (reason) {
+      setConnection(null);
+      setFeedback(readError(reason));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadStatus();
+  }, [token]);
+
+  async function provisionWebhook(event: FormEvent) {
+    event.preventDefault();
+    setFeedback(null);
+    try {
+      const webhook = await request<{ url: string }>(
+        "/platform/asaas/webhook",
+        {
+          method: "POST",
+          body: JSON.stringify({ notification_email: notificationEmail }),
+        },
+        token,
+      );
+      setFeedback(`Webhook ativo em ${webhook.url}`);
+      void loadStatus();
+    } catch (reason) {
+      setFeedback(readError(reason));
+    }
+  }
+
+  const webhookOutdated = Boolean(
+    connection?.webhook_url && connection.expected_webhook_url && connection.webhook_url !== connection.expected_webhook_url,
+  );
+
+  return (
+    <Card className="settings-panel-card">
+      <div className="settings-panel-header">
+        <div>
+          <h2>Asaas</h2>
+          <p>Ambiente de Sandbox para homologar assinaturas e eventos de pagamento.</p>
+        </div>
+        <button className="button-outline" disabled={loading} onClick={() => void loadStatus()} type="button">
+          {loading ? "Verificando..." : "Verificar conexão"}
+        </button>
+      </div>
+      {connection?.configured ? (
+        <div className="info-box">
+          Conectado{connection.account_name ? ` à conta ${connection.account_name}` : ""} · {connection.environment_url}
+        </div>
+      ) : !loading ? (
+        <div className="error-box">A chave do Asaas ainda não está disponível no backend.</div>
+      ) : null}
+      {connection?.configured ? (
+        webhookOutdated ? (
+          <div className="error-box">
+            O webhook aponta para {connection.webhook_url}, mas o endereço público atual é {connection.expected_webhook_url}. Clique em “Configurar webhook” para atualizar.
+          </div>
+        ) : connection.webhook_url ? (
+          <div className="info-box">Webhook configurado em {connection.webhook_url}</div>
+        ) : (
+          <div className="info-box">Webhook ainda não configurado.</div>
+        )
+      ) : null}
+      <form className="form-grid" onSubmit={provisionWebhook}>
+        <Field label="E-mail para avisos do webhook" type="email" value={notificationEmail} onChange={setNotificationEmail} />
+        <button disabled={!connection?.configured} type="submit">Configurar webhook</button>
+      </form>
+      {feedback ? <p>{feedback}</p> : null}
+    </Card>
+  );
+}
+
 function TenantDetail({
   tenant,
   token,
@@ -423,12 +540,44 @@ function TenantDetail({
   const [resource, setResource] = useState("ai_attendance");
   const [units, setUnits] = useState("100");
   const [packCode, setPackCode] = useState(packs[0]?.code ?? "");
+  const billablePlans = useMemo(
+    () => plans.filter((plan) => plan.is_public && plan.monthly_price_cents > 0),
+    [plans],
+  );
+  const [asaasPlanCode, setAsaasPlanCode] = useState(billablePlans[0]?.code ?? "");
+  const [billingName, setBillingName] = useState(tenant.name);
+  const [billingEmail, setBillingEmail] = useState("");
+  const [billingDocument, setBillingDocument] = useState("");
+  const [nextDueDate, setNextDueDate] = useState(() => nextBusinessDay());
+  const [asaasSubscriptions, setAsaasSubscriptions] = useState<AsaasSubscription[]>([]);
+  // Kept across retries so a lost response is reconciled instead of billed twice.
+  const [asaasIdempotencyKey, setAsaasIdempotencyKey] = useState(() => crypto.randomUUID());
   const [feedback, setFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     setPlanCode(tenant.commercial_plan);
     setEnforcement(tenant.commercial_enforcement);
-  }, [tenant.id, tenant.commercial_enforcement, tenant.commercial_plan]);
+    setBillingName(tenant.name);
+    setAsaasPlanCode((current) =>
+      billablePlans.some((plan) => plan.code === current)
+        ? current
+        : (billablePlans[0]?.code ?? ""),
+    );
+  }, [tenant.id, tenant.commercial_enforcement, tenant.commercial_plan, tenant.name, billablePlans]);
+
+  useEffect(() => {
+    void loadAsaasSubscriptions();
+  }, [tenant.id]);
+
+  async function loadAsaasSubscriptions() {
+    try {
+      setAsaasSubscriptions(
+        await request<AsaasSubscription[]>(`/platform/tenants/${tenant.id}/asaas/subscriptions`, {}, token),
+      );
+    } catch (reason) {
+      setFeedback(readError(reason));
+    }
+  }
 
   async function saveSubscription() {
     if (!window.confirm("Atualizar o plano e a política comercial deste cliente?")) return;
@@ -499,6 +648,70 @@ function TenantDetail({
       setFeedback(readError(reason));
     }
   }
+
+  async function createAsaasSubscription(event: FormEvent) {
+    event.preventDefault();
+    if (!asaasPlanCode) return;
+    const plan = plans.find((item) => item.code === asaasPlanCode);
+    if (!window.confirm(`Criar assinatura Sandbox de ${plan?.name ?? asaasPlanCode} para ${tenant.name}? A franquia só será ativada após o evento de pagamento.`)) return;
+    setFeedback(null);
+    try {
+      await request<AsaasSubscription>(
+        `/platform/tenants/${tenant.id}/asaas/subscriptions`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            plan_code: asaasPlanCode,
+            billing_type: "PIX",
+            next_due_date: nextDueDate,
+            enforcement_mode: "enforce",
+            idempotency_key: asaasIdempotencyKey,
+            customer: {
+              name: billingName,
+              email: billingEmail,
+              cpf_cnpj: billingDocument,
+              notification_disabled: true,
+            },
+          }),
+        },
+        token,
+      );
+      setAsaasIdempotencyKey(crypto.randomUUID());
+      setFeedback("Assinatura Sandbox criada. Aguarde o webhook de confirmação para ativar a franquia.");
+      onChanged();
+    } catch (reason) {
+      setFeedback(readError(reason));
+    } finally {
+      void loadAsaasSubscriptions();
+    }
+  }
+
+  async function changeAsaasSubscription(subscription: AsaasSubscription, action: "reconcile" | "cancel") {
+    if (
+      action === "cancel" &&
+      !window.confirm(
+        `Cancelar a assinatura de ${tenant.name} no Asaas? As cobranças futuras deixam de ser geradas e, se ela estiver ativa, a franquia do plano é encerrada agora.`,
+      )
+    )
+      return;
+    setFeedback(null);
+    try {
+      await request(
+        `/platform/tenants/${tenant.id}/asaas/subscriptions/${subscription.id}/${action}`,
+        { method: "POST" },
+        token,
+      );
+      setFeedback(action === "cancel" ? "Assinatura cancelada." : "Assinatura reconciliada com o Asaas.");
+      onChanged();
+    } catch (reason) {
+      setFeedback(readError(reason));
+    } finally {
+      void loadAsaasSubscriptions();
+    }
+  }
+
+  const openAsaasSubscription = asaasSubscriptions.find((item) => openAsaasStatuses.includes(item.status));
+
   return (
     <div className="page-stack">
       <div>
@@ -599,6 +812,71 @@ function TenantDetail({
         {feedback ? <p>{feedback}</p> : null}
       </div>
       <div className="settings-subsection">
+        <h3>Assinatura Asaas (Sandbox)</h3>
+        <p>Crie uma cobrança recorrente de teste. O plano só é ativado quando o Asaas confirmar o pagamento pelo webhook.</p>
+        {asaasSubscriptions.length ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Plano</th>
+                  <th>Situação</th>
+                  <th>Valor</th>
+                  <th>Criada em</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {asaasSubscriptions.map((subscription) => (
+                  <tr key={subscription.id}>
+                    <td>{planName(plans, subscription.plan_code)}</td>
+                    <td>
+                      {asaasStatusLabels[subscription.status] ?? subscription.status}
+                      {subscription.last_error ? <small> · {subscription.last_error}</small> : null}
+                    </td>
+                    <td>{formatBrl(subscription.value_cents)}/mês</td>
+                    <td>{new Date(subscription.created_at).toLocaleDateString("pt-BR")}</td>
+                    <td className="table-actions">
+                      {subscription.invoice_url && openAsaasStatuses.includes(subscription.status) ? (
+                        <a href={subscription.invoice_url} rel="noreferrer" target="_blank">Cobrança</a>
+                      ) : null}
+                      {subscription.status === "creating" ? (
+                        <button className="button-outline" onClick={() => void changeAsaasSubscription(subscription, "reconcile")} type="button">
+                          Reconciliar
+                        </button>
+                      ) : null}
+                      {openAsaasStatuses.includes(subscription.status) ? (
+                        <button className="button-outline" onClick={() => void changeAsaasSubscription(subscription, "cancel")} type="button">
+                          Cancelar
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+        {openAsaasSubscription ? (
+          <div className="info-box">
+            Este cliente já tem uma assinatura em aberto. Cancele-a antes de criar outra, para não cobrar em dobro.
+          </div>
+        ) : null}
+        <form className="form-grid" onSubmit={createAsaasSubscription}>
+          <label>
+            Plano cobrado
+            <select value={asaasPlanCode} onChange={(event) => setAsaasPlanCode(event.target.value)}>
+              {billablePlans.map((plan) => <option key={plan.code} value={plan.code}>{plan.name} · {formatBrl(plan.monthly_price_cents)}/mês</option>)}
+            </select>
+          </label>
+          <Field label="Razão social ou nome" value={billingName} onChange={setBillingName} />
+          <Field label="E-mail financeiro" type="email" value={billingEmail} onChange={setBillingEmail} />
+          <Field label="CPF ou CNPJ" value={billingDocument} onChange={setBillingDocument} />
+          <Field label="Primeiro vencimento" type="date" value={nextDueDate} onChange={setNextDueDate} />
+          <button disabled={!asaasPlanCode || Boolean(openAsaasSubscription)} type="submit">Criar assinatura PIX</button>
+        </form>
+      </div>
+      <div className="settings-subsection">
         <h3>Telemetria técnica interna</h3>
         <p>
           US$ {tenant.estimated_ai_cost} de custo OpenAI registrado · {tenant.credit_balance.toLocaleString("pt-BR")} créditos técnicos · {tenant.credit_reserved.toLocaleString("pt-BR")} reservados.
@@ -664,4 +942,12 @@ function formatBrl(cents: number) {
     currency: "BRL",
     style: "currency",
   }).format(cents / 100);
+}
+
+function nextBusinessDay() {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + 1);
+  while (date.getDay() === 0 || date.getDay() === 6) date.setDate(date.getDate() + 1);
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
 }

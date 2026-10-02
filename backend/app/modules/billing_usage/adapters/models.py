@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -6,6 +6,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -266,6 +267,115 @@ class TenantCommercialSubscriptionModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class AsaasCustomerLinkModel(Base):
+    __tablename__ = "asaas_customer_links"
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    provider_customer_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AsaasSubscriptionModel(Base):
+    __tablename__ = "asaas_subscriptions"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "idempotency_key", name="uq_asaas_subscriptions_tenant_key"),
+        UniqueConstraint("provider_subscription_id", name="uq_asaas_subscriptions_provider_id"),
+        CheckConstraint(
+            "status IN ('creating', 'pending_payment', 'active', 'past_due', "
+            "'cancelled', 'failed')",
+            name="ck_asaas_subscriptions_status",
+        ),
+        CheckConstraint(
+            "billing_type IN ('UNDEFINED', 'BOLETO', 'CREDIT_CARD', 'PIX')",
+            name="ck_asaas_subscriptions_billing_type",
+        ),
+        CheckConstraint(
+            "enforcement_mode IN ('meter_only', 'enforce')",
+            name="ck_asaas_subscriptions_enforcement",
+        ),
+        CheckConstraint("value_cents > 0", name="ck_asaas_subscriptions_value"),
+        Index("ix_asaas_subscriptions_tenant_created", "tenant_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    plan_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("commercial_plans.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    provider_customer_id: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_subscription_id: Mapped[str | None] = mapped_column(Text)
+    provider_payment_id: Mapped[str | None] = mapped_column(Text)
+    external_reference: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
+    billing_type: Mapped[str] = mapped_column(Text, nullable=False)
+    value_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    enforcement_mode: Mapped[str] = mapped_column(Text, nullable=False, default="enforce")
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="creating")
+    invoice_url: Mapped[str | None] = mapped_column(Text)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    extra: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AsaasWebhookConfigModel(Base):
+    __tablename__ = "asaas_webhook_configs"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    environment_url: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    provider_webhook_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    notification_email: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AsaasWebhookEventModel(Base):
+    __tablename__ = "asaas_webhook_events"
+    __table_args__ = (
+        UniqueConstraint("provider_event_id", name="uq_asaas_webhook_events_provider_id"),
+        Index("ix_asaas_webhook_events_subscription_received", "subscription_id", "received_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    provider_event_id: Mapped[str] = mapped_column(Text, nullable=False)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    subscription_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("asaas_subscriptions.id", ondelete="SET NULL")
+    )
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    outcome: Mapped[str] = mapped_column(Text, nullable=False, default="received")
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class CommercialEntitlementGrantModel(Base):
