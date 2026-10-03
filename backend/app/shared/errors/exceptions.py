@@ -33,6 +33,15 @@ class ConfigurationError(ApplicationError):
     code = "configuration_error"
 
 
+class TooManyRequestsError(ApplicationError):
+    status_code = 429
+    code = "too_many_requests"
+
+    def __init__(self, message: str, *, retry_after_seconds: int) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
 class PaymentRequiredError(ApplicationError):
     status_code = 402
     code = "credits_required"

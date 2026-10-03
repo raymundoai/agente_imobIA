@@ -6,7 +6,7 @@ from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 import jwt
-from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -43,6 +43,7 @@ from app.modules.tenants.api.schemas import CreateTenantRequest
 from app.modules.tenants.application.use_cases import CreateTenantUseCase
 from app.modules.users.adapters.models import UserModel
 from app.shared.errors.exceptions import AuthenticationError, ConfigurationError, NotFoundError
+from app.shared.security.rate_limit import client_ip
 
 router = APIRouter(prefix="/platform", tags=["platform"])
 
@@ -338,9 +339,14 @@ def bootstrap_platform_admin(
 @router.post("/auth/login", response_model=PlatformTokenResponse)
 def platform_login(
     payload: PlatformCredentials,
+    request: Request,
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
 ) -> PlatformTokenResponse:
+    limiter = container.auth_rate_limiter
+    account = str(payload.email)
+    limiter.check_and_hit("platform_ip", client_ip(request))
+    limiter.check("platform_account", account)
     user = session.scalar(
         select(PlatformUserModel).where(PlatformUserModel.email == payload.email.lower())
     )
@@ -349,6 +355,7 @@ def platform_login(
         or user.status != "active"
         or not container.password_hasher.verify(payload.password, user.hashed_password)
     ):
+        limiter.hit("platform_account", account)
         raise AuthenticationError("Invalid credentials")
     user.last_login_at = datetime.now(UTC)
     session.commit()

@@ -7,6 +7,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.modules.auth.ports.security import TokenServicePort
+from app.modules.tenants.adapters.models import TenantModel
 from app.modules.users.adapters.models import UserModel
 from app.modules.users.domain.entities import UserStatus
 from app.shared.database.session import Database
@@ -54,12 +55,16 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 claims = self._tokens.decode(authorization[7:], expected_type="access")
                 with self._database.session_factory() as session:
                     user = session.get(UserModel, claims.user_id)
+                    tenant = session.get(TenantModel, claims.tenant_id)
+                    tenant_status = tenant.status if tenant else None
                 if (
                     user is None
                     or user.tenant_id != claims.tenant_id
                     or user.status != UserStatus.ACTIVE.value
                     or user.role != claims.role
                     or user.session_version != claims.session_version
+                    # Suspending an agency cuts its open sessions immediately.
+                    or tenant_status != "active"
                 ):
                     raise ValueError("stale user session")
                 request.state.tenant_id = claims.tenant_id

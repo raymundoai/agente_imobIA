@@ -308,6 +308,19 @@ def share_property(
     else:
         model.network_shared = False
         model.network_shared_at = None
+        # Pending requests would otherwise let the owner reveal contacts for a
+        # listing that is no longer offered.
+        now = datetime.now(UTC)
+        for pending in session.scalars(
+            select(PartnershipRequestModel).where(
+                PartnershipRequestModel.owner_tenant_id == principal.tenant_id,
+                PartnershipRequestModel.property_id == property_id,
+                PartnershipRequestModel.status == "pending",
+            )
+        ):
+            pending.status = "cancelled"
+            pending.decided_by_user_id = principal.user_id
+            pending.decided_at = now
     session.commit()
     return ShareResponse(property_id=model.id, network_shared=model.network_shared)
 
@@ -526,6 +539,10 @@ def decide_partnership(
             raise ForbiddenError("Só a imobiliária do imóvel pode responder ao pedido")
         if principal.role not in {UserRole.ADMIN, UserRole.GESTOR}:
             raise ForbiddenError("Somente administradores e gestores respondem a parcerias")
+        if action == "accept":
+            listing = session.get(PropertyModel, request.property_id)
+            if listing is None or not listing.network_shared or listing.status != "active":
+                raise ConflictError("Este imóvel não está mais na Rede ImmobIA")
         request.status = "accepted" if action == "accept" else "declined"
     request.decided_by_user_id = principal.user_id
     request.decided_at = datetime.now(UTC)

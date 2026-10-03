@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
@@ -20,6 +20,8 @@ from app.modules.auth.application.use_cases import (
 )
 from app.modules.tenants.adapters.repositories import SqlAlchemyTenantRepository
 from app.modules.users.adapters.repositories import SqlAlchemyUserRepository
+from app.shared.errors.exceptions import AuthenticationError
+from app.shared.security.rate_limit import client_ip
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -27,9 +29,22 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/login", response_model=LoginResponse)
 def login(
     payload: LoginRequest,
+    request: Request,
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
 ) -> LoginResponse:
+    limiter = container.auth_rate_limiter
+    account = str(payload.email)
+    limiter.check_and_hit("login_ip", client_ip(request))
+    limiter.check("login_account", account)
+    try:
+        return _login(payload, session, container)
+    except AuthenticationError:
+        limiter.hit("login_account", account)
+        raise
+
+
+def _login(payload: LoginRequest, session: Session, container: Container) -> LoginResponse:
     use_case = LoginUseCase(
         SqlAlchemyTenantRepository(session),
         SqlAlchemyUserRepository(session),
@@ -60,7 +75,9 @@ def refresh(
     container: Container = Depends(get_container),
 ) -> TokenResponse:
     result = RefreshTokenUseCase(
-        SqlAlchemyUserRepository(session), container.token_service
+        SqlAlchemyUserRepository(session),
+        container.token_service,
+        SqlAlchemyTenantRepository(session),
     ).execute(payload.refresh_token)
     return TokenResponse(
         access_token=result.access_token,

@@ -92,17 +92,27 @@ class LoginUseCase:
 
 
 class RefreshTokenUseCase:
-    def __init__(self, users: UserRepositoryPort, tokens: TokenServicePort) -> None:
+    def __init__(
+        self,
+        users: UserRepositoryPort,
+        tokens: TokenServicePort,
+        tenants: TenantRepositoryPort,
+    ) -> None:
         self._users = users
         self._tokens = tokens
+        self._tenants = tenants
 
     def execute(self, refresh_token: str) -> TokenPair:
         claims = self._tokens.decode(refresh_token, expected_type="refresh")
         user = self._users.get_by_id(claims.tenant_id, claims.user_id)
+        tenant = self._tenants.get_by_id(claims.tenant_id)
         if (
             user is None
             or user.status is not UserStatus.ACTIVE
             or user.session_version != claims.session_version
+            # A suspended agency must not keep its sessions alive by refreshing.
+            or tenant is None
+            or tenant.status.value != "active"
         ):
             raise AuthenticationError("Invalid refresh token")
         return TokenPair(

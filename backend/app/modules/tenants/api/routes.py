@@ -3,7 +3,7 @@ import secrets
 import unicodedata
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
@@ -29,6 +29,7 @@ from app.modules.tenants.application.use_cases import (
 from app.modules.users.adapters.repositories import SqlAlchemyUserRepository
 from app.modules.users.domain.entities import UserRole
 from app.shared.errors.exceptions import ConflictError, ForbiddenError, NotFoundError
+from app.shared.security.rate_limit import client_ip
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 signup_router = APIRouter(prefix="/signup", tags=["signup"])
@@ -39,6 +40,7 @@ RESERVED_SLUGS = {"admin", "api", "app", "plataforma", "platform", "suporte", "w
 @signup_router.post("", response_model=SignupResponse, status_code=201)
 def signup(
     payload: SignupRequest,
+    request: Request,
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
 ) -> SignupResponse:
@@ -46,6 +48,7 @@ def signup(
 
     if not container.settings.public_signup_enabled:
         raise ForbiddenError("O cadastro de novas contas está desativado")
+    container.auth_rate_limiter.check_and_hit("signup_ip", client_ip(request))
     if SqlAlchemyUserRepository(session).list_by_email(str(payload.email)):
         raise ConflictError("Este email já tem uma conta. Entre com ele ou use outro email.")
     repository = SqlAlchemyTenantRepository(session)

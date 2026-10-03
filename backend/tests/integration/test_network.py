@@ -281,3 +281,32 @@ def test_declined_request_can_be_made_again(client: TestClient, network: dict[st
         "/network/partnerships", headers=partner, json={"property_id": listing["id"]}
     )
     assert retry.status_code == 201
+
+
+def test_unsharing_cancels_pending_requests_and_blocks_acceptance(
+    client: TestClient, network: dict[str, Any]
+) -> None:
+    listing, _ = _join_and_share(client, network)
+    partner = _auth(network["partner_token"])
+    owner = _auth(network["owner_token"])
+    first = client.post(
+        "/network/partnerships", headers=partner, json={"property_id": listing["id"]}
+    ).json()
+
+    client.put(f"/network/properties/{listing['id']}/share", headers=owner, json={"shared": False})
+    received = client.get("/network/partnerships", headers=owner).json()["received"]
+    assert received[0]["id"] == first["id"]
+    assert received[0]["status"] == "cancelled"
+
+    # Shared again, a new request is made; the listing is then deactivated before acceptance.
+    client.put(f"/network/properties/{listing['id']}/share", headers=owner, json={"shared": True})
+    second = client.post(
+        "/network/partnerships", headers=partner, json={"property_id": listing["id"]}
+    ).json()
+    deactivated = client.patch(
+        f"/properties/{listing['id']}/status", headers=owner, json={"status": "inactive"}
+    )
+    assert deactivated.status_code == 200, deactivated.text
+    accepted = client.post(f"/network/partnerships/{second['id']}/accept", headers=owner)
+    assert accepted.status_code == 409
+    assert "não está mais" in accepted.json()["detail"]

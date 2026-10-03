@@ -40,6 +40,7 @@ from app.shared.events.in_memory import InMemoryEventBus
 from app.shared.events.ports import EventBusPort
 from app.shared.security.jwt import JwtTokenService
 from app.shared.security.passwords import Argon2PasswordHasher
+from app.shared.security.rate_limit import AuthRateLimiter
 
 
 @dataclass(slots=True)
@@ -62,6 +63,7 @@ class Container:
     property_image_storage: PropertyImageStorage
     http_client: httpx.Client
     capture_http_client: httpx.Client
+    auth_rate_limiter: AuthRateLimiter
 
     @classmethod
     def build(cls, settings: Settings) -> "Container":
@@ -112,6 +114,7 @@ class Container:
             settings=settings,
             database=database,
             password_hasher=Argon2PasswordHasher(),
+            auth_rate_limiter=AuthRateLimiter(enabled=settings.auth_rate_limit_enabled),
             token_service=JwtTokenService(
                 secret=settings.jwt_secret.get_secret_value(),
                 algorithm=settings.jwt_algorithm,

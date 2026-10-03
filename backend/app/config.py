@@ -34,7 +34,8 @@ class TelegramTenantSettings(BaseModel):
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_env: str = "development"
+    # Fail-safe: development-only routes stay closed unless the environment says otherwise.
+    app_env: str = "production"
     app_name: str = "ImobIA API"
     api_prefix: str = ""
     database_url: str
@@ -116,6 +117,8 @@ class Settings(BaseSettings):
     platform_bootstrap_token: SecretStr | None = None
     # Self-service signup from the login page. Off unless explicitly enabled per environment.
     public_signup_enabled: bool = False
+    # Attempt limits on login and signup; only worth disabling in local load tests.
+    auth_rate_limit_enabled: bool = True
     trial_days: int = Field(default=7, ge=1, le=60)
 
     @field_validator("jwt_secret")
