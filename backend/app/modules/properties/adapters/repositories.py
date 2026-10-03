@@ -47,6 +47,7 @@ def _to_domain(model: PropertyModel) -> Property:
         advertiser_name=model.advertiser_name,
         advertiser_phone=model.advertiser_phone,
         via_extension=model.via_extension,
+        network_shared=model.network_shared,
         duplicate_group_id=model.duplicate_group_id,
         content_hash=model.content_hash,
         created_at=model.created_at,

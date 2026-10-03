@@ -1,8 +1,9 @@
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, Film, ImagePlus, LoaderCircle, Play, RotateCcw, Sparkles, Trash2, Plus, X } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Download, Film, ImagePlus, LoaderCircle, Play, RotateCcw, Share2, Sparkles, Trash2, Plus, X } from "lucide-react";
 import { type DragEvent, type FormEvent, useEffect, useRef, useState } from "react";
-import { request, requestBlob, requestBlobWithProgress, uploadFormDataWithProgress } from "../api/client";
-import type { Property, PropertyImage } from "../api/types";
+import { ApiError, request, requestBlob, requestBlobWithProgress, uploadFormDataWithProgress } from "../api/client";
+import type { NetworkSettings, Property, PropertyImage } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { getTokenClaims } from "../auth/tokenClaims";
 import { PropertyCard } from "../components/PropertyCard";
 import {
   ACCEPTED_PROPERTY_MEDIA_TYPES,
@@ -214,6 +215,8 @@ export function PropertiesPage() {
   const { token } = useAuth();
   const [items, setItems] = useState<Property[]>([]);
   const [selected, setSelected] = useState<Property | null>(null);
+  const [networkStatus, setNetworkStatus] = useState<NetworkSettings | null>(null);
+  const [shareFeedback, setShareFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [linkedImages, setLinkedImages] = useState<PropertyImage[]>([]);
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   const [imageVersions, setImageVersions] = useState<Record<string, ImageVersion>>({});
@@ -762,6 +765,35 @@ export function PropertiesPage() {
     } finally { setSaving(false); }
   }
 
+  useEffect(() => {
+    request<NetworkSettings>("/network/settings", {}, token).then(setNetworkStatus).catch(() => setNetworkStatus(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  useEffect(() => setShareFeedback(null), [selected?.id]);
+
+  async function toggleNetworkShare() {
+    if (!selected) return;
+    const next = !selected.network_shared;
+    if (next && !window.confirm("Compartilhar este imóvel na Rede ImmobIA? Outras imobiliárias verão fotos, preço, características, bairro e cidade. Dados do proprietário e endereço exato continuam privados.")) return;
+    setSaving(true);
+    try {
+      await request(`/network/properties/${selected.id}/share`, { method: "PUT", body: JSON.stringify({ shared: next }) }, token);
+      const updated = { ...selected, network_shared: next };
+      setSelected(updated);
+      setItems((current) => current.map((item) => item.id === updated.id ? { ...item, network_shared: next } : item));
+      setShareFeedback({ kind: "success", text: next ? "Imóvel compartilhado na Rede ImmobIA." : "Imóvel removido da Rede ImmobIA." });
+      setNetworkStatus((current) => current ? { ...current, shared_properties: Math.max(0, current.shared_properties + (next ? 1 : -1)) } : current);
+    } catch (error) {
+      setShareFeedback({
+        kind: "error",
+        text: error instanceof ApiError && error.status === 402
+          ? "A Rede ImmobIA está disponível nos planos pagos."
+          : error instanceof Error ? error.message : "Não foi possível alterar o compartilhamento.",
+      });
+    } finally { setSaving(false); }
+  }
+
   async function deleteSelected() {
     if (!selected || selected.status !== "inactive" || !window.confirm("Excluir este imóvel e todas as mídias definitivamente?")) return;
     setSaving(true);
@@ -934,7 +966,10 @@ export function PropertiesPage() {
               <ArrowLeft size={16} /> Voltar
             </button>
             <div>
-              <span className="eyebrow">Carteira própria</span>
+              <span className="eyebrow">
+                Carteira própria
+                {selected?.network_shared ? <span className="network-tag"><Share2 size={12} /> Na Rede ImmobIA</span> : null}
+              </span>
               <h2>{selected ? selected.title : "Cadastrar imóvel"}</h2>
               <p>{selected ? "Edite o cadastro e gerencie as mídias do imóvel." : "Preencha os dados e adicione as mídias do imóvel."}</p>
             </div>
@@ -948,6 +983,30 @@ export function PropertiesPage() {
               </div>
               {selected?.listing_code ? <span className="property-code-chip">Código {selected.listing_code}</span> : null}
             </div>
+
+            {selected && selected.source === "manual" ? (
+              <div className={selected.network_shared ? "network-share-box shared" : "network-share-box"}>
+                <Share2 size={18} />
+                <div>
+                  <strong>{selected.network_shared ? "Compartilhado na Rede ImmobIA" : "Compartilhar na Rede ImmobIA"}</strong>
+                  <span>
+                    {selected.network_shared
+                      ? "Outras imobiliárias encontram este imóvel no Buscador e podem pedir parceria."
+                      : "Ofereça este imóvel a outras imobiliárias do ImmobIA com a comissão definida em Configurações > Rede ImmobIA."}
+                  </span>
+                </div>
+                {selected.network_shared ? (
+                  <button aria-pressed className="button-outline" disabled={saving} onClick={() => void toggleNetworkShare()} type="button">
+                    Parar de compartilhar
+                  </button>
+                ) : (
+                  <ShareButton blockedReason={shareBlockedReason(networkStatus, token)} disabled={saving} onShare={() => void toggleNetworkShare()} />
+                )}
+                {shareFeedback ? (
+                  <p className={shareFeedback.kind === "error" ? "network-share-feedback error" : "network-share-feedback"} role="status">{shareFeedback.text}</p>
+                ) : null}
+              </div>
+            ) : null}
 
             <form onSubmit={handleCreateProperty}>
               <p className="required-fields-note"><span aria-hidden="true">*</span> Campo obrigatório</p>
@@ -1510,4 +1569,51 @@ function mediaStatusLabel(image: PropertyImage) {
 function formatFileSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
+}
+
+type ShareBlock = { message: string; actionLabel: string; tab: string } | null;
+
+function shareBlockedReason(status: NetworkSettings | null, token: string | null): ShareBlock | "loading" {
+  if (!status) return "loading";
+  const role = getTokenClaims(token)?.role;
+  if (role !== "admin" && role !== "gestor") {
+    return { message: "Somente administradores e gestores compartilham imóveis na rede.", actionLabel: "", tab: "" };
+  }
+  if (!status.eligible) {
+    return { message: "A Rede ImmobIA está disponível nos planos pagos.", actionLabel: "Ver planos", tab: "billing" };
+  }
+  if (!status.member) {
+    return { message: "Aceite o termo da Rede ImmobIA para compartilhar imóveis.", actionLabel: "Abrir Rede ImmobIA", tab: "network" };
+  }
+  return null;
+}
+
+function ShareButton({ blockedReason, disabled, onShare }: { blockedReason: ShareBlock | "loading"; disabled: boolean; onShare: () => void }) {
+  if (blockedReason === null) {
+    return <button className="primary-button" disabled={disabled} onClick={onShare} type="button">Compartilhar</button>;
+  }
+  if (blockedReason === "loading") {
+    return <button className="primary-button" disabled type="button">Compartilhar</button>;
+  }
+  // A disabled button gets no hover or focus, so the wrapper carries the explanation balloon.
+  return (
+    <span aria-describedby="share-blocked-tip" className="tooltip-wrap" tabIndex={0}>
+      <button aria-disabled className="primary-button" disabled type="button">Compartilhar</button>
+      <span className="tooltip-balloon" id="share-blocked-tip" role="tooltip">
+        {blockedReason.message}
+        {blockedReason.tab ? (
+          <button
+            className="link-button"
+            onClick={() => {
+              window.history.pushState({}, "", `/configuracoes?aba=${blockedReason.tab}`);
+              window.dispatchEvent(new PopStateEvent("popstate"));
+            }}
+            type="button"
+          >
+            {blockedReason.actionLabel}
+          </button>
+        ) : null}
+      </span>
+    </span>
+  );
 }

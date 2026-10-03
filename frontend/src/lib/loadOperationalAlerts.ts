@@ -1,15 +1,21 @@
 import { ApiError, request } from "../api/client";
-import type { CommercialUsage, EvolutionWhatsappConnection, TelegramConnection } from "../api/types";
+import type {
+  CommercialUsage,
+  EvolutionWhatsappConnection,
+  NetworkSettings,
+  TelegramConnection,
+} from "../api/types";
 
 import { jobsUnavailableAlert } from "./operationalAlerts";
 
 /** Operational checks shown on the dashboard and in the user menu's notifications. */
 export async function loadOperationalAlerts(token: string | null): Promise<string[]> {
-  const [creditResult, whatsappResult, telegramResult, jobsResult] = await Promise.allSettled([
+  const [creditResult, whatsappResult, telegramResult, jobsResult, networkResult] = await Promise.allSettled([
     request<CommercialUsage>("/usage/commercial", {}, token),
     request<EvolutionWhatsappConnection>("/integrations/evolution/whatsapp/status", {}, token),
     request<TelegramConnection>("/integrations/telegram/status", {}, token),
     request<Array<{ status: string }>>("/message-jobs?limit=50", {}, token),
+    request<NetworkSettings>("/network/settings", {}, token),
   ]);
   const alerts: string[] = [];
   if (creditResult.status === "rejected") alerts.push("Não foi possível verificar as franquias do plano.");
@@ -38,6 +44,10 @@ export async function loadOperationalAlerts(token: string | null): Promise<strin
     if (failed) alerts.push(`${failed} atendimento(s) exigem revisão operacional.`);
   } else {
     alerts.push(jobsUnavailableAlert(jobsResult.reason instanceof ApiError ? jobsResult.reason.status : undefined));
+  }
+  if (networkResult.status === "fulfilled" && networkResult.value.pending_received > 0) {
+    const count = networkResult.value.pending_received;
+    alerts.push(`${count} pedido${count === 1 ? "" : "s"} de parceria aguardando resposta na Rede ImmobIA.`);
   }
   return alerts;
 }

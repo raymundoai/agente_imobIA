@@ -12,6 +12,7 @@ from app.modules.conversations.adapters import models as conversation_models  # 
 from app.modules.leads.adapters import models as lead_models  # noqa: F401
 from app.modules.maintenance.adapters import models as maintenance_models  # noqa: F401
 from app.modules.messaging import models as messaging_models  # noqa: F401
+from app.modules.network import models as network_models  # noqa: F401
 from app.modules.platform import models as platform_models  # noqa: F401
 from app.modules.properties.adapters import models as property_models  # noqa: F401
 from app.modules.tenants.adapters import models as tenant_models  # noqa: F401

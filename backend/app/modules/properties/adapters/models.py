@@ -107,6 +107,11 @@ class PropertyModel(Base):
     )
     duplicate_group_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     content_hash: Mapped[str | None] = mapped_column(Text)
+    # Offered to other ImmobIA agencies through the network (owner data stays private).
+    network_shared: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    network_shared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

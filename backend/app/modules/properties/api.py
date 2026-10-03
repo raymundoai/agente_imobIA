@@ -90,6 +90,7 @@ class PropertyResponse(BaseModel):
     advertiser_name: str | None
     advertiser_phone: str | None
     via_extension: bool
+    network_shared: bool = False
 
     @classmethod
     def from_domain(cls, property_: Property) -> "PropertyResponse":
@@ -124,6 +125,7 @@ class PropertyResponse(BaseModel):
             advertiser_name=property_.advertiser_name,
             advertiser_phone=property_.advertiser_phone,
             via_extension=property_.via_extension,
+            network_shared=property_.network_shared,
         )
 
 
@@ -794,6 +796,14 @@ def property_image_content(
     session: Session = Depends(get_db_session),
 ):
     image = _image_model(session, principal.tenant_id, property_id, image_id)
+    return serve_property_image(image, principal.tenant_id, variant, container)
+
+
+def serve_property_image(
+    image: PropertyImageModel, owner_tenant_id: UUID, variant: str, container: Container
+):
+    """Stream or redirect to an image from the storage of the tenant that owns it."""
+
     derived = variant == "display" and image.derived_storage_key is not None
     key = image.derived_storage_key if derived else image.original_storage_key
     content_type = image.derived_content_type if derived else image.original_content_type
@@ -816,11 +826,11 @@ def property_image_content(
             status_code=404,
             detail="Mídia legada preservada, mas sua origem não é confiável ou acessível.",
         )
-    signed = container.property_image_storage.signed_url(principal.tenant_id, key)
+    signed = container.property_image_storage.signed_url(owner_tenant_id, key)
     if signed:
         return RedirectResponse(signed)
     try:
-        stream = container.property_image_storage.open(principal.tenant_id, key)
+        stream = container.property_image_storage.open(owner_tenant_id, key)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Arquivo da mídia não encontrado.") from exc
     content_size = image.derived_size if derived else image.original_size

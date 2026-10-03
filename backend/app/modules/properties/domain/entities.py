@@ -42,6 +42,8 @@ class Property:
     advertiser_name: str | None = None
     advertiser_phone: str | None = None
     via_extension: bool = False
+    # Read-only here: changed only through the network share endpoint.
+    network_shared: bool = False
     duplicate_group_id: UUID | None = None
     content_hash: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

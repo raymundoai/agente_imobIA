@@ -258,6 +258,7 @@ export type Property = {
   advertiser_phone: string | null;
   source_url: string | null;
   via_extension: boolean;
+  network_shared?: boolean;
 };
 
 export type PropertyImage = {
@@ -531,4 +532,59 @@ export type BillingOverview = {
     invoice_url: string | null;
   } | null;
   contact: { name: string; email: string | null; cpf_cnpj: string | null };
+};
+
+export type NetworkSettings = {
+  eligible: boolean;
+  terms_version: string;
+  terms_text: string;
+  member: boolean;
+  terms_accepted_at: string | null;
+  partner_commission_percent: number | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
+  shared_properties: number;
+  pending_received: number;
+};
+
+export type NetworkContact = { agency_name: string; name: string; phone: string; email: string };
+
+export type Partnership = {
+  id: string;
+  direction: "sent" | "received";
+  status: "pending" | "accepted" | "declined" | "cancelled";
+  property_id: string;
+  property_title: string;
+  partner_commission_percent: number;
+  message: string | null;
+  counterpart_agency: string;
+  counterpart_contact: NetworkContact | null;
+  created_at: string;
+  decided_at: string | null;
+};
+
+export type NetworkListing = {
+  id: string;
+  title: string;
+  description: string | null;
+  purpose: string | null;
+  property_type: string | null;
+  city: string;
+  neighborhood: string | null;
+  price: string | null;
+  sale_price: string | null;
+  rent_price: string | null;
+  bedrooms: number | null;
+  suites: number | null;
+  bathrooms: number | null;
+  parking_spaces: number | null;
+  area: number | null;
+  image_ids: string[];
+  agency_name: string;
+  partner_commission_percent: number;
+  fit_score: number;
+  matched: string[];
+  tradeoffs: string[];
+  partnership: { id: string; status: Partnership["status"] } | null;
 };

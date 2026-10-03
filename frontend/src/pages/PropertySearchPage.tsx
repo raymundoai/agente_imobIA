@@ -22,6 +22,7 @@ import type {
   Property,
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { NetworkResults } from "../components/NetworkResults";
 import { getTokenClaims } from "../auth/tokenClaims";
 import { DemandModal } from "../components/DemandModal";
 import {
@@ -703,6 +704,8 @@ export function PropertySearchPage() {
                   </div>
                 </div>
               </section>
+
+              {selectedId ? <NetworkResults canRequest={canSearch} demandId={selectedId} /> : null}
 
               <section className="search-stage">
                 <div className="section-heading">

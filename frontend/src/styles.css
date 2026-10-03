@@ -4407,3 +4407,63 @@ label small {
 .billing-confirmed div { display: grid; gap: 2px; }
 .billing-confirmed span { color: var(--muted-foreground); }
 @media (max-width: 640px) { .pix-payment { grid-template-columns: 1fr; justify-items: center; } }
+
+/* Rede ImmobIA */
+.property-media { position: relative; }
+.network-chip { align-items: center; background: color-mix(in srgb, var(--primary) 88%, #000); border-radius: 999px; color: #fff; display: inline-flex; font-size: 11px; font-weight: 800; gap: 4px; left: 10px; padding: 4px 8px; position: absolute; top: 10px; }
+.network-share-box { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; padding: 14px 16px; }
+.network-share-box.shared { background: color-mix(in srgb, var(--primary) 7%, var(--card)); border-color: color-mix(in srgb, var(--primary) 35%, var(--border)); }
+.network-share-box > svg { color: var(--primary); flex: 0 0 auto; }
+.network-share-box > div { display: grid; flex: 1 1 260px; gap: 2px; }
+.network-share-box span { color: var(--muted-foreground); font-size: 13px; }
+.network-upsell, .network-upsell-card { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+.network-upsell-card { padding: 16px; }
+.network-upsell-card > svg { color: var(--primary); }
+.network-upsell-card > div { display: grid; flex: 1 1 240px; gap: 2px; }
+.network-upsell-card span { color: var(--muted-foreground); }
+.network-stats { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.network-stats > div { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 2px; padding: 12px 14px; }
+.network-stats strong { font-size: 22px; }
+.network-stats span { color: var(--muted-foreground); font-size: 13px; }
+.network-form .settings-form-fieldset { gap: 14px; }
+.network-form label { display: grid; font-size: 13px; font-weight: 700; gap: 6px; }
+.network-form .primary-button { justify-self: start; }
+.network-terms { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 8px; padding: 14px; }
+.network-terms p { color: var(--muted-foreground); font-size: 13px; line-height: 1.55; margin: 0; }
+.partnership-list { display: grid; gap: 10px; }
+.partnership-card { align-items: flex-start; border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 10px; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; padding: 12px 14px; }
+.partnership-card.status-pending { border-left-color: var(--warning); }
+.partnership-card.status-accepted { border-left-color: var(--success); }
+.partnership-main { display: grid; flex: 1 1 320px; gap: 4px; min-width: 0; }
+.partnership-main > span { color: var(--muted-foreground); font-size: 13px; }
+.partnership-main p { font-style: italic; margin: 2px 0 0; }
+.partnership-contact { align-items: center; background: color-mix(in srgb, var(--success) 9%, var(--card)); border-radius: 8px; display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; padding: 8px 10px; }
+.partnership-contact a { align-items: center; color: var(--foreground); display: inline-flex; gap: 4px; }
+.partnership-side { align-items: flex-end; display: grid; gap: 8px; justify-items: end; }
+.partnership-status { font-size: 12px; font-weight: 800; }
+.partnership-actions { display: flex; gap: 6px; }
+.network-stage .eyebrow svg { margin-right: 4px; vertical-align: -2px; }
+.network-result-price { font-size: 1.05rem; }
+.network-status { align-items: center; background: var(--muted); border: 0; border-radius: 8px; color: var(--muted-foreground); display: inline-flex; font-size: 13px; font-weight: 700; gap: 6px; justify-content: center; padding: 9px 10px; width: 100%; }
+.network-status.accepted { background: color-mix(in srgb, var(--success) 14%, var(--card)); color: var(--success); cursor: pointer; }
+.network-request { display: grid; gap: 8px; }
+.network-request textarea { font-size: 13px; resize: vertical; width: 100%; }
+.network-request-actions { align-items: center; display: flex; justify-content: space-between; }
+.network-result-card .external-result-actions .primary-button { width: 100%; }
+@media (max-width: 640px) { .network-stats { grid-template-columns: 1fr; } }
+.network-result-card .external-result-source { align-items: start; display: grid; gap: 2px; }
+
+/* Etiqueta "Na Rede" no detalhe e balão de bloqueio do compartilhamento */
+.network-tag { align-items: center; background: color-mix(in srgb, var(--primary) 14%, var(--card)); border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border)); border-radius: 999px; color: var(--primary); display: inline-flex; font-size: 11px; gap: 4px; letter-spacing: 0; margin-left: 8px; padding: 2px 8px; text-transform: none; vertical-align: middle; }
+.network-share-feedback { flex-basis: 100%; font-size: 13px; font-weight: 600; margin: 0; color: var(--success); }
+.network-share-feedback.error { color: var(--danger); }
+.tooltip-wrap { display: inline-flex; position: relative; }
+.tooltip-wrap:focus-visible { border-radius: 9px; box-shadow: var(--ring); outline: none; }
+.tooltip-wrap > button:disabled { cursor: not-allowed; opacity: 0.55; pointer-events: none; }
+.tooltip-balloon { background: var(--foreground); border-radius: 8px; bottom: calc(100% + 10px); box-shadow: var(--shadow-md); color: var(--background); display: grid; font-size: 12px; font-weight: 600; gap: 6px; line-height: 1.4; opacity: 0; padding: 10px 12px; pointer-events: none; position: absolute; right: 0; transform: translateY(4px); transition: opacity 120ms ease, transform 120ms ease; width: 240px; z-index: 30; }
+.tooltip-balloon::after { border: 6px solid transparent; border-top-color: var(--foreground); content: ""; position: absolute; right: 24px; top: 100%; }
+/* Invisible bridge so the pointer can travel from the button into the balloon's link. */
+.tooltip-balloon::before { bottom: -12px; content: ""; height: 12px; left: 0; position: absolute; right: 0; }
+.tooltip-wrap:hover .tooltip-balloon, .tooltip-wrap:focus-within .tooltip-balloon { opacity: 1; pointer-events: auto; transform: translateY(0); }
+.tooltip-balloon .link-button { color: var(--background); justify-self: start; padding: 0; text-decoration: underline; }
+.network-share-box .tooltip-balloon { color: var(--background); font-size: 12px; }

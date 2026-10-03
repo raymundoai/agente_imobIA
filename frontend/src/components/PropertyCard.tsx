@@ -1,4 +1,4 @@
-import { ExternalLink, Home } from "lucide-react";
+import { ExternalLink, Home, Share2 } from "lucide-react";
 import type { Property } from "../api/types";
 import { formatCurrency, labelOrDash } from "../lib/format";
 import { Badge } from "./Badge";
@@ -26,6 +26,11 @@ export function PropertyCard({
       >
       <div className="property-media">
         {imageUrl ? <img alt={property.title} src={imageUrl} /> : <Home size={26} />}
+        {property.network_shared ? (
+          <span className="network-chip" title="Compartilhado na Rede ImmobIA">
+            <Share2 size={12} /> Na Rede
+          </span>
+        ) : null}
       </div>
       <div className="property-body">
         <div className="property-title-row">

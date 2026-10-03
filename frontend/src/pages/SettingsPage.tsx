@@ -1,4 +1,4 @@
-import { Bot, Building2, Cable, CreditCard, PlugZap, Settings, Users } from "lucide-react";
+import { Bot, Building2, Cable, CreditCard, PlugZap, Settings, Share2, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { request } from "../api/client";
 import type { Tenant } from "../api/types";
@@ -8,6 +8,7 @@ import { AgentsSettingsPanel } from "./settings/AgentsSettingsPanel";
 import { BillingSettingsPanel } from "./settings/BillingSettingsPanel";
 import { ChannelsSettingsPanel } from "./settings/ChannelsSettingsPanel";
 import { IntegrationsSettingsPanel } from "./settings/IntegrationsSettingsPanel";
+import { NetworkSettingsPanel } from "./settings/NetworkSettingsPanel";
 import { TenantSettingsPanel } from "./settings/TenantSettingsPanel";
 import { UsageSettingsPanel } from "./settings/UsageSettingsPanel";
 import { UsersSettingsPanel } from "./settings/UsersSettingsPanel";
@@ -19,6 +20,7 @@ const tabs = [
   { key: "agents", label: "Configuração da IA", icon: Bot },
   { key: "users", label: "Equipe", icon: Users },
   { key: "usage", label: "Uso", icon: Settings },
+  { key: "network", label: "Rede ImmobIA", icon: Share2 },
   { key: "billing", label: "Plano e cobrança", icon: CreditCard },
 ] as const;
 
@@ -122,6 +124,7 @@ export function SettingsPage() {
           ) : null}
           {activeTab === "users" ? <UsersSettingsPanel /> : null}
           {activeTab === "usage" ? <UsageSettingsPanel /> : null}
+          {activeTab === "network" ? <NetworkSettingsPanel /> : null}
           {activeTab === "billing" ? <BillingSettingsPanel /> : null}
         </div>
       </div> : null}
