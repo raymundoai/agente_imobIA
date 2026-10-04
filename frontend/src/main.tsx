@@ -4,6 +4,7 @@ import { App } from "./App";
 import { AuthProvider } from "./auth/AuthContext";
 import { applyTheme, getActiveTheme } from "./lib/theme";
 import "./styles.css";
+import "./theme.css";
 import { isPlatformPath } from "./lib/appNavigation";
 
 applyTheme(getActiveTheme());

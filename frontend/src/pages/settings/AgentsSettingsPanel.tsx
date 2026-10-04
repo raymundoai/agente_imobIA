@@ -1,3 +1,4 @@
+import { DEFAULT_AGENT_NAME, EMOJI_LEVELS, VOICE_TONES } from "../../lib/agentOptions";
 import { Bot } from "lucide-react";
 import { useEffect, useState } from "react";
 import { request } from "../../api/client";
@@ -19,7 +20,7 @@ type AgentConfig = {
 };
 
 const defaultAgent: AgentConfig = {
-  name: "Agente de Leads",
+  name: "",
   status: "active",
   handoff_rules: "Lead pronto para visita, pedido de negociação, dúvida complexa ou baixa confiança da IA.",
   restrictions: "Não prometer disponibilidade, não negociar valores finais e não assumir compromisso em nome do corretor.",
@@ -55,6 +56,8 @@ export function AgentsSettingsPanel({
       ...(saved?.leads ?? {}),
       voice_tone: normalizeTone(saved?.leads?.voice_tone ?? legacyTone),
     };
+    // The built-in default is not a real name; show it as empty so the agent stays nameless.
+    if (nextAgent.name === DEFAULT_AGENT_NAME) nextAgent.name = "";
     setAgent(nextAgent);
     setInitialAgent(nextAgent);
   }, [tenant]);
@@ -88,7 +91,7 @@ export function AgentsSettingsPanel({
             agents: {
               leads: {
                 ...agent,
-                name: agent.name.trim(),
+                name: agent.name.trim() || DEFAULT_AGENT_NAME,
                 handoff_rules: agent.handoff_rules.trim(),
                 restrictions: agent.restrictions.trim(),
                 transfer_message: agent.transfer_message.trim(),
@@ -99,7 +102,7 @@ export function AgentsSettingsPanel({
         token,
       );
       onTenantChange(updated);
-      setMessage("Configuração da IA salva.");
+      setMessage("Agente de IA salvo.");
       setMessageKind("success");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao salvar a configuração da IA.");
@@ -113,7 +116,7 @@ export function AgentsSettingsPanel({
     <Card className="settings-panel-card">
       <div className="settings-panel-header">
         <div>
-          <h2>Configuração da IA</h2>
+          <h2>Agente de IA</h2>
           <p>Personalize a conversa, os limites do agente e a passagem para a equipe.</p>
         </div>
         <Badge variant={agent.status === "active" ? "success" : "muted"}>
@@ -125,8 +128,9 @@ export function AgentsSettingsPanel({
       <fieldset className="settings-form-fieldset" disabled={!canManage}>
       <div className="form-grid">
         <label>
-          Nome do agente
-          <input value={agent.name} onChange={(event) => updateAgent({ name: event.target.value })} />
+          <span>Nome do agente <span className="optional">(opcional)</span></span>
+          <input placeholder="Ex.: Sofia" value={agent.name} onChange={(event) => updateAgent({ name: event.target.value })} />
+          <small className="field-hint">Com nome, o agente se apresenta por ele. Sem nome, diz que é o assistente virtual da imobiliária.</small>
         </label>
         <label>
           Status
@@ -146,18 +150,13 @@ export function AgentsSettingsPanel({
           <label>
             Tom de voz
             <select value={agent.voice_tone} onChange={(event) => updateAgent({ voice_tone: event.target.value as AgentConfig["voice_tone"] })}>
-              <option value="professional">Profissional</option>
-              <option value="friendly">Próximo e cordial</option>
-              <option value="consultative">Consultivo</option>
-              <option value="informal">Informal</option>
+              {VOICE_TONES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
           <label>
             Quantidade de emojis
             <select value={agent.emoji_usage} onChange={(event) => updateAgent({ emoji_usage: event.target.value as AgentConfig["emoji_usage"] })}>
-              <option value="none">Não usar</option>
-              <option value="low">Poucos</option>
-              <option value="moderate">Moderada</option>
+              {EMOJI_LEVELS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
         </div>
@@ -188,7 +187,7 @@ export function AgentsSettingsPanel({
       <div className="settings-actions">
         {message ? <span className={`settings-feedback ${messageKind}`} role={messageKind === "error" ? "alert" : "status"} aria-live="polite">{message}</span> : null}
         {dirty ? <span className="unsaved-indicator">Alterações não salvas</span> : null}
-        <button disabled={saving || !tenant || !canManage || !dirty} onClick={save} type="button">{saving ? "Salvando..." : "Salvar configuração da IA"}</button>
+        <button disabled={saving || !tenant || !canManage || !dirty} onClick={save} type="button">{saving ? "Salvando..." : "Salvar agente"}</button>
       </div>
     </Card>
 
@@ -197,7 +196,7 @@ export function AgentsSettingsPanel({
 }
 
 function validateAgent(agent: AgentConfig): string | null {
-  if (agent.name.trim().length < 2) return "Informe um nome para o agente.";
+  if (agent.name.trim().length === 1) return "O nome do agente precisa ter ao menos 2 letras.";
   if (agent.handoff_rules.trim().length < 2) return "Informe quando acionar um atendente humano.";
   if (agent.restrictions.trim().length < 2) return "Informe o que o agente não pode fazer.";
   if (agent.transfer_message.trim().length < 2) return "Informe a mensagem de transferência.";

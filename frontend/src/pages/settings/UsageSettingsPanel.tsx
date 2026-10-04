@@ -44,7 +44,7 @@ export function UsageSettingsPanel() {
     <Card className="settings-panel-card">
       <div className="settings-panel-header">
         <div>
-          <h2>Plano e uso</h2>
+          <h2>Uso no ciclo</h2>
           <p>Acompanhe atendimentos da IA, buscas e otimizações incluídos no ciclo.</p>
         </div>
         <div className="settings-header-actions">

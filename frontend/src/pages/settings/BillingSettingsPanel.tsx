@@ -175,7 +175,7 @@ export function BillingSettingsPanel() {
         </div>
       ) : null}
 
-      {subscription && waiting && subscription.billing_type === "PIX" ? <PixPayment token={token} /> : null}
+      {subscription && waiting && subscription.billing_type === "PIX" ? <PixPayment invoiceUrl={subscription.invoice_url} token={token} /> : null}
       {subscription && waiting && subscription.billing_type === "CREDIT_CARD" ? (
         <p className="billing-waiting" aria-live="polite">
           <Loader2 className="spin" size={16} />
@@ -256,19 +256,23 @@ export function BillingSettingsPanel() {
   );
 }
 
-function PixPayment({ token }: { token: string | null }) {
+function PixPayment({ token, invoiceUrl }: { token: string | null; invoiceUrl?: string | null }) {
   const [pix, setPix] = useState<PixCharge | null>(null);
+  const [failed, setFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    setFailed(false);
     request<PixCharge>("/billing/pix", {}, token)
       .then((value) => {
         setPix(value);
         setError(null);
       })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Não foi possível gerar o QR Code."));
-  }, [token]);
+      // The payment provider's own message is technical; the way out is what matters here.
+      .catch(() => setFailed(true));
+  }, [token, attempt]);
 
   async function copy() {
     if (!pix) return;
@@ -281,8 +285,26 @@ function PixPayment({ token }: { token: string | null }) {
     }
   }
 
-  if (error) return <div className="error-box">{error}</div>;
-  if (!pix) return <div className="empty-state" aria-live="polite">Gerando QR Code do PIX...</div>;
+  if (failed) {
+    return (
+      <div className="pix-unavailable" role="alert">
+        <div>
+          <strong>Não conseguimos gerar o QR Code do PIX agora.</strong>
+          <span>O sistema de pagamentos não respondeu. Sua assinatura já está criada; tente de novo ou pague direto pela página segura da cobrança.</span>
+        </div>
+        <div className="pix-unavailable-actions">
+          <button className="secondary-button" onClick={() => setAttempt((value) => value + 1)} type="button">Tentar de novo</button>
+          {invoiceUrl ? (
+            <a className="primary-button" href={invoiceUrl} rel="noreferrer" target="_blank">
+              Pagar pela página da cobrança
+              <ExternalLink size={14} />
+            </a>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+  if (!pix) return <div className="empty-state" aria-live="polite"><Loader2 className="spin" size={16} /> Gerando QR Code do PIX...</div>;
 
   return (
     <div className="pix-payment">
@@ -298,6 +320,7 @@ function PixPayment({ token }: { token: string | null }) {
           {copied ? <CheckCircle2 size={15} /> : <Copy size={15} />}
           {copied ? "Código copiado" : "Copiar código"}
         </button>
+        {error ? <small className="field-hint error">{error}</small> : null}
         {pix.expiration_date ? (
           <small>Válido até {new Date(pix.expiration_date.replace(" ", "T")).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}.</small>
         ) : null}

@@ -180,7 +180,7 @@ export function DemandModal({
         <header className="modal-header">
           <div>
             <span className="eyebrow">Busca de imóvel</span>
-            <h2>{demand ? "Editar demanda" : "Cadastrar demanda"}</h2>
+            <h2>{demand ? "Editar demanda" : "Nova demanda"}</h2>
             <p>Revise os critérios. A consulta aos portais será iniciada separadamente.</p>
             <small className="required-fields-note">Campos marcados com * são obrigatórios.</small>
           </div>
@@ -346,7 +346,7 @@ export function DemandModal({
             type="button"
           >
             <Search size={16} />
-            {saving ? "Salvando..." : demand ? "Salvar alterações" : "Cadastrar demanda"}
+            {saving ? "Salvando..." : demand ? "Salvar alterações" : "Salvar demanda"}
           </button>
         </footer>
       </section>

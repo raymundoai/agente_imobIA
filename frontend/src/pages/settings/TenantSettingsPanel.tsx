@@ -6,18 +6,22 @@ import type {
   BusinessWeekday,
   Tenant,
   TenantSettings,
+  User,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { getTokenClaims } from "../../auth/tokenClaims";
+import {
+  type BusinessIdentity,
+  BusinessIdentityFields,
+  identityFromProfile,
+  identityToProfile,
+  validateIdentity,
+} from "../../components/BusinessIdentityFields";
 import { Card } from "../../components/Card";
-import { formatDocument } from "../../lib/format";
-import { isValidBrazilianDocument } from "../../lib/settingsValidation";
 
 type TenantProfileForm = {
   display_name: string;
-  legal_name: string;
-  document_type: "cpf" | "cnpj";
-  document_number: string;
+  identity: BusinessIdentity;
   business_hours: BusinessHours;
   regions: string;
 };
@@ -81,11 +85,10 @@ export function TenantSettingsPanel({
 }) {
   const { token } = useAuth();
   const claims = getTokenClaims(token);
+  const [personName, setPersonName] = useState("");
   const [form, setForm] = useState<TenantProfileForm>({
     display_name: "",
-    legal_name: "",
-    document_type: "cnpj",
-    document_number: "",
+    identity: identityFromProfile({}, ""),
     business_hours: defaultBusinessHours(),
     regions: "",
   });
@@ -97,18 +100,20 @@ export function TenantSettingsPanel({
   const dirty = initialForm !== null && JSON.stringify(form) !== JSON.stringify(initialForm);
 
   useEffect(() => {
+    request<User>("/users/me", {}, token).then((user) => setPersonName(user.name)).catch(() => undefined);
+  }, [token]);
+
+  useEffect(() => {
     const profile = tenant?.settings.profile ?? {};
     const nextForm: TenantProfileForm = {
       display_name: profile.display_name ?? tenant?.name ?? "",
-      legal_name: profile.legal_name ?? "",
-      document_type: profile.document_type ?? "cnpj",
-      document_number: formatDocument(profile.document_number ?? "", profile.document_type ?? "cnpj"),
+      identity: identityFromProfile(profile, profile.document_type === "cnpj" ? "" : personName),
       business_hours: normalizedBusinessHours(profile.business_hours),
       regions: profile.regions ?? "",
     };
     setForm(nextForm);
     setInitialForm(nextForm);
-  }, [tenant]);
+  }, [tenant, personName]);
 
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
 
@@ -141,10 +146,19 @@ export function TenantSettingsPanel({
     setMessage(null);
     try {
       const { voice_tone: _legacyVoiceTone, ...currentProfile } = tenant.settings.profile ?? {};
+      const {
+        legal_name: _name,
+        document_type: _type,
+        document_number: _number,
+        business_type: _business,
+        ...kept
+      } = currentProfile;
       const profile: NonNullable<TenantSettings["profile"]> = {
-        ...currentProfile,
-        ...form,
-        document_number: form.document_number.replace(/\D/g, ""),
+        ...kept,
+        display_name: form.display_name.trim(),
+        business_hours: form.business_hours,
+        regions: form.regions,
+        ...identityToProfile(form.identity),
       };
       const updated = await request<Tenant>(
         `/tenants/${claims.tenantId}/settings/profile`,
@@ -167,38 +181,23 @@ export function TenantSettingsPanel({
       <div className="settings-panel-header">
         <div>
           <h2>Empresa</h2>
-          <p>Dados institucionais e horários usados pela equipe e pela IA.</p>
+          <p>Quem você é, onde atua e quando atende. O agente de IA usa tudo isso nas conversas.</p>
         </div>
-        <span className="settings-status">{canManage ? "Empresa" : "Somente leitura"}</span>
+        {canManage ? null : <span className="settings-status">Somente leitura</span>}
       </div>
 
       <fieldset className="settings-form-fieldset" disabled={!canManage}>
-      <div className="form-grid">
+      <BusinessIdentityFields onChange={(identity) => setForm((current) => ({ ...current, identity }))} value={form.identity} />
+      <div className="form-grid settings-identity-extra">
         <label>
-          Nome exibido
-          <input value={form.display_name} onChange={(event) => setForm((current) => ({ ...current, display_name: event.target.value }))} placeholder="Eugênia Imóveis" />
+          {form.identity.business_type === "broker" ? "Nome profissional" : "Nome da imobiliária"}
+          <input value={form.display_name} onChange={(event) => setForm((current) => ({ ...current, display_name: event.target.value }))} placeholder="Como aparece para os leads e a equipe" />
+          <small className="field-hint">O agente de IA se apresenta em nome dele.</small>
         </label>
         <label>
-          Nome completo / Razão social
-          <input value={form.legal_name} onChange={(event) => setForm((current) => ({ ...current, legal_name: event.target.value }))} placeholder="Eugênia Imóveis Ltda." />
-        </label>
-        <label>
-          Tipo de documento
-          <select value={form.document_type} onChange={(event) => {
-            const documentType = event.target.value as TenantProfileForm["document_type"];
-            setForm((current) => ({ ...current, document_type: documentType, document_number: formatDocument(current.document_number, documentType) }));
-          }}>
-            <option value="cnpj">CNPJ</option>
-            <option value="cpf">CPF</option>
-          </select>
-        </label>
-        <label>
-          {form.document_type === "cnpj" ? "CNPJ" : "CPF"}
-          <input inputMode="numeric" value={form.document_number} onChange={(event) => setForm((current) => ({ ...current, document_number: formatDocument(event.target.value, current.document_type) }))} placeholder={form.document_type === "cnpj" ? "00.000.000/0000-00" : "000.000.000-00"} />
-        </label>
-        <label className="form-span-2">
-          Regiões atendidas
+          Regiões de atuação
           <input value={form.regions} onChange={(event) => setForm((current) => ({ ...current, regions: event.target.value }))} placeholder="Novo Hamburgo, São Leopoldo, Campo Bom" />
+          <small className="field-hint">Texto livre usado pelo agente para entender onde vocês atuam.</small>
         </label>
       </div>
 
@@ -244,14 +243,9 @@ export function TenantSettingsPanel({
 }
 
 function validateProfile(form: TenantProfileForm): string | null {
-  const documentDigits = form.document_number.replace(/\D/g, "");
-  const expectedDigits = form.document_type === "cnpj" ? 14 : 11;
-  if (documentDigits && documentDigits.length !== expectedDigits) {
-    return `Informe um ${form.document_type.toUpperCase()} completo.`;
-  }
-  if (documentDigits && !isValidBrazilianDocument(documentDigits, form.document_type)) {
-    return `Informe um ${form.document_type.toUpperCase()} válido.`;
-  }
+  if (form.display_name.trim().length < 2) return "Informe o nome exibido.";
+  const identityError = validateIdentity(form.identity);
+  if (identityError) return identityError;
   for (const { key, label } of weekdays) {
     const schedule = form.business_hours.days[key];
     if (!schedule.enabled) continue;

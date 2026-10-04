@@ -929,14 +929,20 @@ export function PropertiesPage() {
     <section className="page-stack properties-page">
       {!isDetailOpen ? (
         <>
-          <div className="property-toolbar">
-            <h2>Carteira de imóveis</h2>
-            <div className="toolbar-actions">
-              <button className="button-outline" onClick={openCreateProperty} type="button">
+          <div className="page-toolbar">
+            <p>
+              {listLoading
+                ? "Carregando a carteira…"
+                : items.length === 1
+                  ? "1 imóvel na carteira"
+                  : `${items.length} imóveis na carteira`}
+            </p>
+            {items.length > 0 ? (
+              <button className="primary-button" onClick={openCreateProperty} type="button">
                 <Plus size={15} />
-                Cadastrar Imóvel
+                Cadastrar imóvel
               </button>
-            </div>
+            ) : null}
           </div>
 
           {listError ? <div className="error-box">{listError}</div> : null}
@@ -954,8 +960,13 @@ export function PropertiesPage() {
               ))}
             </div>
           ) : (
-            <div className="empty-state large">
-              Nenhum imóvel cadastrado.
+            <div className="empty-guide">
+              <h2>Sua carteira está vazia</h2>
+              <p>Cadastre o primeiro imóvel com fotos e preço. Ele passa a ser oferecido pelo agente de IA aos leads compatíveis.</p>
+              <button className="primary-button" onClick={openCreateProperty} type="button">
+                <Plus size={15} />
+                Cadastrar imóvel
+              </button>
             </div>
           )}
         </>

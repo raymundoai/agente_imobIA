@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   Archive,
   ArchiveRestore,
   Building2,
@@ -27,7 +28,7 @@ import { getTokenClaims } from "../auth/tokenClaims";
 import { Badge } from "../components/Badge";
 import { DemandModal } from "../components/DemandModal";
 import { mergeUserContactTags, TagInput, userContactTags } from "../components/TagInput";
-import { formatCurrency, labelOrDash } from "../lib/format";
+import { formatCurrency, formatPhone, labelOrDash } from "../lib/format";
 import {
   propertyShareFilename,
   propertyShareMimeType,
@@ -45,6 +46,8 @@ export function ConversationsPage() {
   const [contactEditorOpen, setContactEditorOpen] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
+  // On narrow screens the list and the open chat are separate screens.
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [conversationScope, setConversationScope] = useState<"direct" | "groups" | "archived">("direct");
   const [draft, setDraft] = useState("");
   const [propertyShareOpen, setPropertyShareOpen] = useState(false);
@@ -623,7 +626,7 @@ export function ConversationsPage() {
 
   return (
     <section className="page-stack chat-page">
-      <div className="inbox-layout">
+      <div className={mobileChatOpen ? "inbox-layout mobile-chat-open" : "inbox-layout"}>
         <aside className="inbox-list">
           <label className="inbox-search">
             <Search size={16} />
@@ -684,7 +687,10 @@ export function ConversationsPage() {
                 <button
                   className={isActive ? "conversation-item active" : "conversation-item"}
                   key={item.id}
-                  onClick={() => setSelectedId(item.id)}
+                  onClick={() => {
+                    setSelectedId(item.id);
+                    setMobileChatOpen(true);
+                  }}
                   type="button"
                 >
                   <span className="conversation-avatar">
@@ -709,13 +715,32 @@ export function ConversationsPage() {
                 </button>
               );
             })}
-            {!listLoading && visibleItems.length === 0 ? <div className="empty-state">Nenhuma conversa encontrada.</div> : null}
+            {!listLoading && visibleItems.length === 0 ? (
+              <p className="list-empty">
+                {query.trim()
+                  ? `Nada encontrado para “${query.trim()}”.`
+                  : conversationScope === "groups"
+                    ? "Nenhuma conversa em grupo."
+                    : conversationScope === "archived"
+                      ? "Nenhuma conversa arquivada."
+                      : "Nenhuma conversa ainda."}
+              </p>
+            ) : null}
           </div>
         </aside>
 
+        {selected ? (
         <article className="chat-panel">
           <div className="chat-panel-header">
             <div className="chat-contact-heading">
+              <button
+                aria-label="Voltar para a lista de conversas"
+                className="icon-button chat-back-button"
+                onClick={() => setMobileChatOpen(false)}
+                type="button"
+              >
+                <ArrowLeft size={18} />
+              </button>
               <span className="conversation-avatar chat-contact-avatar">
                 {selected?.is_group ? (
                   <UsersRound size={19} />
@@ -744,7 +769,7 @@ export function ConversationsPage() {
                 </div>
               <p>
                 {selected?.is_group ? <UsersRound size={14} /> : <Phone size={14} />}
-                {selected?.is_group ? "Grupo do WhatsApp" : selected?.phone ?? "Sem telefone"}
+                {selected?.is_group ? "Grupo do WhatsApp" : selected?.phone ? formatPhone(selected.phone) : "Sem telefone"}
                 <span>·</span>
                 {selected?.channel === "telegram" ? "Telegram" : "WhatsApp"}
                 <Clock size={14} />
@@ -776,7 +801,7 @@ export function ConversationsPage() {
                 type="button"
               >
                 <Plus size={15} />
-                Cadastrar demanda
+                Nova demanda
               </button>
             </div>
           </div>
@@ -926,6 +951,32 @@ export function ConversationsPage() {
             </button>
           </div>
         </article>
+        ) : (
+          <article className="chat-panel chat-panel-empty">
+            <div className="empty-guide">
+              <h2>{query.trim() ? "Nenhuma conversa encontrada" : conversationScope === "archived" ? "Nenhuma conversa arquivada" : "As conversas aparecem aqui"}</h2>
+              <p>
+                {query.trim()
+                  ? "Revise a busca ou limpe o campo para ver todas as conversas."
+                  : conversationScope === "archived"
+                    ? "Conversas arquivadas saem da lista principal e ficam guardadas nesta aba."
+                    : "Quando um cliente mandar mensagem no WhatsApp ou no Telegram conectados, a conversa abre nesta tela e o agente de IA começa o atendimento."}
+              </p>
+              {!query.trim() && conversationScope !== "archived" ? (
+                <button
+                  className="secondary-button"
+                  onClick={() => {
+                    window.history.pushState({}, "", "/configuracoes?aba=channels");
+                    window.dispatchEvent(new PopStateEvent("popstate"));
+                  }}
+                  type="button"
+                >
+                  Ver canais conectados
+                </button>
+              ) : null}
+            </div>
+          </article>
+        )}
       </div>
       <DemandModal
         conversationId={selected?.id}

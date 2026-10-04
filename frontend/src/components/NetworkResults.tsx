@@ -4,6 +4,8 @@ import { ApiError, request, requestBlob } from "../api/client";
 import type { NetworkListing, Partnership } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { formatCurrency } from "../lib/format";
+import { propertyKindPhrase } from "../lib/propertyLabels";
+import { PropertyFacts } from "./PropertyCard";
 
 function openSettingsTab(tab: string) {
   window.history.pushState({}, "", `/configuracoes?aba=${tab}`);
@@ -142,21 +144,20 @@ function NetworkResultCard({
 
   return (
     <article className="panel-card external-result-card network-result-card">
-      {imageUrl ? <img alt={item.title} loading="lazy" src={imageUrl} /> : <div className="external-result-placeholder"><Home size={24} /></div>}
+      <div className="property-media network-media">
+        {imageUrl ? <img alt="" loading="lazy" src={imageUrl} /> : <Home aria-hidden size={26} />}
+        <span className={item.price ? "property-price" : "property-price missing"}>
+          {item.price ? formatCurrency(item.price) : "Sem preço"}
+        </span>
+      </div>
       <div className="external-result-content">
-        <div className="external-result-source">
-          <span>{item.agency_name}</span>
-          <small>{item.partner_commission_percent}% da comissão para o parceiro</small>
-        </div>
+        <p className="property-kind">{propertyKindPhrase(item.property_type, item.purpose)}</p>
         <h3>{item.title}</h3>
-        <strong className="network-result-price">{formatCurrency(item.price)}</strong>
-        <p>{[item.neighborhood, item.city].filter(Boolean).join(" · ")}</p>
-        <div className="external-result-features">
-          {item.area ? <span>{item.area} m²</span> : null}
-          {item.bedrooms != null ? <span>{item.bedrooms} quartos</span> : null}
-          {item.suites ? <span>{item.suites} suítes</span> : null}
-          {item.parking_spaces != null ? <span>{item.parking_spaces} vagas</span> : null}
-        </div>
+        <p>{[item.neighborhood, item.city].filter(Boolean).join(", ")}</p>
+        <PropertyFacts property={item} />
+        <p className="network-agency">
+          <strong>{item.agency_name}</strong> oferece {item.partner_commission_percent}% da comissão ao parceiro
+        </p>
         <div className="external-result-scores">
           <span>{item.fit_score}% compatível</span>
         </div>
@@ -169,10 +170,10 @@ function NetworkResultCard({
 
         {status === "accepted" ? (
           <button className="network-status accepted" onClick={() => openSettingsTab("network")} type="button">
-            <Check size={14} /> Parceria aceita · ver contato
+            <Check size={14} /> Parceria aceita: ver contato
           </button>
         ) : status === "pending" ? (
-          <span className="network-status">Pedido enviado · aguardando resposta</span>
+          <span className="network-status">Pedido enviado, aguardando resposta</span>
         ) : composing ? (
           <div className="network-request">
             <textarea

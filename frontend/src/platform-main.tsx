@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { applyTheme, getActiveTheme } from "./lib/theme";
 import { PlatformApp } from "./platform/PlatformApp";
 import "./styles.css";
+import "./theme.css";
 
 applyTheme(getActiveTheme());
 

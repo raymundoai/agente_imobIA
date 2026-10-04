@@ -1,33 +1,31 @@
-import { useState } from "react";
-import { ArrowRight, Bot, Building2, CheckCircle2, Clock, Hexagon, MessageCircle, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Bot, Building2, CheckCircle2, Clock, MessageCircle, Sparkles } from "lucide-react";
 import { request } from "../api/client";
-import type { BusinessHours, Tenant, TenantSettings } from "../api/types";
-import { formatDocument } from "../lib/format";
-import { isValidBrazilianDocument } from "../lib/settingsValidation";
+import type { BusinessHours, Tenant, TenantSettings, User } from "../api/types";
+import {
+  type BusinessIdentity,
+  BusinessIdentityFields,
+  identityFromProfile,
+  identityToProfile,
+  validateIdentity,
+} from "../components/BusinessIdentityFields";
+import { useWhatsappConnection, WhatsappConnectModal } from "../components/WhatsappConnect";
+import { DEFAULT_AGENT_NAME, EMOJI_LEVELS, VOICE_TONES } from "../lib/agentOptions";
+import { formatPhone } from "../lib/format";
 import { defaultBusinessHours } from "./settings/TenantSettingsPanel";
+import { BrandMark } from "../components/BrandMark";
 
 type Step = "company" | "hours" | "agent" | "channels" | "done";
 type Profile = NonNullable<TenantSettings["profile"]>;
 
 const steps: Array<{ key: Step; label: string; icon: typeof Building2 }> = [
-  { key: "company", label: "Empresa", icon: Building2 },
+  { key: "company", label: "Perfil", icon: Building2 },
   { key: "hours", label: "Atendimento", icon: Clock },
   { key: "agent", label: "Agente de IA", icon: Bot },
-  { key: "channels", label: "Canais", icon: MessageCircle },
+  { key: "channels", label: "WhatsApp", icon: MessageCircle },
   { key: "done", label: "Pronto", icon: Sparkles },
 ];
 const weekdayKeys = ["monday", "tuesday", "wednesday", "thursday", "friday"] as const;
-const voiceTones = [
-  { value: "friendly", label: "Amigável" },
-  { value: "professional", label: "Profissional" },
-  { value: "consultative", label: "Consultivo" },
-  { value: "informal", label: "Descontraído" },
-];
-const emojiOptions = [
-  { value: "low", label: "Poucos emojis" },
-  { value: "none", label: "Sem emojis" },
-  { value: "moderate", label: "Emojis moderados" },
-];
 
 export function OnboardingWizard({
   tenant: initialTenant,
@@ -45,12 +43,16 @@ export function OnboardingWizard({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const savedProfile = initialTenant.settings.profile ?? {};
-  const [company, setCompany] = useState({
-    display_name: savedProfile.display_name ?? initialTenant.name,
-    legal_name: savedProfile.legal_name ?? "",
-    document_type: savedProfile.document_type ?? ("cnpj" as "cpf" | "cnpj"),
-    document_number: formatDocument(savedProfile.document_number ?? "", savedProfile.document_type ?? "cnpj"),
-  });
+  const businessName = savedProfile.display_name ?? initialTenant.name;
+  const [identity, setIdentity] = useState<BusinessIdentity>(() => identityFromProfile(savedProfile, ""));
+  const whatsapp = useWhatsappConnection(token);
+
+  // The signup already asked for the person's name; use it as the CPF holder by default.
+  useEffect(() => {
+    request<User>("/users/me", {}, token)
+      .then((user) => setIdentity((current) => (current.cpf_name ? current : { ...current, cpf_name: user.name })))
+      .catch(() => undefined);
+  }, [token]);
   const savedHours = typeof savedProfile.business_hours === "object" ? savedProfile.business_hours : null;
   const [hours, setHours] = useState({
     start: savedHours?.days.monday.start ?? "08:30",
@@ -62,7 +64,7 @@ export function OnboardingWizard({
   });
   const savedAgent = ((initialTenant.settings.agents ?? {}) as { leads?: Record<string, string> }).leads ?? {};
   const [agent, setAgent] = useState({
-    name: savedAgent.name ?? "Agente de Leads",
+    name: savedAgent.name && savedAgent.name !== DEFAULT_AGENT_NAME ? savedAgent.name : "",
     voice_tone: savedAgent.voice_tone ?? "friendly",
     emoji_usage: savedAgent.emoji_usage ?? "low",
   });
@@ -97,19 +99,10 @@ export function OnboardingWizard({
   }
 
   function saveCompany() {
-    const digits = company.document_number.replace(/\D/g, "");
-    if (company.display_name.trim().length < 2) return setError("Informe o nome da imobiliária.");
-    if (digits && !isValidBrazilianDocument(digits, company.document_type)) {
-      return setError(`Informe um ${company.document_type.toUpperCase()} válido ou deixe em branco.`);
-    }
-    void run(() =>
-      saveProfile({
-        display_name: company.display_name.trim(),
-        legal_name: company.legal_name.trim() || undefined,
-        document_type: digits ? company.document_type : undefined,
-        document_number: digits || undefined,
-      }),
-    );
+    if (!identity.business_type) return setError("Escolha se você é corretor autônomo ou imobiliária.");
+    const invalid = validateIdentity(identity);
+    if (invalid) return setError(invalid);
+    void run(() => saveProfile(identityToProfile(identity)));
   }
 
   function saveHours() {
@@ -131,13 +124,12 @@ export function OnboardingWizard({
   }
 
   function saveAgent() {
-    if (agent.name.trim().length < 2) return setError("Dê um nome ao agente.");
     void run(async () => {
       const updated = await request<Tenant>(
         `/tenants/${tenant.id}/settings/agents`,
         {
           method: "PATCH",
-          body: JSON.stringify({ agents: { leads: { ...savedAgent, ...agent, name: agent.name.trim() } } }),
+          body: JSON.stringify({ agents: { leads: { ...savedAgent, ...agent, name: agent.name.trim() || DEFAULT_AGENT_NAME } } }),
         },
         token,
       );
@@ -167,7 +159,7 @@ export function OnboardingWizard({
     <main className="onboarding-page">
       <header className="onboarding-header">
         <div className="onboarding-brand">
-          <span className="login-logo"><Hexagon size={20} strokeWidth={2.4} /></span>
+          <span className="brand-icon"><BrandMark /></span>
           <strong>ImmobIA</strong>
         </div>
         {step !== "done" ? (
@@ -190,42 +182,11 @@ export function OnboardingWizard({
         })}
       </ol>
 
-      <section className="onboarding-card">
+      <section className="onboarding-card" key={step}>
         {step === "company" ? (
           <>
-            <StepTitle title="Conte sobre a sua imobiliária" text="Esses dados aparecem para a equipe e são usados na cobrança. CPF ou CNPJ pode ficar para depois." />
-            <div className="form-grid">
-              <label>
-                Nome da imobiliária
-                <input value={company.display_name} onChange={(event) => setCompany({ ...company, display_name: event.target.value })} />
-              </label>
-              <label>
-                Razão social
-                <input placeholder="Opcional" value={company.legal_name} onChange={(event) => setCompany({ ...company, legal_name: event.target.value })} />
-              </label>
-              <label>
-                Documento
-                <select
-                  value={company.document_type}
-                  onChange={(event) => {
-                    const type = event.target.value as "cpf" | "cnpj";
-                    setCompany({ ...company, document_type: type, document_number: formatDocument(company.document_number, type) });
-                  }}
-                >
-                  <option value="cnpj">CNPJ</option>
-                  <option value="cpf">CPF</option>
-                </select>
-              </label>
-              <label>
-                Número
-                <input
-                  inputMode="numeric"
-                  placeholder="Opcional"
-                  value={company.document_number}
-                  onChange={(event) => setCompany({ ...company, document_number: formatDocument(event.target.value, company.document_type) })}
-                />
-              </label>
-            </div>
+            <StepTitle title="Como você trabalha?" text="Isso ajuda o agente a se apresentar do jeito certo. O documento é usado na cobrança e pode ficar para depois." />
+            <BusinessIdentityFields onChange={setIdentity} value={identity} />
           </>
         ) : null}
 
@@ -259,51 +220,72 @@ export function OnboardingWizard({
               </div>
             ) : null}
             <label>
-              Regiões de atuação
+              <span>Regiões de atuação <span className="optional">(opcional)</span></span>
               <textarea
                 placeholder="Ex.: Zona Sul de Porto Alegre, Canoas, Novo Hamburgo"
                 rows={3}
                 value={hours.regions}
                 onChange={(event) => setHours({ ...hours, regions: event.target.value })}
               />
+              <small className="field-hint">Escreva do seu jeito. O agente usa isso para entender onde você atua e avisar o lead quando ele procura fora dessas regiões.</small>
             </label>
           </>
         ) : null}
 
         {step === "agent" ? (
           <>
-            <StepTitle title="Personalize o agente de IA" text="É ele quem recebe os leads no WhatsApp e no Telegram. Regras de transferência e restrições ficam em Configurações > Configuração da IA." />
+            <StepTitle title="Personalize o agente de IA" text="É ele quem responde os leads no WhatsApp. Regras de transferência e o que ele deve saber ficam em Configurações > Agente de IA." />
             <div className="form-grid">
               <label>
-                Nome do agente
-                <input value={agent.name} onChange={(event) => setAgent({ ...agent, name: event.target.value })} />
+                <span>Nome do agente <span className="optional">(opcional)</span></span>
+                <input placeholder="Ex.: Sofia" value={agent.name} onChange={(event) => setAgent({ ...agent, name: event.target.value })} />
               </label>
               <label>
                 Tom de voz
                 <select value={agent.voice_tone} onChange={(event) => setAgent({ ...agent, voice_tone: event.target.value })}>
-                  {voiceTones.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  {VOICE_TONES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </label>
               <label>
-                Uso de emojis
+                Quantidade de emojis
                 <select value={agent.emoji_usage} onChange={(event) => setAgent({ ...agent, emoji_usage: event.target.value })}>
-                  {emojiOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  {EMOJI_LEVELS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </label>
             </div>
+            <AgentPreview
+              businessName={businessName}
+              businessType={identity.business_type}
+              emoji={agent.emoji_usage}
+              name={agent.name.trim()}
+            />
           </>
         ) : null}
 
         {step === "channels" ? (
           <>
-            <StepTitle title="Conecte seus canais" text="Para o agente atender, conecte o WhatsApp da imobiliária lendo um QR Code. Leva cerca de um minuto." />
-            <div className="onboarding-choice">
-              <button className="primary-button" disabled={saving} onClick={() => void finish("completed", "/configuracoes?aba=channels")} type="button">
-                <MessageCircle size={16} />
-                Conectar WhatsApp agora
-              </button>
-              <p>Você também pode conectar o Telegram na mesma tela.</p>
-            </div>
+            <StepTitle
+              title={whatsapp.connected ? "WhatsApp conectado" : "Conecte o WhatsApp"}
+              text={
+                whatsapp.connected
+                  ? "Pronto: as mensagens desse número já chegam ao agente."
+                  : "O agente atende pelo WhatsApp da imobiliária. Basta ler um QR Code com o celular; leva cerca de um minuto."
+              }
+            />
+            {whatsapp.connected ? (
+              <div className="onboarding-connected">
+                <CheckCircle2 size={22} />
+                <strong>{formatPhone(whatsapp.connection?.connected_phone) || whatsapp.connection?.connected_name || "Número conectado"}</strong>
+              </div>
+            ) : (
+              <div className="onboarding-choice">
+                <button className="primary-button" disabled={saving} onClick={() => void whatsapp.connect()} type="button">
+                  <MessageCircle size={16} />
+                  Mostrar QR Code
+                </button>
+              </div>
+            )}
+            {whatsapp.modalOpen ? <WhatsappConnectModal whatsapp={whatsapp} /> : null}
           </>
         ) : null}
 
@@ -320,7 +302,6 @@ export function OnboardingWizard({
             <div className="onboarding-choice">
               <button className="primary-button" disabled={saving} onClick={() => void finish("completed")} type="button">
                 Ir para o painel
-                <ArrowRight size={16} />
               </button>
               <button className="secondary-button" disabled={saving} onClick={() => void finish("completed", "/configuracoes?aba=billing")} type="button">
                 Ver planos
@@ -341,18 +322,47 @@ export function OnboardingWizard({
               type="button"
             >
               {saving ? "Salvando..." : "Salvar e continuar"}
-              {!saving ? <ArrowRight size={16} /> : null}
             </button>
           </footer>
         ) : null}
         {step === "channels" ? (
           <footer className="onboarding-actions">
             <span />
-            <button className="link-button" disabled={saving} onClick={next} type="button">Conectar depois</button>
+            {whatsapp.connected ? (
+              <button className="primary-button" onClick={next} type="button">Continuar</button>
+            ) : (
+              <button className="link-button" disabled={saving} onClick={next} type="button">Conectar depois</button>
+            )}
           </footer>
         ) : null}
       </section>
     </main>
+  );
+}
+
+const EMOJI_SAMPLE: Record<string, string> = { none: "", low: " 🙂", moderate: " 😊🏡" };
+
+/** What the lead sees first, so the name and tone choices are concrete. */
+function AgentPreview({
+  name,
+  businessName,
+  businessType,
+  emoji,
+}: {
+  name: string;
+  businessName: string;
+  businessType: "broker" | "agency" | null;
+  emoji: string;
+}) {
+  const owner = businessType === "broker" ? `do corretor ${businessName}` : `da ${businessName}`;
+  const intro = name ? `Oi! Eu sou ${name}, assistente virtual ${owner}.` : `Oi! Sou o assistente virtual ${owner}.`;
+  return (
+    <div className="agent-preview" aria-label="Prévia da primeira mensagem">
+      <span className="agent-preview-label">Assim o agente se apresenta</span>
+      <p className="agent-preview-bubble">
+        {intro} Está procurando imóvel para comprar ou alugar?{EMOJI_SAMPLE[emoji] ?? ""}
+      </p>
+    </div>
   );
 }
 

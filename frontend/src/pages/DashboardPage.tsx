@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   Building2,
+  Check,
   CheckCircle2,
   MessageSquare,
   SearchCheck,
@@ -10,10 +11,10 @@ import {
 import { request } from "../api/client";
 import type { ContactKind, ConversationTimeline, DashboardStats } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
-import { Badge } from "../components/Badge";
 import { Card } from "../components/Card";
 import { formatNumber } from "../lib/format";
-import { loadOperationalAlerts } from "../lib/loadOperationalAlerts";
+import { openAppLink } from "../lib/appNavigation";
+import { loadOperationalAlerts, type OperationalAlert } from "../lib/loadOperationalAlerts";
 
 const contactKindOptions: Array<{ value: ContactKind | "all"; label: string }> = [
   { value: "all", label: "Todos" },
@@ -30,7 +31,7 @@ export function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [alerts, setAlerts] = useState<string[]>([]);
+  const [alerts, setAlerts] = useState<OperationalAlert[]>([]);
   const [contactKind, setContactKind] = useState<ContactKind | "all">("all");
   const [period, setPeriod] = useState<Period>(30);
   const [timeline, setTimeline] = useState<ConversationTimeline | null>(null);
@@ -72,19 +73,36 @@ export function DashboardPage() {
 
   return (
     <section className="page-stack">
-      {alerts.length ? (
-        <Card className="health-card operational-warning" role="alert">
-          <AlertTriangle size={18} />
-          <div>{alerts.map((alert) => <p key={alert}>{alert}</p>)}</div>
-          <Badge variant="muted">Atenção</Badge>
-        </Card>
-      ) : (
-        <Card className="health-card">
-          <CheckCircle2 size={18} />
-          <span>Nenhum alerta foi encontrado nas verificações realizadas.</span>
-          <Badge variant="success">Sem alertas detectados</Badge>
-        </Card>
-      )}
+      {(() => {
+        const steps = stats ? firstSteps(stats, alerts) : [];
+        const showSteps = steps.some((step) => !step.done);
+        // While the checklist is on screen it already asks for WhatsApp; no need to say it twice.
+        const visibleAlerts = showSteps ? alerts.filter((alert) => alert.key !== "whatsapp") : alerts;
+        return (
+          <>
+            {showSteps ? <FirstSteps steps={steps} /> : null}
+            {visibleAlerts.length ? (
+              <Card className="health-card operational-warning" role="alert">
+                <AlertTriangle size={18} />
+                <ul className="alert-list">
+                  {visibleAlerts.map((alert) => (
+                    <li key={alert.key}>
+                      <span>{alert.message}</span>
+                      {alert.action ? (
+                        <button className="link-button" onClick={() => openAppLink(alert.action!.href)} type="button">
+                          {alert.action.label}
+                        </button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            ) : !showSteps ? (
+              <p className="health-ok"><CheckCircle2 size={16} /> Tudo funcionando: nenhum alerta nas verificações.</p>
+            ) : null}
+          </>
+        );
+      })()}
 
       <div className="metric-grid">
         <article className="metric-card">
@@ -141,6 +159,76 @@ export function DashboardPage() {
         ) : null}
       </Card>
     </section>
+  );
+}
+
+type Step = { key: string; label: string; detail: string; done: boolean; href: string; action: string };
+
+function firstSteps(stats: DashboardStats, alerts: OperationalAlert[]): Step[] {
+  const whatsappOk = !alerts.some((alert) => alert.key === "whatsapp" || alert.key === "whatsapp-unknown");
+  return [
+    {
+      key: "whatsapp",
+      label: "Conectar o WhatsApp",
+      detail: "É por ele que os leads falam com o agente.",
+      done: whatsappOk,
+      href: "/configuracoes?aba=channels",
+      action: "Conectar",
+    },
+    {
+      key: "properties",
+      label: "Cadastrar o primeiro imóvel",
+      detail: "O agente só oferece o que está na carteira.",
+      done: stats.properties > 0,
+      href: "/imoveis",
+      action: "Cadastrar",
+    },
+    {
+      key: "conversation",
+      label: "Receber a primeira conversa",
+      detail: "Mande uma mensagem de teste para o número conectado.",
+      done: stats.conversations > 0,
+      href: "/conversas",
+      action: "Abrir conversas",
+    },
+  ];
+}
+
+function FirstSteps({ steps }: { steps: Step[] }) {
+  const done = steps.filter((step) => step.done).length;
+  const next = steps.find((step) => !step.done);
+  return (
+    <Card className="first-steps">
+      <div className="first-steps-header">
+        <div>
+          <h2>Primeiros passos</h2>
+          <p>{done} de {steps.length} concluídos. Falta pouco para o agente começar a atender.</p>
+        </div>
+        <div className="first-steps-progress" aria-hidden="true">
+          <span style={{ width: `${(done / steps.length) * 100}%` }} />
+        </div>
+      </div>
+      <ol className="first-steps-list">
+        {steps.map((step) => (
+          <li className={step.done ? "done" : step === next ? "next" : undefined} key={step.key}>
+            <span className="first-steps-mark">{step.done ? <Check size={14} /> : null}</span>
+            <div>
+              <strong>{step.label}</strong>
+              <small>{step.detail}</small>
+            </div>
+            {!step.done ? (
+              <button
+                className={step === next ? "primary-button" : "secondary-button"}
+                onClick={() => openAppLink(step.href)}
+                type="button"
+              >
+                {step.action}
+              </button>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </Card>
   );
 }
 

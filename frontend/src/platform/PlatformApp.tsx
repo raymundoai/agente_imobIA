@@ -13,9 +13,12 @@ import {
   Users,
 } from "lucide-react";
 import { request } from "../api/client";
+import { AuthLayout } from "../components/AuthLayout";
 import { Card } from "../components/Card";
 import { MetricCard } from "../components/MetricCard";
 import { runWithLoading } from "../lib/asyncState";
+import { AgentPromptSettings, TenantAgentInstructions } from "./AgentPromptSettings";
+import { BrandMark } from "../components/BrandMark";
 
 type Dashboard = {
   total_clients: number;
@@ -123,6 +126,7 @@ const storageKey = "immobia.platform.auth.v1";
 const platformTabs = [
   { key: "overview", label: "Visão geral", icon: LayoutDashboard },
   { key: "clients", label: "Clientes", icon: Building2 },
+  { key: "agent", label: "Agente de IA", icon: Bot },
   { key: "settings", label: "Configurações", icon: Cable },
 ] as const;
 type PlatformTab = (typeof platformTabs)[number]["key"];
@@ -240,13 +244,11 @@ export function PlatformApp() {
 
   return (
     <main className="platform-page page-stack">
-      <header className="page-header platform-header">
-        <div>
-          <span className="eyebrow">ImmobIA Platform</span>
-          <h1>Administração da plataforma</h1>
-          <p>
-            Clientes, operação, integrações e consumo em um ambiente separado.
-          </p>
+      <header className="platform-topbar">
+        <div className="auth-brand-mark platform-brand">
+          <span className="brand-icon"><BrandMark /></span>
+          <strong>ImmobIA</strong>
+          <span>Administração</span>
         </div>
         <button
           className="button-outline"
@@ -319,6 +321,7 @@ export function PlatformApp() {
         />
       </section>
       ) : null}
+      {!loading && activeTab === "agent" && token ? <AgentPromptSettings token={token} /> : null}
       {!loading && activeTab === "settings" ? (
         <section className="page-stack">
           <div>
@@ -337,6 +340,7 @@ export function PlatformApp() {
               <span>{dashboard?.total_clients ?? 0} cadastradas</span>
             </div>
             <button
+              className="secondary-button"
               onClick={() => {
                 setCreating(true);
                 setSelected(null);
@@ -387,7 +391,6 @@ export function PlatformApp() {
           {creating ? (
             <form className="page-stack" onSubmit={createTenant}>
               <div>
-                <span className="eyebrow">Onboarding</span>
                 <h2>Novo cliente</h2>
               </div>
               <div className="form-grid">
@@ -466,13 +469,12 @@ function PlatformLogin({
     }
   }
   return (
-    <main className="login-page">
-      <div className="login-heading">
-        <ShieldCheck size={36} />
-        <h1>ImmobIA Platform</h1>
-        <p>Acesso exclusivo da administração</p>
-      </div>
+    <AuthLayout signLine="administração da plataforma" signWord="ADMIN">
       <form className="login-card" onSubmit={submit}>
+        <div>
+          <h1>Entrar na administração</h1>
+          <p>Acesso exclusivo da equipe ImmobIA.</p>
+        </div>
         <label>
           Email
           <input
@@ -490,9 +492,9 @@ function PlatformLogin({
           />
         </label>
         {error ? <div className="error-box">{error}</div> : null}
-        <button type="submit">Entrar</button>
+        <button className="primary-button" type="submit">Entrar</button>
       </form>
-    </main>
+    </AuthLayout>
   );
 }
 
@@ -940,6 +942,7 @@ function TenantDetail({
           <button className="primary-button form-action" disabled={!asaasPlanCode || Boolean(openAsaasSubscription)} type="submit">Criar assinatura PIX</button>
         </form>
       </div>
+      <TenantAgentInstructions tenantId={tenant.id} token={token} />
       <div className="settings-subsection">
         <h3>Telemetria técnica interna</h3>
         <p>

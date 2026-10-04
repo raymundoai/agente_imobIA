@@ -2,7 +2,6 @@ import {
   BarChart3,
   ChevronsLeft,
   ChevronsRight,
-  Hexagon,
   Home,
   MessageSquare,
   Search,
@@ -12,14 +11,15 @@ import {
 import { useEffect, useState } from "react";
 import { appRoutes, type AppPage, shouldHandleClientNavigation } from "../lib/appNavigation";
 import { UserMenu } from "./UserMenu";
+import { BrandMark } from "./BrandMark";
 
 export const navigationItems = [
-  { key: "dashboard", label: "Visão geral", icon: BarChart3 },
-  { key: "conversations", label: "Conversas", icon: MessageSquare },
-  { key: "contacts", label: "Contatos", icon: UserRoundCog },
-  { key: "properties", label: "Imóveis", icon: Home },
-  { key: "propertySearch", label: "Buscador de imóveis", icon: Search },
-  { key: "settings", label: "Configurações", icon: Settings },
+  { key: "dashboard", label: "Visão geral", short: "Início", icon: BarChart3 },
+  { key: "conversations", label: "Conversas", short: "Conversas", icon: MessageSquare },
+  { key: "contacts", label: "Contatos", short: "Contatos", icon: UserRoundCog },
+  { key: "properties", label: "Imóveis", short: "Imóveis", icon: Home },
+  { key: "propertySearch", label: "Buscador de imóveis", short: "Buscador", icon: Search },
+  { key: "settings", label: "Configurações", short: "Ajustes", icon: Settings },
 ] as const;
 
 // Settings is reached from the account menu in the sidebar footer.
@@ -44,7 +44,7 @@ export function Sidebar({
     <aside className={collapsed ? "sidebar-v2 collapsed" : "sidebar-v2"}>
       <div className="brand-v2">
         <div className="brand-icon">
-          <Hexagon size={18} strokeWidth={2.4} />
+          <BrandMark />
         </div>
         <span>ImmobIA</span>
         <button
@@ -77,7 +77,8 @@ export function Sidebar({
               }}
             >
               <Icon size={17} />
-              <span>{item.label}</span>
+              <span className="nav-label">{item.label}</span>
+              <span aria-hidden="true" className="nav-short">{item.short}</span>
             </a>
           );
         })}

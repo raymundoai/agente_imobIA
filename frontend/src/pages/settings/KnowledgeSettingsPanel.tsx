@@ -139,7 +139,6 @@ export function KnowledgeSettingsPanel({ canManage }: { canManage: boolean }) {
           <h2>Base de conhecimento</h2>
           <p>Arquivos que ajudam a IA a responder sobre regras, bairros, imóveis e processos.</p>
         </div>
-        <Badge variant="muted">IA</Badge>
       </div>
 
       {!canManage ? (

@@ -1,7 +1,9 @@
 import { FormEvent, useState } from "react";
-import { ArrowLeft, ArrowRight, Building2, Hexagon } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2 } from "lucide-react";
 import type { CompanyOption } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { AuthLayout } from "../components/AuthLayout";
+import { PasswordInput } from "../components/PasswordInput";
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -30,19 +32,10 @@ export function LoginPage() {
   }
 
   return (
-    <main className="login-page">
-      <div className="login-glow" />
-      <div className="login-heading">
-        <div className="login-logo">
-          <Hexagon size={28} strokeWidth={2.4} />
-        </div>
-        <h1>ImmobIA</h1>
-        <p>O sistema operacional da sua imobiliária</p>
-      </div>
+    <AuthLayout>
       {companies ? (
         <section className="login-card" aria-labelledby="company-choice-title">
           <div>
-            <span className="eyebrow">ImmobIA</span>
             <h1 id="company-choice-title">Escolha a empresa</h1>
             <p>Seu email tem acesso a mais de uma imobiliária.</p>
           </div>
@@ -64,9 +57,8 @@ export function LoginPage() {
       ) : (
         <form className="login-card" onSubmit={submit}>
           <div>
-            <span className="eyebrow">ImmobIA</span>
-            <h1>Acesse o painel</h1>
-            <p>Informe seu email e senha.</p>
+            <h1>Entrar</h1>
+            <p>Use o email e a senha da sua conta.</p>
           </div>
           <label>
             Email
@@ -74,24 +66,17 @@ export function LoginPage() {
           </label>
           <label>
             Senha
-            <input
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              type="password"
-            />
+            <PasswordInput autoComplete="current-password" onChange={setPassword} value={password} />
           </label>
           {error ? <div className="error-box">{error}</div> : null}
           <button disabled={loading} type="submit">
             {loading ? "Entrando..." : "Entrar"}
-            {!loading ? <ArrowRight size={16} /> : null}
           </button>
           <a className="login-switch" href="/criar-conta">
             Ainda não tem conta? <strong>Criar conta grátis</strong>
           </a>
         </form>
       )}
-      <p className="login-footnote">Acesso restrito a corretores e gestores credenciados</p>
-    </main>
+    </AuthLayout>
   );
 }

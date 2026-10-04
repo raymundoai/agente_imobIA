@@ -55,3 +55,9 @@ export function subscribeToPageChanges(
   browser.addEventListener("popstate", sync);
   return () => browser.removeEventListener("popstate", sync);
 }
+
+/** Opens an in-app link such as "/configuracoes?aba=channels" without reloading the page. */
+export function openAppLink(href: string) {
+  window.history.pushState({}, "", href);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}

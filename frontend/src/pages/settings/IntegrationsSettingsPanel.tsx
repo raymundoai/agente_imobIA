@@ -1,181 +1,173 @@
-import { Cable, Database, Loader2, RefreshCw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Check, Database, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { request } from "../../api/client";
 import type { IntegrationSetupSummary } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { getTokenClaims } from "../../auth/tokenClaims";
-import { Badge } from "../../components/Badge";
 import { Card } from "../../components/Card";
+import { ConnectionCard, ConnectionSections } from "../../components/ConnectionCard";
+import { Modal } from "../../components/Modal";
 
-export function IntegrationsSettingsPanel({
-  onDirtyChange,
-}: {
-  onDirtyChange?: (dirty: boolean) => void;
-}) {
+const DESCRIPTIONS: Record<string, string> = {
+  kenlo: "Traga a carteira de imóveis e os leads do Kenlo para o ImmobIA.",
+  tecimob: "Sincronize os imóveis publicados no seu site Tecimob.",
+  jetimob: "Importe imóveis e contatos do CRM Jetimob.",
+  orulo: "Ofereça lançamentos de construtoras parceiras da Órulo.",
+};
+
+export function IntegrationsSettingsPanel() {
   const { token } = useAuth();
-  const claims = useMemo(() => getTokenClaims(token), [token]);
+  const role = getTokenClaims(token)?.role;
+  const canManage = role === "admin" || role === "gestor";
   const [items, setItems] = useState<IntegrationSetupSummary[]>([]);
-  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
-  const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [messageKind, setMessageKind] = useState<"success" | "error">("success");
-  const canManage = claims?.role === "admin" || claims?.role === "gestor";
-  const selected = items.find((item) => item.provider === selectedProvider) ?? null;
-  const dirty = Boolean(selected && notes !== (selected.notes ?? ""));
-
-  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
+  const [error, setError] = useState<string | null>(null);
+  const [openProvider, setOpenProvider] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
-    setLoading(true);
     request<IntegrationSetupSummary[]>("/integrations/setup", {}, token)
       .then((catalog) => {
         setItems(catalog);
-        setSelectedProvider((current) =>
-          current && catalog.some((item) => item.provider === current)
-            ? current
-            : catalog[0]?.provider ?? null,
-        );
-        setMessage(null);
+        setError(null);
       })
-      .catch((error) => {
-        setMessage(error instanceof Error ? error.message : "Falha ao carregar integrações.");
-        setMessageKind("error");
-      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Falha ao carregar integrações."))
       .finally(() => setLoading(false));
   }, [token]);
 
-  useEffect(() => {
-    setNotes(selected?.notes ?? "");
-  }, [selected?.notes, selected?.provider]);
+  const opened = items.find((item) => item.provider === openProvider) ?? null;
+  const card = (item: IntegrationSetupSummary) => (
+    <ConnectionCard
+      description={DESCRIPTIONS[item.provider] ?? item.target_resources.join(", ")}
+      icon={<Database size={20} />}
+      key={item.provider}
+      name={item.name}
+      onOpen={() => setOpenProvider(item.provider)}
+      state={item.status === "connected" ? "connected" : item.status === "not_configured" ? "soon" : "pending"}
+    />
+  );
 
-  function selectIntegration(item: IntegrationSetupSummary) {
-    if (dirty && !window.confirm("Descartar as observações ainda não registradas?")) return;
-    setSelectedProvider(item.provider);
-    setNotes(item.notes ?? "");
-    setMessage(null);
-  }
+  return (
+    <Card className="settings-panel-card">
+      <div className="settings-panel-header">
+        <div>
+          <h2>Integrações</h2>
+          <p>Conecte o ImmobIA aos sistemas que a imobiliária já usa, como CRMs e portais.</p>
+        </div>
+      </div>
+      {loading ? <div className="empty-state" aria-live="polite"><Loader2 className="spin-icon" size={18} /> Carregando integrações...</div> : null}
+      {error ? <div className="error-box" role="alert">{error}</div> : null}
+      {!loading && !error ? (
+        <ConnectionSections
+          connected={items.filter((item) => item.status === "connected").map(card)}
+          others={items.filter((item) => item.status !== "connected").map(card)}
+          othersTitle="Em breve"
+        />
+      ) : null}
+      {opened ? (
+        <IntegrationModal
+          canManage={canManage}
+          item={opened}
+          onClose={() => setOpenProvider(null)}
+          onSaved={(updated) => setItems((current) => current.map((item) => (item.provider === updated.provider ? updated : item)))}
+          token={token}
+        />
+      ) : null}
+    </Card>
+  );
+}
 
-  async function registerSetup() {
-    if (!selected || !token || !canManage) return;
+function IntegrationModal({
+  item,
+  canManage,
+  token,
+  onClose,
+  onSaved,
+}: {
+  item: IntegrationSetupSummary;
+  canManage: boolean;
+  token: string | null;
+  onClose: () => void;
+  onSaved: (item: IntegrationSetupSummary) => void;
+}) {
+  const registered = item.status !== "not_configured";
+  const [notes, setNotes] = useState(item.notes ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
+
+  async function register() {
     setSaving(true);
-    setMessage(null);
+    setError(null);
     try {
       const updated = await request<IntegrationSetupSummary>(
         "/integrations/setup",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            provider: selected.provider,
-            notes: notes.trim() || null,
-          }),
-        },
+        { method: "POST", body: JSON.stringify({ provider: item.provider, notes: notes.trim() || null }) },
         token,
       );
-      setItems((current) => current.map((item) =>
-        item.provider === updated.provider ? updated : item,
-      ));
-      setNotes(updated.notes ?? "");
-      setMessage(`${updated.name} registrada para configuração.`);
-      setMessageKind("success");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Falha ao registrar integração.");
-      setMessageKind("error");
+      onSaved(updated);
+      setJustSaved(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível registrar o interesse.");
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Card className="settings-panel-card integration-settings-stack">
-      <div className="settings-panel-header">
-        <div>
-          <h2>Integrações</h2>
-          <p>Conecte CRMs, ERPs e catálogos imobiliários sem misturá-los aos canais de atendimento.</p>
+    <Modal
+      description={DESCRIPTIONS[item.provider] ?? item.category}
+      footer={
+        justSaved ? (
+          <button className="primary-button" onClick={onClose} type="button">Concluir</button>
+        ) : (
+          <>
+            <button className="secondary-button" onClick={onClose} type="button">Fechar</button>
+            {canManage ? (
+              <button className="primary-button" disabled={saving} onClick={() => void register()} type="button">
+                {saving ? <><Loader2 className="spin-icon" size={15} /> Enviando...</> : registered ? "Atualizar pedido" : "Quero essa integração"}
+              </button>
+            ) : null}
+          </>
+        )
+      }
+      onClose={onClose}
+      title={item.name}
+    >
+      {justSaved ? (
+        <div className="qr-state qr-success">
+          <Check size={36} />
+          <strong>Pedido registrado</strong>
+          <span>Avisamos você assim que a integração com {item.name} estiver disponível.</span>
         </div>
-        <Badge variant="muted"><Cable size={13} /> CRMs e ferramentas</Badge>
-      </div>
-
-      <div className="settings-readonly-note">
-        Nesta etapa você registra a integração desejada e os recursos necessários. Credenciais
-        serão configuradas depois em um fluxo protegido e específico para cada fornecedor.
-      </div>
-
-      {loading ? <div className="empty-state" aria-live="polite"><Loader2 className="spin-icon" size={18} /> Carregando integrações...</div> : null}
-      {!loading && items.length === 0 ? <div className="empty-state">Nenhuma integração disponível.</div> : null}
-
-      {!loading && items.length ? (
-        <div className="integration-option-grid">
-          {items.map((item) => (
-            <button
-              aria-pressed={selectedProvider === item.provider}
-              className={`integration-option-card${selectedProvider === item.provider ? " active" : ""}`}
-              key={item.provider}
-              onClick={() => selectIntegration(item)}
-              type="button"
-            >
-              <div className="integration-option-top">
-                <span className="settings-icon"><Database size={18} /></span>
-                <Badge variant={statusVariant(item.status)}>{statusLabels[item.status]}</Badge>
-              </div>
-              <div>
-                <strong>{item.name}</strong>
-                <small>{item.category}</small>
-              </div>
-              <p>{item.target_resources.join(" · ")}</p>
-            </button>
-          ))}
+      ) : (
+        <div className="integration-modal-body">
+          <p className="integration-soon-note">
+            Esta integração ainda está em desenvolvimento.
+            {registered ? " Você já pediu para ser avisado." : " Registre o interesse e avisamos quando ela chegar."}
+          </p>
+          <div>
+            <h3 className="connection-section-title">O que vai sincronizar</h3>
+            <ul className="integration-resources">
+              {item.target_resources.map((resource) => <li key={resource}><Check size={14} /> {resource[0].toUpperCase() + resource.slice(1)}</li>)}
+            </ul>
+          </div>
+          {canManage ? (
+            <label>
+              <span>Como você usa o {item.name}? <span className="optional">(opcional)</span></span>
+              <textarea
+                onChange={(event) => setNotes(event.target.value)}
+                placeholder="Ex.: é a origem oficial da nossa carteira; queremos os imóveis ativos aqui."
+                rows={3}
+                value={notes}
+              />
+            </label>
+          ) : (
+            <p className="connection-hint">Somente administradores e gestores podem pedir integrações.</p>
+          )}
+          {error ? <div className="error-box" role="alert">{error}</div> : null}
         </div>
-      ) : null}
-
-      {selected ? (
-        <section className="integration-requirements">
-          <div className="section-inline-header">
-            <div>
-              <strong>Configurar {selected.name}</strong>
-              <span>Itens que precisaremos validar durante a homologação.</span>
-            </div>
-            <Badge variant={statusVariant(selected.status)}>{statusLabels[selected.status]}</Badge>
-          </div>
-          <div className="integration-requirement-grid">
-            {selected.required_items.map((item) => <span key={item}>{item}</span>)}
-          </div>
-          <label>
-            Observações para a configuração
-            <textarea
-              disabled={!canManage}
-              onChange={(event) => setNotes(event.target.value)}
-              placeholder="Ex.: usamos este sistema como origem oficial da carteira e queremos sincronizar imóveis ativos."
-              rows={4}
-              value={notes}
-            />
-          </label>
-          <div className="settings-actions">
-            {message ? <span className={`settings-feedback ${messageKind}`} role={messageKind === "error" ? "alert" : "status"}>{message}</span> : null}
-            {!canManage ? <span>Somente administradores e gestores podem solicitar configurações.</span> : null}
-            <button disabled={!canManage || saving || (!dirty && selected.status === "awaiting_credentials")} onClick={() => void registerSetup()} type="button">
-              {saving ? <><Loader2 className="spin-icon" size={15} /> Registrando...</> : selected.status === "awaiting_credentials" ? <><RefreshCw size={15} /> Atualizar solicitação</> : "Registrar integração"}
-            </button>
-          </div>
-        </section>
-      ) : null}
-    </Card>
+      )}
+    </Modal>
   );
-}
-
-const statusLabels: Record<IntegrationSetupSummary["status"], string> = {
-  not_configured: "Disponível",
-  awaiting_credentials: "Aguardando configuração",
-  testing: "Em validação",
-  connected: "Conectada",
-  error: "Requer atenção",
-};
-
-function statusVariant(status: IntegrationSetupSummary["status"]) {
-  if (status === "connected") return "success" as const;
-  if (status === "error") return "danger" as const;
-  if (status === "awaiting_credentials" || status === "testing") return "accent" as const;
-  return "muted" as const;
 }

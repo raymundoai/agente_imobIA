@@ -371,6 +371,7 @@ export type Tenant = {
 export type TenantSettings = {
   profile?: {
     display_name?: string;
+    business_type?: "broker" | "agency";
     legal_name?: string;
     document_type?: "cpf" | "cnpj";
     document_number?: string;

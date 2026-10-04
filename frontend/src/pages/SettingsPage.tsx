@@ -1,9 +1,10 @@
-import { Bot, Building2, Cable, CreditCard, PlugZap, Settings, Share2, Users } from "lucide-react";
+import { Bot, Building2, Cable, CreditCard, History, PlugZap, Share2, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { request } from "../api/client";
 import type { Tenant } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { getTokenClaims } from "../auth/tokenClaims";
+import { ActivitySettingsPanel } from "./settings/ActivitySettingsPanel";
 import { AgentsSettingsPanel } from "./settings/AgentsSettingsPanel";
 import { BillingSettingsPanel } from "./settings/BillingSettingsPanel";
 import { ChannelsSettingsPanel } from "./settings/ChannelsSettingsPanel";
@@ -17,11 +18,11 @@ const tabs = [
   { key: "company", label: "Empresa", icon: Building2 },
   { key: "channels", label: "Canais", icon: PlugZap },
   { key: "integrations", label: "Integrações", icon: Cable },
-  { key: "agents", label: "Configuração da IA", icon: Bot },
+  { key: "agents", label: "Agente de IA", icon: Bot },
   { key: "users", label: "Equipe", icon: Users },
-  { key: "usage", label: "Uso", icon: Settings },
   { key: "network", label: "Rede ImmobIA", icon: Share2 },
   { key: "billing", label: "Plano e cobrança", icon: CreditCard },
+  { key: "history", label: "Histórico", icon: History },
 ] as const;
 
 type SettingsTab = (typeof tabs)[number]["key"];
@@ -34,6 +35,8 @@ export function SettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
+  const canSeeHistory = claims?.role === "admin" || claims?.role === "gestor";
+  const visibleTabs = tabs.filter((tab) => tab.key !== "history" || canSeeHistory);
 
   useEffect(() => {
     if (!claims?.tenantId) {
@@ -92,7 +95,7 @@ export function SettingsPage() {
 
       {!loading && !message ? <div className="settings-layout">
         <aside className="settings-tabs">
-          {tabs.map((tab) => {
+          {visibleTabs.map((tab) => {
             const Icon = tab.icon;
             return (
               <button
@@ -114,18 +117,23 @@ export function SettingsPage() {
             <TenantSettingsPanel onDirtyChange={setDirty} onTenantChange={setTenant} tenant={tenant} />
           ) : null}
           {activeTab === "channels" ? (
-            <ChannelsSettingsPanel onDirtyChange={setDirty} onTenantChange={setTenant} tenant={tenant} />
+            <ChannelsSettingsPanel />
           ) : null}
           {activeTab === "integrations" ? (
-            <IntegrationsSettingsPanel onDirtyChange={setDirty} />
+            <IntegrationsSettingsPanel />
           ) : null}
           {activeTab === "agents" ? (
             <AgentsSettingsPanel onDirtyChange={setDirty} onTenantChange={setTenant} tenant={tenant} />
           ) : null}
           {activeTab === "users" ? <UsersSettingsPanel /> : null}
-          {activeTab === "usage" ? <UsageSettingsPanel /> : null}
           {activeTab === "network" ? <NetworkSettingsPanel /> : null}
-          {activeTab === "billing" ? <BillingSettingsPanel /> : null}
+          {activeTab === "history" && canSeeHistory ? <ActivitySettingsPanel /> : null}
+          {activeTab === "billing" ? (
+            <div className="settings-panel-stack">
+              <BillingSettingsPanel />
+              <UsageSettingsPanel />
+            </div>
+          ) : null}
         </div>
       </div> : null}
     </section>
@@ -135,5 +143,6 @@ export function SettingsPage() {
 function settingsTabFromUrl(): SettingsTab {
   const requested = new URLSearchParams(window.location.search).get("aba");
   if (requested === "knowledge") return "agents";
+  if (requested === "usage") return "billing";
   return tabs.some((tab) => tab.key === requested) ? requested as SettingsTab : "company";
 }

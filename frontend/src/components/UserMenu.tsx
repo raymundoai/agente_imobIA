@@ -4,7 +4,8 @@ import { request } from "../api/client";
 import type { Tenant, User } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { getTokenClaims } from "../auth/tokenClaims";
-import { loadOperationalAlerts } from "../lib/loadOperationalAlerts";
+import { openAppLink } from "../lib/appNavigation";
+import { loadOperationalAlerts, type OperationalAlert } from "../lib/loadOperationalAlerts";
 import { useTheme } from "../lib/useTheme";
 
 type View = "menu" | "notifications";
@@ -17,7 +18,7 @@ export function UserMenu({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<View>("menu");
-  const [alerts, setAlerts] = useState<string[] | null>(null);
+  const [alerts, setAlerts] = useState<OperationalAlert[] | null>(null);
   const [position, setPosition] = useState<Position | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -81,7 +82,7 @@ export function UserMenu({ onOpenSettings }: { onOpenSettings: () => void }) {
   function showNotifications() {
     setView("notifications");
     setAlerts(null);
-    loadOperationalAlerts(token).then(setAlerts).catch(() => setAlerts(["Não foi possível verificar os alertas."]));
+    loadOperationalAlerts(token).then(setAlerts).catch(() => setAlerts([{ key: "error", message: "Não foi possível verificar os alertas." }]));
   }
 
   const name = user?.name ?? "Minha conta";
@@ -154,10 +155,21 @@ export function UserMenu({ onOpenSettings }: { onOpenSettings: () => void }) {
                   </p>
                 ) : null}
                 {alerts?.map((alert) => (
-                  <p className="user-menu-alert" key={alert}>
+                  <div className="user-menu-alert" key={alert.key}>
                     <AlertTriangle size={15} />
-                    {alert}
-                  </p>
+                    <span>
+                      {alert.message}
+                      {alert.action ? (
+                        <button
+                          className="link-button"
+                          onClick={() => { close(); openAppLink(alert.action!.href); }}
+                          type="button"
+                        >
+                          {alert.action.label}
+                        </button>
+                      ) : null}
+                    </span>
+                  </div>
                 ))}
               </div>
             </>

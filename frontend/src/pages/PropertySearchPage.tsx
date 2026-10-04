@@ -23,6 +23,7 @@ import type {
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { NetworkResults } from "../components/NetworkResults";
+import { propertyTypeLabel } from "../lib/propertyLabels";
 import { getTokenClaims } from "../auth/tokenClaims";
 import { DemandModal } from "../components/DemandModal";
 import {
@@ -541,17 +542,13 @@ export function PropertySearchPage() {
 
   return (
     <section className="property-search-page">
-      <header className="page-header property-search-header">
-        <div>
-          <span className="eyebrow">Captação externa</span>
-          <h1>Buscador de imóveis</h1>
-          <p>Pesquise imóveis para uma demanda e mantenha a origem do anúncio sempre visível.</p>
-        </div>
-        <button className="primary-button property-search-cta" disabled={!canSearch} onClick={() => setModalOpen(true)} type="button">
-          <Plus size={17} />
+      <div className="page-toolbar">
+        <p>Escolha o pedido de um cliente para encontrar imóveis na Rede ImmobIA e nos portais.</p>
+        <button className="primary-button" disabled={!canSearch} onClick={() => setModalOpen(true)} type="button">
+          <Plus size={16} />
           Nova demanda
         </button>
-      </header>
+      </div>
 
       <div className="capture-notice"><Sparkles size={18} /><span>Imóveis captados ficam disponíveis ao corretor. A IA continua oferecendo somente imóveis da carteira própria.</span></div>
       {message ? <div className="inline-feedback">{message}</div> : null}
@@ -559,12 +556,17 @@ export function PropertySearchPage() {
       <div className="property-search-layout">
         <aside className="property-search-sidebar">
           <section className="demand-list panel-card">
-            <div className="panel-title"><div><span className="eyebrow">Demandas</span><h2>Clientes em busca</h2></div><button aria-label="Atualizar" className="icon-button" onClick={() => void loadDemands()} type="button"><RefreshCw size={16} /></button></div>
-            {demands.length === 0 && !loading ? <div className="empty-state"><Search size={24} /><p>Cadastre uma demanda para começar.</p></div> : null}
+            <div className="panel-title"><div><h2>Clientes em busca</h2></div><button aria-label="Atualizar" className="icon-button" onClick={() => void loadDemands()} type="button"><RefreshCw size={16} /></button></div>
+            {demands.length === 0 && !loading ? (
+              <div className="list-empty demand-empty">
+                <p>Nenhum cliente em busca ainda. Cadastre o que o cliente procura para começar.</p>
+                {canSearch ? <button className="secondary-button" onClick={() => setModalOpen(true)} type="button"><Plus size={15} />Nova demanda</button> : null}
+              </div>
+            ) : null}
             {demands.map((demand) => (
               <div className={`demand-list-item${selectedId === demand.id ? " active" : ""}`} key={demand.id}>
                 <button className="demand-select-button" onClick={() => void selectDemand(demand.id)} type="button">
-                  <strong>{demand.lead_name}</strong><span>{purposeLabel(demand.purpose)} · {demand.property_type || "Imóvel"}</span><small>{demand.city || "Cidade não informada"}{demand.neighborhoods.length ? ` · ${demand.neighborhoods.join(", ")}` : ""}</small>
+                  <strong>{demand.lead_name}</strong><span>{purposeLabel(demand.purpose)} de {propertyTypeLabel(demand.property_type).toLowerCase()}</span><small>{[...demand.neighborhoods, demand.city || "Cidade não informada"].join(", ")}</small>
                 </button>
                 {canSearch ? <button
                   aria-label={`Excluir demanda de ${demand.lead_name}`}
@@ -581,7 +583,7 @@ export function PropertySearchPage() {
 
           <section className="source-sidebar panel-card">
             <div className="panel-title">
-              <div><span className="eyebrow">Fontes</span><h2>Portais consultados</h2></div>
+              <div><h2>Portais consultados</h2></div>
               {totalSourceCount ? <small>{completedSourceCount}/{totalSourceCount}</small> : null}
             </div>
             {visibleSources.length ? (
