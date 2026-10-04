@@ -11,6 +11,7 @@ from app.modules.ai.domain.ports import (
     AiProviderRejectedError,
     AiProviderResponse,
     AiToolCall,
+    ChatOptions,
 )
 from app.modules.properties.media import ImageEditResult
 
@@ -171,16 +172,19 @@ class OpenAiAdapter(AiProviderPort):
         system_prompt: str,
         messages: list[dict[str, str]],
         tools: list[dict[str, Any]],
+        options: ChatOptions | None = None,
     ) -> AiProviderResponse:
+        options = options or ChatOptions()
+        model = options.model or self._chat_model
         try:
             response = self._client.responses.create(
-                model=self._chat_model,
+                model=model,
                 instructions=system_prompt,
                 input=self._responses_input(messages),
                 tools=tools,
                 parallel_tool_calls=False,
-                reasoning={"effort": self._chat_reasoning_effort},
-                max_output_tokens=self._chat_max_output_tokens,
+                reasoning={"effort": options.reasoning_effort or self._chat_reasoning_effort},
+                max_output_tokens=options.max_output_tokens or self._chat_max_output_tokens,
             )
         except (APIConnectionError, APITimeoutError) as exc:
             raise AiProviderDispatchUncertainError("OpenAI chat dispatch is uncertain") from exc
@@ -190,7 +194,7 @@ class OpenAiAdapter(AiProviderPort):
             raise AiProviderDispatchUncertainError("OpenAI chat dispatch is uncertain") from exc
         return AiProviderResponse(
             text=getattr(response, "output_text", "") or self._extract_text(response),
-            model=getattr(response, "model", self._chat_model),
+            model=getattr(response, "model", model),
             tokens_used=self._tokens_used(response),
             input_tokens=self._usage_value(response, "input_tokens"),
             cached_input_tokens=self._cached_input_tokens(response),

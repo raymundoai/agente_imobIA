@@ -15,6 +15,7 @@ from app.modules.ai.adapters.repositories import (
     SqlAlchemyAiAuditLogRepository,
     SqlAlchemyKnowledgeRepository,
 )
+from app.modules.ai.agent_config import SqlAlchemyAgentConfigRepository
 from app.modules.ai.application.use_cases import GenerateAiReplyUseCase
 from app.modules.ai.domain.ports import (
     AiProviderDispatchUncertainError,
@@ -207,6 +208,7 @@ class MessageJobProcessor:
                     ),
                     properties=SqlAlchemyPropertyRepository(session),
                     lead_demands=SqlAlchemyLeadDemandRepository(session),
+                    agent_config=SqlAlchemyAgentConfigRepository(session),
                 ).execute(
                     job["tenant_id"],
                     job["conversation_id"],

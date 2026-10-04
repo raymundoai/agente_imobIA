@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.container import get_db_session
+from app.modules.activity.service import model_snapshot, record_activity
 from app.modules.auth.api.dependencies import (
     CurrentPrincipal,
     get_current_principal,
@@ -18,7 +19,9 @@ from app.modules.capture.models import SearchRunModel
 from app.modules.contacts.phone import normalize_contact_phone
 from app.modules.contacts.service import ContactUpsertService
 from app.modules.conversations.adapters.models import ConversationModel
+from app.modules.leads.adapters.models import LeadDemandModel
 from app.modules.leads.adapters.repositories import SqlAlchemyLeadDemandRepository
+from app.modules.leads.application.use_cases import describe_interest
 from app.modules.leads.domain.entities import LeadDemand, LeadDemandStatus, LeadPurpose
 from app.modules.users.domain.entities import UserRole
 from app.shared.errors.exceptions import ConflictError, NotFoundError
@@ -281,6 +284,25 @@ def delete_demand(
     ):
         raise ConflictError(
             "Aguarde a finalização da cobrança da busca antes de excluir a demanda"
+        )
+    demand = session.scalar(
+        select(LeadDemandModel).where(
+            LeadDemandModel.tenant_id == principal.tenant_id, LeadDemandModel.id == demand_id
+        )
+    )
+    if demand is not None:
+        interest = describe_interest(
+            demand.purpose, demand.property_type, demand.city, demand.neighborhoods
+        )
+        record_activity(
+            session,
+            tenant_id=principal.tenant_id,
+            actor_user_id=principal.user_id,
+            entity="lead_demand",
+            entity_id=demand.id,
+            action="deleted",
+            summary=f"Demanda de {demand.lead_name} excluída: {interest}",
+            snapshot=model_snapshot(demand),
         )
     deleted = SqlAlchemyLeadDemandRepository(session).delete(
         principal.tenant_id, demand_id

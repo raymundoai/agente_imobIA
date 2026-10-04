@@ -100,9 +100,7 @@ class FakeConversations:
         self.messages.append(message)
         return message
 
-    def update_mode(
-        self, tenant_id, conversation_id, mode, assigned_user_id, *, commit=True
-    ):
+    def update_mode(self, tenant_id, conversation_id, mode, assigned_user_id, *, commit=True):
         self.conversation.mode = mode
         return self.conversation
 
@@ -395,3 +393,74 @@ def test_system_prompt_excludes_company_document_identifiers() -> None:
     assert "Porto Alegre" in prompt
     assert "12345678000199" not in prompt
     assert "document_number" not in prompt
+
+
+def test_agent_introduces_itself_by_configured_name_for_the_agency() -> None:
+    prompt = GenerateAiReplyUseCase._system_prompt(
+        {"profile": {"display_name": "Imobiliária Horizonte", "business_type": "agency"}},
+        "leads",
+        _effective_agent_settings({"name": "Luna"}),
+        [],
+    )
+    assert "Você é Luna, assistente virtual da Imobiliária Horizonte" in prompt
+    assert "apresente-se como Luna" in prompt
+    assert "ImobIA" not in prompt
+
+
+def test_default_agent_name_is_not_forced_and_broker_is_named() -> None:
+    prompt = GenerateAiReplyUseCase._system_prompt(
+        {"profile": {"display_name": "Ana Souza", "business_type": "broker"}},
+        "leads",
+        _effective_agent_settings({}),
+        [],
+    )
+    assert "Você é o assistente virtual do corretor Ana Souza" in prompt
+    assert "Agente de Leads, assistente" not in prompt
+    assert "corretor autônomo" in prompt
+
+
+def _lead_payload_for(conversation_phone: str, typed_phone: str) -> dict:
+    tenant = Tenant(name="Tenant", slug="tenant-a")
+    conversation = Conversation(tenant_id=tenant.id, phone=conversation_phone)
+    inbound = Message(
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        direction=MessageDirection.INBOUND,
+        author_type=MessageAuthor.CUSTOMER,
+        text="Meu telefone é outro",
+    )
+    ai = FakeAi()
+    original = ai.chat_completion
+
+    def chat_completion(**kwargs):
+        response = original(**kwargs)
+        for call in response.tool_calls or []:
+            call.arguments["phone"] = typed_phone
+        return response
+
+    ai.chat_completion = chat_completion
+    qualifier = FakeLeadQualification()
+    GenerateAiReplyUseCase(
+        FakeTenants(tenant),
+        FakeConversations(conversation, inbound),
+        ai,
+        EmptyKnowledge(),
+        FakeAudit(),
+        EmptyCredentials(),
+        EmptyChannel(),
+        InMemoryEventBus(),
+        qualifier,
+    ).execute(tenant.id, conversation.id)
+    return qualifier.payloads[0][1]
+
+
+def test_lead_is_keyed_on_the_conversation_number_not_a_typed_one() -> None:
+    data = _lead_payload_for("5511947497989", "1199998877")
+    assert data["phone"] == "5511947497989"
+    assert data["notes"] == "Lead pronto\nOutro telefone informado pelo lead: 1199998877"
+
+
+def test_same_number_typed_without_country_code_adds_no_note() -> None:
+    data = _lead_payload_for("5511947497989", "(11) 94749-7989")
+    assert data["phone"] == "5511947497989"
+    assert data["notes"] == "Lead pronto"

@@ -12,6 +12,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
+from app.modules.ai.agent_config import (
+    REASONING_EFFORTS,
+    AgentPromptVersionModel,
+    SqlAlchemyAgentConfigRepository,
+    TenantAgentOverrideModel,
+)
+from app.modules.ai.application.use_cases import DEFAULT_BASE_PROMPT, GenerateAiReplyUseCase
 from app.modules.billing_usage.adapters.models import (
     AsaasSubscriptionModel,
     CommercialEntitlementGrantModel,
@@ -853,3 +860,174 @@ def _tenant_summary(session: Session, tenant: TenantModel) -> PlatformTenantSumm
         },
         integrations=safe_integrations,
     )
+
+
+# Agent prompt ---------------------------------------------------------------
+# The platform team edits the agent's base prompt (versioned, newest wins) and can add
+# instructions for a single client. Tenants never see or change either.
+
+MODEL_PATTERN = r"^[A-Za-z0-9._:-]{1,80}$"
+
+
+class AgentPromptVersionItem(BaseModel):
+    id: UUID
+    base_prompt: str | None
+    chat_model: str | None
+    reasoning_effort: str | None
+    max_output_tokens: int | None
+    note: str | None
+    created_by_email: str | None
+    created_at: datetime
+
+
+class AgentPromptResponse(BaseModel):
+    default_prompt: str
+    default_chat_model: str
+    default_reasoning_effort: str
+    default_max_output_tokens: int
+    reasoning_efforts: list[str]
+    active: AgentPromptVersionItem | None
+    versions: list[AgentPromptVersionItem]
+
+
+class AgentPromptVersionRequest(BaseModel):
+    base_prompt: str | None = Field(default=None, max_length=20_000)
+    chat_model: str | None = Field(default=None, pattern=MODEL_PATTERN)
+    reasoning_effort: str | None = Field(
+        default=None, pattern="^(none|minimal|low|medium|high|xhigh|max)$"
+    )
+    max_output_tokens: int | None = Field(default=None, ge=512, le=128_000)
+    note: str | None = Field(default=None, max_length=300)
+
+
+class TenantAgentResponse(BaseModel):
+    extra_instructions: str
+    updated_by_email: str | None
+    updated_at: datetime | None
+    preview: str
+
+
+class TenantAgentRequest(BaseModel):
+    extra_instructions: str = Field(default="", max_length=4_000)
+
+
+def _version_item(version: AgentPromptVersionModel) -> AgentPromptVersionItem:
+    return AgentPromptVersionItem(
+        id=version.id,
+        base_prompt=version.base_prompt,
+        chat_model=version.chat_model,
+        reasoning_effort=version.reasoning_effort,
+        max_output_tokens=version.max_output_tokens,
+        note=version.note,
+        created_by_email=version.created_by_email,
+        created_at=version.created_at,
+    )
+
+
+def _agent_prompt_response(container: Container, session: Session) -> AgentPromptResponse:
+    versions = session.scalars(
+        select(AgentPromptVersionModel).order_by(AgentPromptVersionModel.created_at.desc()).limit(30)
+    ).all()
+    settings = container.settings
+    return AgentPromptResponse(
+        default_prompt=DEFAULT_BASE_PROMPT,
+        default_chat_model=settings.openai_chat_model,
+        default_reasoning_effort=settings.openai_chat_reasoning_effort,
+        default_max_output_tokens=settings.openai_chat_max_output_tokens,
+        reasoning_efforts=list(REASONING_EFFORTS),
+        active=_version_item(versions[0]) if versions else None,
+        versions=[_version_item(version) for version in versions],
+    )
+
+
+@router.get("/agent", response_model=AgentPromptResponse)
+def platform_agent_prompt(
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> AgentPromptResponse:
+    return _agent_prompt_response(container, session)
+
+
+@router.post("/agent/versions", response_model=AgentPromptResponse, status_code=201)
+def platform_save_agent_prompt(
+    payload: AgentPromptVersionRequest,
+    principal: PlatformPrincipal = Depends(get_platform_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> AgentPromptResponse:
+    prompt = (payload.base_prompt or "").strip()
+    session.add(
+        AgentPromptVersionModel(
+            id=uuid4(),
+            # Saving the default text keeps "no override", so future default improvements apply.
+            base_prompt=prompt if prompt and prompt != DEFAULT_BASE_PROMPT else None,
+            chat_model=(payload.chat_model or "").strip() or None,
+            reasoning_effort=payload.reasoning_effort or None,
+            max_output_tokens=payload.max_output_tokens,
+            note=(payload.note or "").strip() or None,
+            created_by_email=principal.email,
+        )
+    )
+    session.commit()
+    return _agent_prompt_response(container, session)
+
+
+def _tenant_agent_response(session: Session, tenant: TenantModel) -> TenantAgentResponse:
+    override = session.get(TenantAgentOverrideModel, tenant.id)
+    settings = tenant.settings if isinstance(tenant.settings, dict) else {}
+    agent_key, agent_settings = GenerateAiReplyUseCase._resolve_agent(settings)
+    preview = GenerateAiReplyUseCase._system_prompt(
+        settings,
+        agent_key,
+        agent_settings,
+        [],
+        {},
+        SqlAlchemyAgentConfigRepository(session).for_tenant(tenant.id),
+    )
+    return TenantAgentResponse(
+        extra_instructions=override.extra_instructions if override else "",
+        updated_by_email=override.updated_by_email if override else None,
+        updated_at=override.updated_at if override else None,
+        preview=preview,
+    )
+
+
+@router.get("/tenants/{tenant_id}/agent", response_model=TenantAgentResponse)
+def platform_tenant_agent(
+    tenant_id: UUID,
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> TenantAgentResponse:
+    tenant = session.get(TenantModel, tenant_id)
+    if tenant is None:
+        raise NotFoundError("Tenant not found")
+    return _tenant_agent_response(session, tenant)
+
+
+@router.put("/tenants/{tenant_id}/agent", response_model=TenantAgentResponse)
+def platform_update_tenant_agent(
+    tenant_id: UUID,
+    payload: TenantAgentRequest,
+    principal: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> TenantAgentResponse:
+    tenant = session.get(TenantModel, tenant_id)
+    if tenant is None:
+        raise NotFoundError("Tenant not found")
+    text = payload.extra_instructions.strip()
+    override = session.get(TenantAgentOverrideModel, tenant_id)
+    if not text:
+        if override is not None:
+            session.delete(override)
+    elif override is None:
+        session.add(
+            TenantAgentOverrideModel(
+                tenant_id=tenant_id, extra_instructions=text, updated_by_email=principal.email
+            )
+        )
+    else:
+        override.extra_instructions = text
+        override.updated_by_email = principal.email
+    session.commit()
+    return _tenant_agent_response(session, tenant)

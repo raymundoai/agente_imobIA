@@ -14,6 +14,8 @@ from app.modules.ai.domain.entities import (
     KnowledgeDocument,
 )
 from app.modules.ai.domain.ports import (
+    AgentConfigPort,
+    AgentRuntimeConfig,
     AiAuditLogRepositoryPort,
     AiProviderPort,
     AiProviderResponse,
@@ -203,10 +205,12 @@ class GenerateAiReplyUseCase:
         lead_qualification: LeadQualificationPort | None = None,
         properties: PropertyRepositoryPort | None = None,
         lead_demands: LeadDemandRepositoryPort | None = None,
+        agent_config: AgentConfigPort | None = None,
     ) -> None:
         self._tenants = tenants
         self._conversations = conversations
         self._ai = ai
+        self._agent_config = agent_config
         self._knowledge = knowledge
         self._audit_logs = audit_logs
         self._credentials = credentials
@@ -240,6 +244,10 @@ class GenerateAiReplyUseCase:
         if conversation.mode is not ConversationMode.AI:
             raise ConfigurationError("AI is disabled while the conversation is in human mode")
         agent_key, agent_settings = self._resolve_agent(tenant.settings)
+        runtime = self._agent_config.for_tenant(tenant_id) if self._agent_config else None
+        # Only pass options when the platform overrides a default, keeping providers simple.
+        chat_options = runtime.chat_options() if runtime else None
+        chat_extra: dict[str, Any] = {"options": chat_options} if chat_options else {}
         history = self._conversations.list_messages(tenant_id, conversation_id)[-25:]
         user_text = input_text or next(
             (message.text for message in reversed(history) if message.direction.value == "inbound"),
@@ -279,9 +287,11 @@ class GenerateAiReplyUseCase:
                 agent_settings,
                 chunks,
                 self._conversation_context(tenant_id, conversation),
+                runtime,
             ),
             messages=self._messages_from_history(history),
             tools=self._tool_definitions(agent_key),
+            **chat_extra,
         )
         if usage_observer is not None:
             usage_observer(response)
@@ -335,10 +345,12 @@ class GenerateAiReplyUseCase:
                     agent_settings,
                     chunks,
                     self._conversation_context(tenant_id, conversation),
+                    runtime,
                 )
                 + retry_instruction,
                 messages=[*self._messages_from_history(history), *tool_context],
                 tools=self._tool_definitions(agent_key),
+                **chat_extra,
             )
             if usage_observer is not None:
                 usage_observer(response)
@@ -443,6 +455,28 @@ class GenerateAiReplyUseCase:
             response_parts=response_parts,
         )
 
+    def _with_conversation_phone(
+        self, arguments: dict[str, Any], tenant_id: UUID, conversation_id: UUID
+    ) -> dict[str, Any]:
+        """The lead is whoever is talking: key the demand on the conversation's number.
+
+        A number typed in the chat is kept as an extra contact in the notes, so it never
+        replaces the lead's identity or opens a duplicate demand and contact.
+        """
+
+        conversation = self._conversations.get_by_id(tenant_id, conversation_id)
+        if conversation is None or not conversation.phone:
+            return arguments
+        given = str(arguments.get("phone") or "").strip()
+        given_digits = re.sub(r"\D", "", given)
+        known_digits = re.sub(r"\D", "", conversation.phone)
+        result = {**arguments, "phone": conversation.phone}
+        if given_digits and not known_digits.endswith(given_digits[-8:]):
+            extra = f"Outro telefone informado pelo lead: {given}"
+            notes = str(arguments.get("notes") or "").strip()
+            result["notes"] = f"{notes}\n{extra}" if notes else extra
+        return result
+
     def _execute_tool(
         self, name: str, arguments: dict[str, Any], tenant_id: UUID, conversation_id: UUID
     ) -> dict[str, Any]:
@@ -459,7 +493,7 @@ class GenerateAiReplyUseCase:
                 return {"status": "unavailable"}
             lead = self._lead_qualification.create_or_update_lead(
                 tenant_id,
-                arguments,
+                self._with_conversation_phone(arguments, tenant_id, conversation_id),
                 conversation_id=conversation_id,
                 handoff_reason=_optional_text(arguments.get("handoff_reason")),
             )
@@ -665,13 +699,24 @@ class GenerateAiReplyUseCase:
         agent_settings: dict[str, Any],
         chunks: list[Any],
         conversation_context: dict[str, Any] | None = None,
+        runtime: AgentRuntimeConfig | None = None,
     ) -> str:
+        base_prompt = (runtime.base_prompt if runtime else None) or DEFAULT_BASE_PROMPT
+        extra_text = (runtime.extra_instructions if runtime else None) or ""
+        extra = (
+            f"Instruções específicas desta conta:\n{extra_text.strip()}\n\n"
+            if extra_text.strip()
+            else ""
+        )
         profile = settings.get("profile", {}) if isinstance(settings, dict) else {}
         prompt_profile = {
             key: profile[key]
             for key in ("display_name", "legal_name", "regions")
             if isinstance(profile, dict) and profile.get(key) not in (None, "")
         }
+        business_type = profile.get("business_type") if isinstance(profile, dict) else None
+        if business_type in BUSINESS_TYPE_LABELS:
+            prompt_profile["tipo_de_negocio"] = BUSINESS_TYPE_LABELS[business_type]
         legacy_hours = profile.get("business_hours") if isinstance(profile, dict) else None
         prompt_profile["horario_de_atendimento"] = _business_hours_text(legacy_hours)
         structured_profile = json.dumps(prompt_profile, ensure_ascii=False, default=str)
@@ -689,30 +734,9 @@ class GenerateAiReplyUseCase:
         )
         rag = "\n\n".join(chunk.content for chunk in chunks)
         return (
-            f"Você é o agente de qualificação de leads do ImobIA (agente: {agent_key}). "
-            "Atenda novos interessados de forma natural, breve e prestativa. Colete aos poucos "
-            "nome, telefone, finalidade de compra ou locação, cidade, bairros, tipo de imóvel, "
-            "faixa de valor, quartos, vagas e urgência. Não repita perguntas já respondidas. "
-            "Quando houver critérios suficientes, salve a demanda com create_or_update_lead e "
-            "busque imóveis com search_properties. Essa ferramenta contém somente a carteira "
-            "própria autorizada para oferta. Nunca mencione portal, captação, anunciante ou URL "
-            "de origem. Nunca invente imóveis ou dados ausentes. "
-            "Se não houver resultado, explique isso e informe que a equipe poderá iniciar uma "
-            "busca externa. Não negocie valores, não dê orientação jurídica conclusiva e peça "
-            "handoff quando a autonomia for insuficiente ou o lead pedir uma pessoa. "
-            "Respeite integralmente handoff_rules e restrictions da configuração. Ao transferir, "
-            "use a transfer_message configurada, adaptando apenas o mínimo necessário ao contexto. "
-            "Faça uma pergunta por vez. Escreva como uma conversa de WhatsApp: frases curtas, "
-            "linguagem simples e sem tabelas ou títulos. Obedeça ao tom de voz e à quantidade "
-            "de emojis definidos na configuração do agente. 'none' significa nenhum emoji, "
-            "'low' significa no máximo um ocasionalmente e 'moderate' permite até dois quando "
-            "forem naturais. "
-            "Não repita o nome do cliente nem comece respostas seguidas com a mesma expressão. "
-            "Entenda confirmações curtas como 'sim', 'pode ser' e 'bora' pelo contexto anterior. "
-            "Evite jargão, ponto e vírgula e travessão. Não afirme que uma ação foi concluída sem "
-            "o retorno bem-sucedido da ferramenta correspondente. Use transcrições e descrições "
-            "de mídia apenas como contexto auxiliar, sem transformar inferências visuais em "
-            "fatos.\n\n"
+            f"{_agent_identity(agent_settings, profile)} "
+            f"{base_prompt}\n\n"
+            f"{extra}"
             f"Perfil da empresa:\n{structured_profile}\n\n"
             f"Configuração deste agente:\n{structured_agent}\n\n"
             f"Contexto cadastral já confirmado:\n{structured_context}\n\n"
@@ -758,7 +782,10 @@ class GenerateAiReplyUseCase:
                     "type": "object",
                     "properties": {
                         "lead_name": {"type": ["string", "null"]},
-                        "phone": {"type": "string"},
+                        "phone": {
+                            "type": "string",
+                            "description": "Use o telefone da conversa; não peça ao lead.",
+                        },
                         "email": {"type": ["string", "null"]},
                         "purpose": {"type": ["string", "null"], "enum": ["buy", "rent", None]},
                         "property_type": {"type": ["string", "null"]},
@@ -904,6 +931,68 @@ def _business_hours_text(value: Any) -> str:
         descriptions.append(description)
     timezone = str(value.get("timezone") or "America/Sao_Paulo")
     return "; ".join(descriptions) + f". Fuso horário: {timezone}."
+
+
+DEFAULT_BASE_PROMPT = (
+    "Atenda novos interessados de forma natural, breve e prestativa. Colete aos poucos "
+    "nome, finalidade de compra ou locação, cidade, bairros, tipo de imóvel, "
+    "faixa de valor, quartos, vagas e urgência. Não repita perguntas já respondidas. "
+    "O telefone do lead já é conhecido pelo canal da conversa: não peça o número. "
+    "Registre valores exatamente como o lead informou, sem ajustar ou arredondar. "
+    "Em notes, guarde só preferências do lead que ajudem na busca, nunca descrições "
+    "de imagens, áudios ou resumos do atendimento. "
+    "Quando houver critérios suficientes, salve a demanda com create_or_update_lead e "
+    "busque imóveis com search_properties. Essa ferramenta contém somente a carteira "
+    "própria autorizada para oferta. Nunca mencione portal, captação, anunciante ou URL "
+    "de origem. Nunca invente imóveis ou dados ausentes. "
+    "Se não houver resultado, explique isso e informe que a equipe poderá iniciar uma "
+    "busca externa. Não negocie valores, não dê orientação jurídica conclusiva e peça "
+    "handoff quando a autonomia for insuficiente ou o lead pedir uma pessoa. "
+    "Respeite integralmente handoff_rules e restrictions da configuração. Ao transferir, "
+    "use a transfer_message configurada, adaptando apenas o mínimo necessário ao contexto. "
+    "Faça uma pergunta por vez. Escreva como uma conversa de WhatsApp: frases curtas, "
+    "linguagem simples e sem tabelas ou títulos. Obedeça ao tom de voz e à quantidade "
+    "de emojis definidos na configuração do agente. 'none' significa nenhum emoji, "
+    "'low' significa no máximo um ocasionalmente e 'moderate' permite até dois quando "
+    "forem naturais. "
+    "Não repita o nome do cliente nem comece respostas seguidas com a mesma expressão. "
+    "Entenda confirmações curtas como 'sim', 'pode ser' e 'bora' pelo contexto anterior. "
+    "Evite jargão, ponto e vírgula e travessão. Não afirme que uma ação foi concluída sem "
+    "o retorno bem-sucedido da ferramenta correspondente. Use transcrições e descrições "
+    "de mídia apenas como contexto auxiliar, sem transformar inferências visuais em "
+    "fatos."
+)
+
+
+BUSINESS_TYPE_LABELS = {"broker": "corretor autônomo", "agency": "imobiliária"}
+DEFAULT_AGENT_NAME = "Agente de Leads"
+
+
+def _agent_identity(agent_settings: dict[str, Any], profile: Any) -> str:
+    """Who the agent says it is: the configured name, speaking for the agency or broker."""
+
+    business = ""
+    if isinstance(profile, dict):
+        business = str(profile.get("display_name") or "").strip()
+        broker = profile.get("business_type") == "broker"
+    else:
+        broker = False
+    if business:
+        owner = f"do corretor {business}" if broker else f"da {business}"
+    else:
+        owner = "do corretor" if broker else "da imobiliária"
+    name = str(agent_settings.get("name") or "").strip()
+    if name and name != DEFAULT_AGENT_NAME:
+        who = (
+            f"Você é {name}, assistente virtual {owner}. Ao iniciar uma conversa, "
+            f"apresente-se como {name}."
+        )
+    else:
+        who = f"Você é o assistente virtual {owner}."
+    return (
+        f"{who} Seu papel é atender e qualificar leads. Nunca diga que é um produto, "
+        "uma plataforma ou um sistema de terceiros."
+    )
 
 
 def _effective_agent_settings(configured: dict[str, Any]) -> dict[str, Any]:

@@ -204,13 +204,12 @@ class LeadQualificationService(LeadQualificationPort):
 
     @staticmethod
     def _interest_summary(lead: LeadDemand) -> str:
-        criteria = [
+        return describe_interest(
             lead.purpose.value if lead.purpose else None,
             lead.property_type,
             lead.city,
-            ", ".join(lead.neighborhoods) if lead.neighborhoods else None,
-        ]
-        return " | ".join(item for item in criteria if item) or "Interesse imobiliário"
+            lead.neighborhoods,
+        )
 
     @staticmethod
     def _summary(lead: LeadDemand, conversation_id: UUID | None) -> str:
@@ -261,3 +260,32 @@ def _int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+_PURPOSE_WORDS = {"buy": "Compra", "rent": "Aluguel"}
+
+
+def describe_interest(
+    purpose: str | None,
+    property_type: str | None,
+    city: str | None,
+    neighborhoods: list[str] | None = None,
+) -> str:
+    """Readable summary shown to the team: "Compra de apartamento em Porto Alegre (Centro)"."""
+
+    kind = (property_type or "").replace("_", " ").strip().lower()
+    action = _PURPOSE_WORDS.get(purpose or "")
+    if action:
+        head = f"{action} de {kind or 'imóvel'}"
+    elif kind:
+        head = kind[:1].upper() + kind[1:]
+    else:
+        head = ""
+    place = city.strip() if city else ""
+    areas = ", ".join(item.strip() for item in neighborhoods or [] if item and item.strip())
+    if place:
+        location = f"{place} ({areas})" if areas else place
+        head = f"{head} em {location}" if head else location
+    elif areas:
+        head = f"{head} em {areas}" if head else areas
+    return head or "Interesse imobiliário"

@@ -5,7 +5,11 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.modules.contacts.models import ContactModel
-from app.modules.contacts.phone import normalize_contact_phone
+from app.modules.contacts.phone import (
+    normalize_contact_phone,
+    phone_identity_key,
+    phone_variants,
+)
 from app.modules.contacts.ports import ContactReference
 
 
@@ -27,13 +31,16 @@ class ContactUpsertService:
         normalized = normalize_contact_phone(phone)
         self._session.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-            {"key": f"contact:{tenant_id}:{normalized}"},
+            {"key": f"contact:{tenant_id}:{phone_identity_key(normalized)}"},
         )
         model = self._session.scalar(
-            select(ContactModel).where(
+            select(ContactModel)
+            .where(
                 ContactModel.tenant_id == tenant_id,
-                ContactModel.phone == normalized,
+                ContactModel.phone.in_(phone_variants(normalized)),
             )
+            .order_by(ContactModel.created_at)
+            .limit(1)
         )
         now = datetime.now(UTC)
         if model is None:

@@ -3,6 +3,7 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from app.modules.contacts.phone import phone_identity_key, phone_variants
 from app.modules.leads.adapters.models import LeadDemandModel
 from app.modules.leads.domain.entities import LeadDemand, LeadDemandStatus, LeadPurpose
 from app.modules.leads.ports.repositories import LeadDemandRepositoryPort
@@ -43,7 +44,7 @@ class SqlAlchemyLeadDemandRepository(LeadDemandRepositoryPort):
     def lock_phone(self, tenant_id: UUID, phone: str) -> None:
         self._session.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-            {"key": f"lead-demand:{tenant_id}:{phone}"},
+            {"key": f"lead-demand:{tenant_id}:{phone_identity_key(phone)}"},
         )
 
     def create(self, tenant_id: UUID, lead: LeadDemand) -> LeadDemand:
@@ -68,9 +69,10 @@ class SqlAlchemyLeadDemandRepository(LeadDemandRepositoryPort):
         model = self._session.scalar(
             select(LeadDemandModel).where(
                 LeadDemandModel.tenant_id == tenant_id,
-                LeadDemandModel.phone == phone,
+                LeadDemandModel.phone.in_(phone_variants(phone)),
                 LeadDemandModel.status != LeadDemandStatus.CLOSED.value,
             )
+            .limit(1)
         )
         return _to_domain(model) if model else None
 

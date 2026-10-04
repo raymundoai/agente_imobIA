@@ -14,6 +14,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
+from app.modules.activity.service import model_snapshot, record_activity
 from app.modules.ai.domain.ports import (
     AiProviderDispatchUncertainError,
     AiProviderRejectedError,
@@ -463,6 +464,16 @@ def delete_property(
         session.add(
             PropertyMediaCleanupModel(id=uuid4(), tenant_id=principal.tenant_id, storage_key=key)
         )
+    record_activity(
+        session,
+        tenant_id=principal.tenant_id,
+        actor_user_id=principal.user_id,
+        entity="property",
+        entity_id=model.id,
+        action="deleted",
+        summary=f"Imóvel excluído: {model.title}",
+        snapshot=model_snapshot(model, exclude=("embedding",)),
+    )
     session.delete(model)
     session.commit()
 

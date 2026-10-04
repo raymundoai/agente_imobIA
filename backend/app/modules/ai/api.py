@@ -6,14 +6,18 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
+from app.modules.activity.service import record_activity
 from app.modules.ai.adapters.job_queue import InProcessKnowledgeJobQueue
+from app.modules.ai.adapters.models import KnowledgeDocumentModel
 from app.modules.ai.adapters.repositories import (
     SqlAlchemyAiAuditLogRepository,
     SqlAlchemyKnowledgeRepository,
 )
+from app.modules.ai.agent_config import SqlAlchemyAgentConfigRepository
 from app.modules.ai.application.use_cases import (
     DeleteKnowledgeDocumentUseCase,
     GenerateAiReplyUseCase,
@@ -174,6 +178,23 @@ def delete_document(
     principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN)),
     session: Session = Depends(get_db_session),
 ) -> None:
+    document = session.scalar(
+        select(KnowledgeDocumentModel).where(
+            KnowledgeDocumentModel.tenant_id == principal.tenant_id,
+            KnowledgeDocumentModel.id == document_id,
+        )
+    )
+    if document is not None:
+        record_activity(
+            session,
+            tenant_id=principal.tenant_id,
+            actor_user_id=principal.user_id,
+            entity="knowledge_document",
+            entity_id=document.id,
+            action="deleted",
+            summary=f"Documento da base de conhecimento excluído: {document.filename}",
+            snapshot={"filename": document.filename},
+        )
     DeleteKnowledgeDocumentUseCase(SqlAlchemyKnowledgeRepository(session)).execute(
         principal.tenant_id, document_id
     )
@@ -270,6 +291,7 @@ def generate_ai_reply(
             ),
             properties=SqlAlchemyPropertyRepository(session),
             lead_demands=SqlAlchemyLeadDemandRepository(session),
+            agent_config=SqlAlchemyAgentConfigRepository(session),
         ).execute(
             principal.tenant_id,
             conversation_id,

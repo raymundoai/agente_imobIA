@@ -40,6 +40,37 @@ class AiProviderResponse:
     tool_calls: list[AiToolCall] | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ChatOptions:
+    """Per-call overrides of the server's chat defaults; None keeps the default."""
+
+    model: str | None = None
+    reasoning_effort: str | None = None
+    max_output_tokens: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRuntimeConfig:
+    """Platform-managed agent settings; None falls back to the built-in prompt and defaults."""
+
+    base_prompt: str | None = None
+    extra_instructions: str | None = None
+    chat_model: str | None = None
+    reasoning_effort: str | None = None
+    max_output_tokens: int | None = None
+
+    def chat_options(self) -> ChatOptions | None:
+        if not (self.chat_model or self.reasoning_effort or self.max_output_tokens):
+            return None
+        return ChatOptions(self.chat_model, self.reasoning_effort, self.max_output_tokens)
+
+
+class AgentConfigPort(ABC):
+    @abstractmethod
+    def for_tenant(self, tenant_id: UUID) -> AgentRuntimeConfig:
+        raise NotImplementedError
+
+
 class AiProviderPort(ABC):
     @abstractmethod
     def get_embedding(self, text: str) -> list[float]:
@@ -52,6 +83,7 @@ class AiProviderPort(ABC):
         system_prompt: str,
         messages: list[dict[str, str]],
         tools: list[dict[str, Any]],
+        options: ChatOptions | None = None,
     ) -> AiProviderResponse:
         raise NotImplementedError
 

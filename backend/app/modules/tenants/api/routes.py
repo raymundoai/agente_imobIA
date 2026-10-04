@@ -60,7 +60,11 @@ def signup(
         payload.admin_name,
         str(payload.email),
         payload.password,
-        settings={"onboarding": {"status": "pending"}},
+        settings={
+            "onboarding": {"status": "pending"},
+            # The AI agent introduces itself on behalf of this name even if the wizard is skipped.
+            "profile": {"display_name": payload.company_name.strip()},
+        },
     )
     trial = CommercialEntitlementService(session).start_trial(
         tenant.id, days=container.settings.trial_days

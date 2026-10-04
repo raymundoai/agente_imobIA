@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from app.config import Settings, get_settings
 from app.container import Container
+from app.modules.activity.api import router as activity_router
 from app.modules.ai.api import ai_router, knowledge_router
 from app.modules.auth.api.routes import router as auth_router
 from app.modules.billing_usage.api import asaas_webhook_router, billing_router
@@ -82,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(asaas_webhook_router, prefix=resolved.api_prefix)
     application.include_router(billing_router, prefix=resolved.api_prefix)
     application.include_router(network_router, prefix=resolved.api_prefix)
+    application.include_router(activity_router, prefix=resolved.api_prefix)
 
     @application.get("/health", tags=["system"])
     def health() -> dict[str, str]:

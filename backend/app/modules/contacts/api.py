@@ -4,16 +4,26 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from sqlalchemy import or_, select, text
+from sqlalchemy import or_, select, text, update
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
-from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal
+from app.modules.activity.service import model_snapshot, record_activity
+from app.modules.auth.api.dependencies import (
+    CurrentPrincipal,
+    get_current_principal,
+    require_roles,
+)
 from app.modules.contacts.models import ContactModel
-from app.modules.contacts.phone import normalize_contact_phone
+from app.modules.contacts.phone import (
+    normalize_contact_phone,
+    phone_identity_key,
+    phone_variants,
+)
 from app.modules.conversations.adapters.models import ConversationModel
 from app.modules.leads.adapters.models import LeadDemandModel
 from app.modules.tenants.adapters.models import TenantModel
+from app.modules.users.domain.entities import UserRole
 from app.shared.errors.exceptions import ConflictError, NotFoundError
 
 router = APIRouter(prefix="/contacts", tags=["contacts"])
@@ -83,12 +93,12 @@ def create_contact(
     normalized_phone = normalize_contact_phone(payload.phone)
     session.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": f"contact:{principal.tenant_id}:{normalized_phone}"},
+        {"key": f"contact:{principal.tenant_id}:{phone_identity_key(normalized_phone)}"},
     )
     existing = session.scalar(
         select(ContactModel).where(
             ContactModel.tenant_id == principal.tenant_id,
-            ContactModel.phone == normalized_phone,
+            ContactModel.phone.in_(phone_variants(normalized_phone)),
         )
     )
     if existing:
@@ -149,7 +159,7 @@ def update_contact(
     duplicate = session.scalar(
         select(ContactModel).where(
             ContactModel.tenant_id == principal.tenant_id,
-            ContactModel.phone == values["phone"],
+            ContactModel.phone.in_(phone_variants(values["phone"])),
             ContactModel.id != contact_id,
         )
     )
@@ -161,6 +171,52 @@ def update_contact(
     session.commit()
     session.refresh(model)
     return ContactResponse.from_model(model)
+
+
+@router.delete("/{contact_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_contact(
+    contact_id: UUID,
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN, UserRole.GESTOR)),
+    session: Session = Depends(get_db_session),
+) -> None:
+    """Removes the contact card. Conversations and demands stay, without the link to it."""
+
+    model = session.scalar(
+        select(ContactModel).where(
+            ContactModel.tenant_id == principal.tenant_id, ContactModel.id == contact_id
+        )
+    )
+    if model is None:
+        raise NotFoundError("Contact not found")
+    detached = {}
+    for label, table in (("conversa", ConversationModel), ("demanda", LeadDemandModel)):
+        result = session.execute(
+            update(table)
+            .where(table.tenant_id == principal.tenant_id, table.contact_id == contact_id)
+            .values(contact_id=None)
+        )
+        detached[label] = result.rowcount or 0
+    kept = [
+        f"{count} {label}{'s' if count > 1 else ''}" for label, count in detached.items() if count
+    ]
+    record_activity(
+        session,
+        tenant_id=principal.tenant_id,
+        actor_user_id=principal.user_id,
+        entity="contact",
+        entity_id=model.id,
+        action="deleted",
+        summary=f"Contato excluído: {model.name}"
+        + (
+            f" ({' e '.join(kept)} {'continua' if sum(detached.values()) == 1 else 'continuam'}"
+            " no sistema)"
+            if kept
+            else ""
+        ),
+        snapshot=model_snapshot(model),
+    )
+    session.delete(model)
+    session.commit()
 
 
 @router.get("/{contact_id}/profile-picture", response_model=ContactProfilePictureResponse)

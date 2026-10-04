@@ -156,6 +156,8 @@ class TenantProfileSettings(BaseModel):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
 
     display_name: str | None = Field(default=None, max_length=160)
+    # "broker" (corretor autônomo) or "agency" (imobiliária): shapes how the AI presents itself.
+    business_type: Literal["broker", "agency"] | None = None
     legal_name: str | None = Field(default=None, max_length=200)
     document_type: Literal["cpf", "cnpj"] | None = None
     document_number: str | None = Field(default=None, max_length=18)
