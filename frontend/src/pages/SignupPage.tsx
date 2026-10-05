@@ -7,6 +7,7 @@ import { AuthLayout } from "../components/AuthLayout";
 import { PasswordInput } from "../components/PasswordInput";
 
 type SignupForm = {
+  accept_terms: boolean;
   company_name: string;
   admin_name: string;
   email: string;
@@ -14,6 +15,7 @@ type SignupForm = {
 };
 
 const emptyForm: SignupForm = {
+  accept_terms: false,
   company_name: "",
   admin_name: "",
   email: "",
@@ -77,6 +79,13 @@ export function SignupPage() {
           Senha
           <PasswordInput autoComplete="new-password" minLength={12} onChange={(value) => update("password", value)} value={form.password} />
         </label>
+        <label className="terms-check">
+          <input checked={form.accept_terms} onChange={(event) => update("accept_terms", event.target.checked)} type="checkbox" />
+          <span>
+            Li e aceito os <a href="/termos" rel="noreferrer" target="_blank">Termos de uso</a> e a{" "}
+            <a href="/privacidade" rel="noreferrer" target="_blank">Política de privacidade</a>.
+          </span>
+        </label>
         {error ? <div className="error-box">{error}</div> : null}
         <button disabled={loading} type="submit">
           {loading ? "Criando conta..." : "Criar conta e começar"}
@@ -95,5 +104,6 @@ function validate(form: SignupForm): string | null {
   if (form.company_name.trim().length < 2) return "Informe o nome da imobiliária ou seu nome profissional.";
   if (!form.email.includes("@")) return "Informe um email válido.";
   if (form.password.length < 12) return "A senha precisa ter ao menos 12 caracteres.";
+  if (!form.accept_terms) return "Para criar a conta, aceite os Termos de uso e a Política de privacidade.";
   return null;
 }

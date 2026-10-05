@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 import jwt
@@ -12,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.container import Container, get_container, get_db_session
+from app.modules.activity.service import record_activity
 from app.modules.ai.agent_config import (
     REASONING_EFFORTS,
     AgentPromptVersionModel,
@@ -49,6 +51,8 @@ from app.modules.tenants.adapters.repositories import SqlAlchemyTenantRepository
 from app.modules.tenants.api.schemas import CreateTenantRequest
 from app.modules.tenants.application.use_cases import CreateTenantUseCase
 from app.modules.users.adapters.models import UserModel
+from app.modules.users.adapters.repositories import SqlAlchemyUserRepository
+from app.modules.users.application.use_cases import GeneratePasswordSetupUseCase
 from app.shared.errors.exceptions import AuthenticationError, ConfigurationError, NotFoundError
 from app.shared.security.rate_limit import client_ip
 
@@ -988,7 +992,9 @@ def _version_item(version: AgentPromptVersionModel) -> AgentPromptVersionItem:
 
 def _agent_prompt_response(container: Container, session: Session) -> AgentPromptResponse:
     versions = session.scalars(
-        select(AgentPromptVersionModel).order_by(AgentPromptVersionModel.created_at.desc()).limit(30)
+        select(AgentPromptVersionModel)
+        .order_by(AgentPromptVersionModel.created_at.desc())
+        .limit(30)
     ).all()
     settings = container.settings
     return AgentPromptResponse(
@@ -1093,3 +1099,72 @@ def platform_update_tenant_agent(
         override.updated_by_email = principal.email
     session.commit()
     return _tenant_agent_response(session, tenant)
+
+
+# Account access -------------------------------------------------------------
+# There is no e-mail yet, so a person who forgot the password gets a one-time link from
+# the platform team. It is the same link used for invitations and expires in 7 days.
+
+
+class PlatformTenantUser(BaseModel):
+    id: UUID
+    name: str
+    email: str
+    role: str
+    status: str
+    is_master: bool
+
+
+class PasswordLinkResponse(BaseModel):
+    link: str | None
+    token: str
+    expires_at: datetime
+
+
+@router.get("/tenants/{tenant_id}/users", response_model=list[PlatformTenantUser])
+def platform_tenant_users(
+    tenant_id: UUID,
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> list[PlatformTenantUser]:
+    users = session.scalars(
+        select(UserModel)
+        .where(UserModel.tenant_id == tenant_id)
+        .order_by(UserModel.is_master.desc(), UserModel.name)
+    ).all()
+    return [PlatformTenantUser.model_validate(user, from_attributes=True) for user in users]
+
+
+@router.post(
+    "/tenants/{tenant_id}/users/{user_id}/password-link", response_model=PasswordLinkResponse
+)
+def platform_password_link(
+    tenant_id: UUID,
+    user_id: UUID,
+    principal: PlatformPrincipal = Depends(get_platform_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> PasswordLinkResponse:
+    """One-time link for the person to set a new password; current sessions are ended."""
+
+    setup = GeneratePasswordSetupUseCase(SqlAlchemyUserRepository(session)).execute(
+        tenant_id, None, user_id
+    )
+    record_activity(
+        session,
+        tenant_id=tenant_id,
+        actor_user_id=None,
+        entity="user",
+        entity_id=user_id,
+        action="password_link",
+        summary=f"Equipe ImmobIA gerou um link de nova senha para {setup.user.name}",
+        snapshot={"requested_by": principal.email},
+    )
+    session.commit()
+    app_url = container.settings.app_public_url
+    link = (
+        f"{str(app_url).rstrip('/')}/aceitar-convite?token={quote(setup.token)}"
+        if app_url
+        else None
+    )
+    return PasswordLinkResponse(link=link, token=setup.token, expires_at=setup.expires_at)

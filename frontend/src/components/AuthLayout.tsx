@@ -28,7 +28,13 @@ export function AuthLayout({ children, signWord = "ATENDE", signLine = "seus lea
         </figure>
         <p className="auth-brand-note">Atendimento com IA, carteira de imóveis e parcerias entre imobiliárias, em um só lugar.</p>
       </aside>
-      <section className="auth-content">{children}</section>
+      <section className="auth-content">
+        {children}
+        <nav aria-label="Documentos" className="auth-legal">
+          <a href="/termos">Termos de uso</a>
+          <a href="/privacidade">Privacidade</a>
+        </nav>
+      </section>
     </main>
   );
 }

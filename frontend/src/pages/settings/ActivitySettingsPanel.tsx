@@ -28,6 +28,7 @@ const ACTION_LABELS: Record<string, string> = {
   deleted: "Excluído",
   merged: "Juntado",
   closed: "Encerrado",
+  password_link: "Senha",
 };
 
 // Fields worth showing from the copy of a removed record, in reading order.

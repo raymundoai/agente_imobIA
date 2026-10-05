@@ -12,6 +12,7 @@ import { ContactsPage } from "./pages/ContactsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { InviteAcceptancePage } from "./pages/InviteAcceptancePage";
+import { LegalPage } from "./pages/LegalPage";
 import { OnboardingWizard } from "./pages/OnboardingWizard";
 import { PropertiesPage } from "./pages/PropertiesPage";
 import { PropertySearchPage } from "./pages/PropertySearchPage";
@@ -52,6 +53,10 @@ export function App() {
     // Only re-check when the account changes, not on every token refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, tenantId, isAdmin]);
+
+  if (window.location.pathname === "/termos" || window.location.pathname === "/privacidade") {
+    return <LegalPage kind={window.location.pathname === "/termos" ? "terms" : "privacy"} />;
+  }
 
   if (window.location.pathname === "/aceitar-convite") {
     return <InviteAcceptancePage />;

@@ -171,7 +171,9 @@ class GeneratePasswordSetupUseCase:
         self._users = users
         self._ttl = timedelta(hours=ttl_hours)
 
-    def execute(self, tenant_id: UUID, actor_user_id: UUID, user_id: UUID) -> PasswordSetup:
+    def execute(self, tenant_id: UUID, actor_user_id: UUID | None, user_id: UUID) -> PasswordSetup:
+        """actor_user_id is None when the platform team generates the link."""
+
         current = self._users.get_by_id(tenant_id, user_id)
         if current is None:
             raise NotFoundError("User not found")

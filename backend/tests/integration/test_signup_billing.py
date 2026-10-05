@@ -19,6 +19,7 @@ SIGNUP = {
     "admin_name": "Ana Corretora",
     "email": "ana@horizonte.example.com",
     "password": "senha-forte-horizonte-1",
+    "accept_terms": True,
 }
 
 
@@ -96,6 +97,15 @@ def test_signup_is_disabled_by_default(client: TestClient) -> None:
     assert Settings.model_fields["public_signup_enabled"].default is False
     client.app.state.container.settings.public_signup_enabled = False
     assert client.post("/signup", json=SIGNUP).status_code == 403
+
+
+def test_signup_requires_accepting_the_terms(signup_enabled: TestClient) -> None:
+    refused = signup_enabled.post("/signup", json={**SIGNUP, "accept_terms": False})
+    assert refused.status_code == 422
+    body = _signup(signup_enabled)
+    tenant = signup_enabled.get(f"/tenants/{body['tenant_id']}", headers=_auth(body)).json()
+    assert tenant["settings"]["legal"]["terms_version"] == "2026-10-05"
+    assert tenant["settings"]["legal"]["accepted_by"] == SIGNUP["email"]
 
 
 def test_signup_waits_for_first_subscription_without_allowance(

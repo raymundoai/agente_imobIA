@@ -1,6 +1,7 @@
 import re
 import secrets
 import unicodedata
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
@@ -64,6 +65,11 @@ def signup(
             "onboarding": {"status": "pending"},
             # The AI agent introduces itself on behalf of this name even if the wizard is skipped.
             "profile": {"display_name": payload.company_name.strip()},
+            "legal": {
+                "terms_version": TERMS_VERSION,
+                "accepted_at": datetime.now(UTC).isoformat(),
+                "accepted_by": str(payload.email),
+            },
         },
     )
     commercial = CommercialEntitlementService(session)
@@ -85,6 +91,10 @@ def signup(
         ),
         trial_ends_at=trial.trial_ends_at,
     )
+
+
+# Date of the terms of use and privacy policy shown at signup (frontend: src/legal/content.ts).
+TERMS_VERSION = "2026-10-05"
 
 
 def _available_slug(repository: SqlAlchemyTenantRepository, company_name: str) -> str:

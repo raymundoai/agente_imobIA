@@ -19,6 +19,7 @@ import { MetricCard } from "../components/MetricCard";
 import { runWithLoading } from "../lib/asyncState";
 import { AgentPromptSettings, TenantAgentInstructions } from "./AgentPromptSettings";
 import { BetaPricesSettings } from "./BetaPricesSettings";
+import { TenantAccess } from "./TenantAccess";
 import { BrandMark } from "../components/BrandMark";
 
 type Dashboard = {
@@ -967,6 +968,7 @@ function TenantDetail({
           <button className="primary-button form-action" disabled={!asaasPlanCode || Boolean(openAsaasSubscription)} type="submit">Criar assinatura PIX</button>
         </form>
       </div>
+      <TenantAccess tenantId={tenant.id} token={token} />
       <TenantAgentInstructions tenantId={tenant.id} token={token} />
       <div className="settings-subsection">
         <h3>Telemetria técnica interna</h3>

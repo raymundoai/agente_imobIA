@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.modules.tenants.domain.entities import Tenant
 
@@ -22,6 +22,15 @@ class SignupRequest(BaseModel):
     admin_name: str = Field(min_length=2, max_length=160)
     email: EmailStr
     password: str = Field(min_length=12, max_length=128)
+    # The terms of use and privacy policy must be accepted to open an account.
+    accept_terms: bool
+
+    @field_validator("accept_terms")
+    @classmethod
+    def require_terms(cls, value: bool) -> bool:
+        if not value:
+            raise ValueError("Aceite os Termos de uso e a Política de privacidade para continuar")
+        return value
 
 
 class SignupResponse(BaseModel):
