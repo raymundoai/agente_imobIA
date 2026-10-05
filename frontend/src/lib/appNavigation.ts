@@ -61,3 +61,6 @@ export function openAppLink(href: string) {
   window.history.pushState({}, "", href);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
+
+/** Fired when the URL changes inside a page (e.g. a settings tab) without a popstate. */
+export const ROUTE_CHANGED_EVENT = "immobia:route-changed";

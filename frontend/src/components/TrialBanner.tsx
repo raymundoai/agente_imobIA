@@ -30,6 +30,10 @@ export function TrialBanner() {
     message = days
       ? `Teste grátis: ${days} dia${days === 1 ? "" : "s"} restante${days === 1 ? "" : "s"}.`
       : "Seu teste grátis terminou. Assine para continuar usando a IA e as buscas.";
+  } else if (overview.status === "pending") {
+    message = overview.beta_pricing
+      ? "Conta pronta, com condição de beta tester. Escolha um plano para ativar a IA."
+      : "Conta pronta. Escolha um plano para ativar a IA, as buscas e a otimização de fotos.";
   } else if (overview.status === "past_due") {
     message = "Há um pagamento em atraso. O plano não renova até a quitação.";
   } else if (overview.status === "cancelled" && overview.plan.monthly_price_cents > 0) {

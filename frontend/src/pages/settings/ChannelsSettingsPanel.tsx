@@ -1,16 +1,17 @@
-import { Facebook, Globe, Instagram, MessageCircle, Send } from "lucide-react";
+import { Globe } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
 import { getTokenClaims } from "../../auth/tokenClaims";
 import { Card } from "../../components/Card";
+import { ChannelLogo } from "../../components/ChannelLogo";
 import { ConnectionCard, ConnectionSections } from "../../components/ConnectionCard";
 import { useWhatsappConnection, WhatsappConnectModal } from "../../components/WhatsappConnect";
 import { formatPhone } from "../../lib/format";
 
 const UPCOMING_CHANNELS = [
-  { key: "telegram", name: "Telegram", icon: Send, description: "Atenda leads que chegam pelo seu bot do Telegram." },
-  { key: "instagram", name: "Instagram Direct", icon: Instagram, description: "Responda mensagens do perfil da imobiliária." },
-  { key: "messenger", name: "Facebook Messenger", icon: Facebook, description: "Conversas da página no Facebook, no mesmo lugar." },
-  { key: "site", name: "Chat no site", icon: Globe, description: "Um balão de conversa para o site da imobiliária." },
+  { key: "telegram", name: "Telegram", icon: <ChannelLogo brand="telegram" />, description: "Atenda leads que chegam pelo seu bot do Telegram." },
+  { key: "instagram", name: "Instagram Direct", icon: <ChannelLogo brand="instagram" />, description: "Responda mensagens do perfil da imobiliária." },
+  { key: "messenger", name: "Facebook Messenger", icon: <ChannelLogo brand="messenger" />, description: "Conversas da página no Facebook, no mesmo lugar." },
+  { key: "site", name: "Chat no site", icon: <Globe size={20} />, description: "Um balão de conversa para o site da imobiliária." },
 ];
 
 export function ChannelsSettingsPanel() {
@@ -38,14 +39,15 @@ export function ChannelsSettingsPanel() {
             ? "Não conseguimos consultar a conexão agora. Tente conectar de novo."
             : "Conecte o número da imobiliária lendo um QR Code."
       }
-      icon={<MessageCircle size={20} />}
+      icon={<ChannelLogo brand="whatsapp" />}
       key="whatsapp"
+      brandIcon
       name="WhatsApp"
       state={whatsapp.checking ? "available" : whatsapp.connected ? "connected" : "available"}
     />
   );
-  const upcoming = UPCOMING_CHANNELS.map(({ key, name, icon: Icon, description }) => (
-    <ConnectionCard description={description} icon={<Icon size={20} />} key={key} name={name} state="soon" />
+  const upcoming = UPCOMING_CHANNELS.map(({ key, name, icon, description }) => (
+    <ConnectionCard brandIcon={key !== "site"} description={description} icon={icon} key={key} name={name} state="soon" />
   ));
 
   return (

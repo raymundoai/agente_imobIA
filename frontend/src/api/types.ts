@@ -499,7 +499,9 @@ export type SignupResponse = {
 export type BillingPlan = {
   code: string;
   name: string;
+  /** What this account pays (the beta price for beta testers). */
   monthly_price_cents: number;
+  list_price_cents: number;
   ai_attendances: number;
   property_searches: number;
   image_optimizations: number;
@@ -509,14 +511,33 @@ export type BillingPlan = {
 export type PixCharge = {
   payment_id: string;
   value_cents: number;
-  due_date: string;
+  due_date: string | null;
   payload: string;
   encoded_image: string;
   expiration_date: string | null;
 };
 
+export type PackOffer = {
+  resource: "ai_attendance" | "property_search_standard" | "image_optimization";
+  units: number;
+  price_cents: number;
+};
+
+export type PackOrder = {
+  id: string;
+  resource: PackOffer["resource"];
+  units: number;
+  value_cents: number;
+  status: "pending_payment" | "paid";
+  invoice_url: string | null;
+  created_at: string;
+};
+
 export type BillingOverview = {
-  status: "pilot" | "trial" | "active" | "past_due" | "cancelled";
+  status: "pilot" | "trial" | "pending" | "active" | "past_due" | "cancelled";
+  beta_pricing: boolean;
+  packs: PackOffer[];
+  pack_orders: PackOrder[];
   plan: BillingPlan;
   trial_ends_at: string | null;
   cycle_ends_at: string;

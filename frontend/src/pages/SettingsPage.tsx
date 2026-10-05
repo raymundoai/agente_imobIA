@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { request } from "../api/client";
 import type { Tenant } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { ROUTE_CHANGED_EVENT } from "../lib/appNavigation";
 import { getTokenClaims } from "../auth/tokenClaims";
 import { ActivitySettingsPanel } from "./settings/ActivitySettingsPanel";
 import { AgentsSettingsPanel } from "./settings/AgentsSettingsPanel";
@@ -86,6 +87,7 @@ export function SettingsPage() {
     window.history.pushState({}, "", `${url.pathname}${url.search}`);
     setDirty(false);
     setActiveTab(tab);
+    window.dispatchEvent(new Event(ROUTE_CHANGED_EVENT));
   }
 
   return (

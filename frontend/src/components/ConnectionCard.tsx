@@ -18,6 +18,7 @@ export function ConnectionCard({
   action,
   onOpen,
   tone,
+  brandIcon = false,
 }: {
   icon: ReactNode;
   name: string;
@@ -26,11 +27,13 @@ export function ConnectionCard({
   action?: ReactNode;
   onOpen?: () => void;
   tone?: string;
+  /** Third-party logos keep their own colours on a neutral tile. */
+  brandIcon?: boolean;
 }) {
   const body = (
     <>
       <div className="connection-card-top">
-        <span className="connection-icon" style={tone ? { background: tone, color: "#fff" } : undefined}>{icon}</span>
+        <span className={brandIcon ? "connection-icon brand" : "connection-icon"} style={tone ? { background: tone, color: "#fff" } : undefined}>{icon}</span>
         <span className={`connection-state state-${state}`}>{STATE_LABELS[state]}</span>
       </div>
       <strong className="connection-name">{name}</strong>

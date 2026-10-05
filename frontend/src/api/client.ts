@@ -57,10 +57,17 @@ async function authenticatedFetch(
   return response;
 }
 
+export const QUOTA_EXHAUSTED_EVENT = "immobia:quota-exhausted";
+
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const text = await response.text();
-    throw new ApiError(readErrorMessage(text), response.status);
+    const message = readErrorMessage(text);
+    if (response.status === 402 && text.includes("commercial_allowance_exhausted")) {
+      // One place reacts to an exhausted allowance: the app offers a pack or an upgrade.
+      window.dispatchEvent(new CustomEvent(QUOTA_EXHAUSTED_EVENT, { detail: { message } }));
+    }
+    throw new ApiError(message, response.status);
   }
   if (response.status === 204) {
     return undefined as T;

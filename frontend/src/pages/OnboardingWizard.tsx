@@ -291,21 +291,37 @@ export function OnboardingWizard({
 
         {step === "done" ? (
           <>
-            <StepTitle
-              title="Tudo pronto para começar"
-              text={
-                trialDays !== null
-                  ? `Seu teste grátis vai até ${new Date(trialEndsAt as string).toLocaleDateString("pt-BR")} (${trialDays} dia${trialDays === 1 ? "" : "s"}). Escolha um plano quando quiser, sem perder o que já configurou.`
-                  : "Sua conta está configurada."
-              }
-            />
+            {trialDays !== null ? (
+              <StepTitle
+                title="Tudo pronto para começar"
+                text={`Seu teste grátis vai até ${new Date(trialEndsAt as string).toLocaleDateString("pt-BR")} (${trialDays} dia${trialDays === 1 ? "" : "s"}). Escolha um plano quando quiser, sem perder o que já configurou.`}
+              />
+            ) : (
+              <StepTitle
+                title="Falta só escolher o plano"
+                text="Sua conta está configurada. O agente começa a atender assim que a primeira mensalidade for paga."
+              />
+            )}
             <div className="onboarding-choice">
-              <button className="primary-button" disabled={saving} onClick={() => void finish("completed")} type="button">
-                Ir para o painel
-              </button>
-              <button className="secondary-button" disabled={saving} onClick={() => void finish("completed", "/configuracoes?aba=billing")} type="button">
-                Ver planos
-              </button>
+              {trialDays !== null ? (
+                <>
+                  <button className="primary-button" disabled={saving} onClick={() => void finish("completed")} type="button">
+                    Ir para o painel
+                  </button>
+                  <button className="secondary-button" disabled={saving} onClick={() => void finish("completed", "/configuracoes?aba=billing")} type="button">
+                    Ver planos
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button className="primary-button" disabled={saving} onClick={() => void finish("completed", "/configuracoes?aba=billing")} type="button">
+                    Escolher plano
+                  </button>
+                  <button className="secondary-button" disabled={saving} onClick={() => void finish("completed")} type="button">
+                    Ir para o painel
+                  </button>
+                </>
+              )}
             </div>
           </>
         ) : null}

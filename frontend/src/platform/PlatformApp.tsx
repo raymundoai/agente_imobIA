@@ -18,6 +18,7 @@ import { Card } from "../components/Card";
 import { MetricCard } from "../components/MetricCard";
 import { runWithLoading } from "../lib/asyncState";
 import { AgentPromptSettings, TenantAgentInstructions } from "./AgentPromptSettings";
+import { BetaPricesSettings } from "./BetaPricesSettings";
 import { BrandMark } from "../components/BrandMark";
 
 type Dashboard = {
@@ -50,7 +51,8 @@ type Tenant = {
   credit_enforcement: "meter_only" | "enforce";
   unlimited_messages: boolean;
   commercial_plan: string;
-  commercial_status: "pilot" | "trial" | "active" | "past_due" | "cancelled";
+  commercial_status: "pilot" | "trial" | "pending" | "active" | "past_due" | "cancelled";
+  beta_pricing: boolean;
   commercial_enforcement: "meter_only" | "enforce";
   commercial_cycle_ends_at: string;
   commercial_available: Record<string, number>;
@@ -329,6 +331,7 @@ export function PlatformApp() {
             <p>Serviços externos usados por toda a plataforma.</p>
           </div>
           <AsaasSetup token={token} />
+          <BetaPricesSettings token={token} />
         </section>
       ) : null}
       {!loading && activeTab === "clients" ? (
@@ -665,6 +668,21 @@ function TenantDetail({
     }
   }
 
+  async function toggleBeta(next: boolean) {
+    setFeedback(null);
+    try {
+      await request(
+        `/platform/tenants/${tenant.id}/beta`,
+        { method: "PATCH", body: JSON.stringify({ beta_pricing: next }) },
+        token,
+      );
+      setFeedback(next ? "Cliente marcado como beta tester." : "Condição beta removida.");
+      onChanged();
+    } catch (reason) {
+      setFeedback(readError(reason));
+    }
+  }
+
   async function grantUnits(event: FormEvent) {
     event.preventDefault();
     if (!window.confirm(`Adicionar ${Number(units).toLocaleString("pt-BR")} unidades para ${tenant.name}?`)) return;
@@ -811,6 +829,13 @@ function TenantDetail({
       </div>
       <div className="settings-subsection">
         <h3>Plano e franquias comerciais</h3>
+        <label className="beta-toggle">
+          <input checked={tenant.beta_pricing} onChange={(event) => void toggleBeta(event.target.checked)} type="checkbox" />
+          <span>
+            <strong>Beta tester</strong>
+            <small>Vê e paga os preços beta (Configurações → Preços beta). Vale a partir da próxima assinatura.</small>
+          </span>
+        </label>
         <div className="contact-info-grid">
           <div>
             <Coins size={15} />

@@ -58,7 +58,7 @@ export function SignupPage() {
       <form className="login-card signup-card" onSubmit={submit}>
         <div>
           <h1>Criar conta</h1>
-          <p>Teste grátis por 7 dias. Depois do cadastro, você configura a imobiliária em poucos passos.</p>
+          <p>Depois do cadastro, você configura a imobiliária em poucos passos e escolhe o plano.</p>
         </div>
         <label>
           Seu nome

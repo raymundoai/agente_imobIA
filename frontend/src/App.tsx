@@ -4,6 +4,8 @@ import type { BillingOverview, Tenant } from "./api/types";
 import { useAuth } from "./auth/AuthContext";
 import { getTokenClaims } from "./auth/tokenClaims";
 import { AppShell } from "./components/AppShell";
+import { HelperAssistant } from "./components/assistant/HelperAssistant";
+import { QuotaExhaustedModal } from "./components/QuotaExhaustedModal";
 import { TrialBanner } from "./components/TrialBanner";
 import { ConversationsPage } from "./pages/ConversationsPage";
 import { ContactsPage } from "./pages/ContactsPage";
@@ -84,6 +86,8 @@ export function App() {
       }}
     >
       <TrialBanner />
+      <QuotaExhaustedModal />
+      <HelperAssistant />
       {renderPage(page)}
     </AppShell>
   );

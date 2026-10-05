@@ -9,7 +9,7 @@ import {
   Users,
 } from "lucide-react";
 import { request } from "../api/client";
-import type { ContactKind, ConversationTimeline, DashboardStats } from "../api/types";
+import type { BillingOverview, ContactKind, ConversationTimeline, DashboardStats } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { Card } from "../components/Card";
 import { formatNumber } from "../lib/format";
@@ -32,6 +32,7 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<OperationalAlert[]>([]);
+  const [billingStatus, setBillingStatus] = useState<BillingOverview["status"] | null>(null);
   const [contactKind, setContactKind] = useState<ContactKind | "all">("all");
   const [period, setPeriod] = useState<Period>(30);
   const [timeline, setTimeline] = useState<ConversationTimeline | null>(null);
@@ -43,7 +44,9 @@ export function DashboardPage() {
     void Promise.allSettled([
       request<DashboardStats>("/dashboard/stats", {}, token),
       loadOperationalAlerts(token),
-    ]).then(([statsResult, alertsResult]) => {
+      request<BillingOverview>("/billing", {}, token),
+    ]).then(([statsResult, alertsResult, billingResult]) => {
+      setBillingStatus(billingResult.status === "fulfilled" ? billingResult.value.status : null);
       if (statsResult.status === "rejected") {
         setError(statsResult.reason instanceof Error ? statsResult.reason.message : "Falha ao carregar o painel.");
         setStats(null);
@@ -74,7 +77,7 @@ export function DashboardPage() {
   return (
     <section className="page-stack">
       {(() => {
-        const steps = stats ? firstSteps(stats, alerts) : [];
+        const steps = stats ? firstSteps(stats, alerts, billingStatus) : [];
         const showSteps = steps.some((step) => !step.done);
         // While the checklist is on screen it already asks for WhatsApp; no need to say it twice.
         const visibleAlerts = showSteps ? alerts.filter((alert) => alert.key !== "whatsapp") : alerts;
@@ -164,9 +167,18 @@ export function DashboardPage() {
 
 type Step = { key: string; label: string; detail: string; done: boolean; href: string; action: string };
 
-function firstSteps(stats: DashboardStats, alerts: OperationalAlert[]): Step[] {
+function firstSteps(stats: DashboardStats, alerts: OperationalAlert[], billing: BillingOverview["status"] | null): Step[] {
   const whatsappOk = !alerts.some((alert) => alert.key === "whatsapp" || alert.key === "whatsapp-unknown");
+  const subscribed = billing === null || !["pending", "cancelled"].includes(billing);
   return [
+    {
+      key: "plan",
+      label: "Escolher um plano",
+      detail: "O agente começa a atender assim que a primeira mensalidade é paga.",
+      done: subscribed,
+      href: "/configuracoes?aba=billing",
+      action: "Ver planos",
+    },
     {
       key: "whatsapp",
       label: "Conectar o WhatsApp",

@@ -1,4 +1,4 @@
-import { Check, Database, Loader2 } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { request } from "../../api/client";
 import type { IntegrationSetupSummary } from "../../api/types";
@@ -39,7 +39,7 @@ export function IntegrationsSettingsPanel() {
   const card = (item: IntegrationSetupSummary) => (
     <ConnectionCard
       description={DESCRIPTIONS[item.provider] ?? item.target_resources.join(", ")}
-      icon={<Database size={20} />}
+      icon={<span className="initial-badge" aria-hidden="true">{item.name.charAt(0)}</span>}
       key={item.provider}
       name={item.name}
       onOpen={() => setOpenProvider(item.provider)}

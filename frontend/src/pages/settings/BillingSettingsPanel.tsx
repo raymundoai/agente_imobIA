@@ -1,10 +1,11 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { CheckCircle2, Copy, CreditCard, ExternalLink, Loader2, QrCode, RefreshCw } from "lucide-react";
+import { CheckCircle2, Copy, CreditCard, ExternalLink, Image, Loader2, MessageSquare, QrCode, RefreshCw, Search } from "lucide-react";
 import { request } from "../../api/client";
-import type { BillingOverview, BillingPlan, PixCharge } from "../../api/types";
+import type { BillingOverview, BillingPlan, PackOffer, PackOrder, PixCharge } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { getTokenClaims } from "../../auth/tokenClaims";
 import { Card } from "../../components/Card";
+import { Modal } from "../../components/Modal";
 import { BILLING_CHANGED_EVENT } from "../../components/TrialBanner";
 import { formatDocument, formatNumber } from "../../lib/format";
 
@@ -18,9 +19,17 @@ const subscriptionStatusLabels: Record<string, string> = {
   past_due: "Pagamento em atraso",
 };
 
+const PACK_LABELS: Record<PackOffer["resource"], { title: string; unit: string; icon: typeof Search }> = {
+  ai_attendance: { title: "Atendimentos de IA", unit: "atendimentos", icon: MessageSquare },
+  property_search_standard: { title: "Buscas de imóveis", unit: "buscas", icon: Search },
+  image_optimization: { title: "Otimização de fotos", unit: "fotos", icon: Image },
+};
+
 export function BillingSettingsPanel() {
   const { token } = useAuth();
-  const isAdmin = getTokenClaims(token)?.role === "admin";
+  const role = getTokenClaims(token)?.role;
+  const isAdmin = role === "admin";
+  const canBuyPacks = role === "admin" || role === "gestor";
   const [overview, setOverview] = useState<BillingOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,9 +76,19 @@ export function BillingSettingsPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // Arriving from "Comprar pacote" (#pacotes), bring the packs into view once they render.
+  const hasPacks = Boolean(overview?.packs.length);
+  useEffect(() => {
+    if (hasPacks && window.location.hash === "#pacotes") {
+      document.getElementById("pacotes")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [hasPacks]);
+
   // While a charge is open, keep checking so the screen flips to "active" on its own
   // as soon as the payment webhook is processed.
-  const waiting = Boolean(overview?.subscription && awaitingPayment.has(overview.subscription.status));
+  const [packOrder, setPackOrder] = useState<PackOrder | null>(null);
+  const waitingPack = Boolean(overview?.pack_orders.some((order) => order.status === "pending_payment"));
+  const waiting = Boolean(overview?.subscription && awaitingPayment.has(overview.subscription.status)) || waitingPack;
   useEffect(() => {
     if (!waiting) return;
     const handle = window.setInterval(() => {
@@ -252,11 +271,145 @@ export function BillingSettingsPanel() {
       ) : error ? (
         <div className="error-box">{error}</div>
       ) : null}
+
+      {overview.packs.length ? (
+        <PackSection
+          canBuy={canBuyPacks}
+          onBought={(order) => {
+            setPackOrder(order);
+            void load();
+          }}
+          onOpenOrder={setPackOrder}
+          orders={overview.pack_orders}
+          packs={overview.packs}
+          token={token}
+        />
+      ) : null}
+
+      {packOrder ? (
+        <PackPaymentModal
+          onClose={() => setPackOrder(null)}
+          order={overview.pack_orders.find((order) => order.id === packOrder.id) ?? packOrder}
+          token={token}
+        />
+      ) : null}
     </Card>
   );
 }
 
-function PixPayment({ token, invoiceUrl }: { token: string | null; invoiceUrl?: string | null }) {
+function PackSection({
+  packs,
+  orders,
+  canBuy,
+  token,
+  onBought,
+  onOpenOrder,
+}: {
+  packs: PackOffer[];
+  orders: PackOrder[];
+  canBuy: boolean;
+  token: string | null;
+  onBought: (order: PackOrder) => void;
+  onOpenOrder: (order: PackOrder) => void;
+}) {
+  const [buying, setBuying] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // One key per resource, kept across retries so a lost response never charges twice.
+  const keys = useRef<Record<string, string>>({});
+
+  async function buy(pack: PackOffer) {
+    keys.current[pack.resource] ??= crypto.randomUUID();
+    setBuying(pack.resource);
+    setError(null);
+    try {
+      const order = await request<PackOrder>(
+        "/billing/packs",
+        { method: "POST", body: JSON.stringify({ resource: pack.resource, idempotency_key: keys.current[pack.resource] }) },
+        token,
+      );
+      delete keys.current[pack.resource];
+      onBought(order);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível gerar a cobrança do pacote.");
+    } finally {
+      setBuying(null);
+    }
+  }
+
+  const pending = orders.filter((order) => order.status === "pending_payment");
+  return (
+    <section className="pack-section" id="pacotes">
+      <div>
+        <h3>Pacotes adicionais</h3>
+        <p>Se a franquia do mês acabar, compre um pacote avulso. Os créditos entram assim que o pagamento é confirmado e valem por 90 dias.</p>
+      </div>
+      <div className="pack-grid">
+        {packs.map((pack) => {
+          const label = PACK_LABELS[pack.resource];
+          const Icon = label.icon;
+          return (
+            <article className="pack-card" key={pack.resource}>
+              <span className="pack-icon"><Icon size={18} /></span>
+              <strong>{formatNumber(pack.units)} {label.unit}</strong>
+              <small>{label.title}</small>
+              <span className="pack-price">{formatBrl(pack.price_cents)}</span>
+              {canBuy ? (
+                <button className="secondary-button" disabled={buying !== null} onClick={() => void buy(pack)} type="button">
+                  {buying === pack.resource ? <><Loader2 className="spin" size={14} /> Gerando…</> : "Comprar"}
+                </button>
+              ) : null}
+            </article>
+          );
+        })}
+      </div>
+      {!canBuy ? <small className="field-hint">Somente administradores e gestores podem comprar pacotes.</small> : null}
+      {error ? <div className="error-box" role="alert">{error}</div> : null}
+      {pending.length ? (
+        <ul className="pack-pending">
+          {pending.map((order) => (
+            <li key={order.id}>
+              <span>{formatNumber(order.units)} {PACK_LABELS[order.resource].unit} · {formatBrl(order.value_cents)} · aguardando pagamento</span>
+              <button className="link-button" onClick={() => onOpenOrder(order)} type="button">Pagar</button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
+function PackPaymentModal({ order, token, onClose }: { order: PackOrder; token: string | null; onClose: () => void }) {
+  const paid = order.status === "paid";
+  return (
+    <Modal
+      description={paid ? undefined : `${formatNumber(order.units)} ${PACK_LABELS[order.resource].unit} por ${formatBrl(order.value_cents)}`}
+      footer={<button className={paid ? "primary-button" : "secondary-button"} onClick={onClose} type="button">{paid ? "Concluir" : "Fechar"}</button>}
+      onClose={onClose}
+      size="wide"
+      title={paid ? "Pacote liberado" : "Pagar pacote adicional"}
+    >
+      {paid ? (
+        <div className="qr-state qr-success">
+          <CheckCircle2 size={40} />
+          <strong>{formatNumber(order.units)} {PACK_LABELS[order.resource].unit} adicionados</strong>
+          <span>Os créditos já estão disponíveis e valem por 90 dias.</span>
+        </div>
+      ) : (
+        <PixPayment endpoint={`/billing/packs/${order.id}/pix`} invoiceUrl={order.invoice_url} token={token} />
+      )}
+    </Modal>
+  );
+}
+
+function PixPayment({
+  token,
+  invoiceUrl,
+  endpoint = "/billing/pix",
+}: {
+  token: string | null;
+  invoiceUrl?: string | null;
+  endpoint?: string;
+}) {
   const [pix, setPix] = useState<PixCharge | null>(null);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -265,14 +418,14 @@ function PixPayment({ token, invoiceUrl }: { token: string | null; invoiceUrl?: 
 
   useEffect(() => {
     setFailed(false);
-    request<PixCharge>("/billing/pix", {}, token)
+    request<PixCharge>(endpoint, {}, token)
       .then((value) => {
         setPix(value);
         setError(null);
       })
       // The payment provider's own message is technical; the way out is what matters here.
       .catch(() => setFailed(true));
-  }, [token, attempt]);
+  }, [token, attempt, endpoint]);
 
   async function copy() {
     if (!pix) return;
@@ -290,7 +443,7 @@ function PixPayment({ token, invoiceUrl }: { token: string | null; invoiceUrl?: 
       <div className="pix-unavailable" role="alert">
         <div>
           <strong>Não conseguimos gerar o QR Code do PIX agora.</strong>
-          <span>O sistema de pagamentos não respondeu. Sua assinatura já está criada; tente de novo ou pague direto pela página segura da cobrança.</span>
+          <span>O sistema de pagamentos não respondeu. A cobrança já está criada; tente de novo ou pague direto pela página segura dela.</span>
         </div>
         <div className="pix-unavailable-actions">
           <button className="secondary-button" onClick={() => setAttempt((value) => value + 1)} type="button">Tentar de novo</button>
@@ -338,6 +491,12 @@ function PlanOption({ plan, selected, onSelect }: { plan: BillingPlan; selected:
     <label className={selected ? "plan-option selected" : "plan-option"}>
       <input checked={selected} name="plan" type="radio" onChange={onSelect} />
       <strong>{plan.name}</strong>
+      {plan.list_price_cents > plan.monthly_price_cents ? (
+        <span className="plan-beta">
+          <s>{formatBrl(plan.list_price_cents)}</s>
+          <em>Condição beta</em>
+        </span>
+      ) : null}
       <span className="plan-price">{formatBrl(plan.monthly_price_cents)}<small>/mês</small></span>
       <ul>
         <li>{plan.ai_attendances ? `${formatNumber(plan.ai_attendances)} atendimentos de IA` : "Sem atendimento de IA"}</li>
@@ -359,6 +518,7 @@ function statusHeadline(overview: BillingOverview) {
     const days = trialDaysLeft(overview);
     return days ? `Teste grátis: ${days} dia${days === 1 ? "" : "s"} restante${days === 1 ? "" : "s"}` : "Seu teste grátis terminou";
   }
+  if (overview.status === "pending") return "Escolha um plano para ativar a IA";
   if (overview.status === "active") return `Plano ${overview.plan.name} ativo`;
   if (overview.status === "past_due") return "Pagamento em atraso";
   if (overview.status === "cancelled") return "Assinatura encerrada";
@@ -370,6 +530,11 @@ function statusDetail(overview: BillingOverview) {
     return overview.trial_ends_at
       ? `O teste vai até ${new Date(overview.trial_ends_at).toLocaleDateString("pt-BR")}. Assine para continuar usando a IA e as buscas.`
       : "";
+  }
+  if (overview.status === "pending") {
+    return overview.beta_pricing
+      ? "Sua conta tem a condição especial de beta tester. O atendimento com IA, as buscas e a otimização de fotos começam assim que a primeira mensalidade for paga."
+      : "O atendimento com IA, as buscas e a otimização de fotos começam assim que a primeira mensalidade for paga.";
   }
   if (overview.status === "past_due") return "Você ainda usa o que resta deste mês, mas o plano não renova até o pagamento.";
   if (overview.status === "cancelled") return "IA e buscas estão bloqueadas. Escolha um plano para voltar a usar.";

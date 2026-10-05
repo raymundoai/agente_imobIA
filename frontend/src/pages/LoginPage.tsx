@@ -73,7 +73,7 @@ export function LoginPage() {
             {loading ? "Entrando..." : "Entrar"}
           </button>
           <a className="login-switch" href="/criar-conta">
-            Ainda não tem conta? <strong>Criar conta grátis</strong>
+            Ainda não tem conta? <strong>Criar conta</strong>
           </a>
         </form>
       )}
