@@ -1,5 +1,5 @@
 import { BrandMark } from "../components/BrandMark";
-import { type LegalDocument, PRIVACY, TERMS, TERMS_VERSION } from "../legal/content";
+import { BETA_NOTICE, type LegalDocument, PRIVACY, TERMS, TERMS_VERSION } from "../legal/content";
 
 /** Public page for the terms of use (/termos) and the privacy policy (/privacidade). */
 export function LegalPage({ kind }: { kind: "terms" | "privacy" }) {
@@ -20,6 +20,7 @@ export function LegalPage({ kind }: { kind: "terms" | "privacy" }) {
       <article className="legal-body">
         <h1>{doc.title}</h1>
         <p className="legal-updated">Atualizado em {updated}</p>
+        {BETA_NOTICE ? <p className="legal-beta">{BETA_NOTICE}</p> : null}
         <p className="legal-intro">{doc.intro}</p>
         {doc.sections.map((section) => (
           <section key={section.heading}>

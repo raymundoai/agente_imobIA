@@ -4,11 +4,13 @@ import type { CompanyOption } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { AuthLayout } from "../components/AuthLayout";
 import { PasswordInput } from "../components/PasswordInput";
+import { COMPANY } from "../legal/content";
 
 export function LoginPage() {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [forgotOpen, setForgotOpen] = useState(false);
   const [companies, setCompanies] = useState<CompanyOption[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -68,6 +70,15 @@ export function LoginPage() {
             Senha
             <PasswordInput autoComplete="current-password" onChange={setPassword} value={password} />
           </label>
+          <button className="link-button forgot-link" onClick={() => setForgotOpen((open) => !open)} type="button">
+            Esqueci minha senha
+          </button>
+          {forgotOpen ? (
+            <div className="forgot-help" role="status">
+              <p><strong>Faz parte de uma equipe?</strong> Peça ao administrador da sua conta um link de nova senha (em Configurações → Equipe).</p>
+              <p><strong>É o administrador?</strong> Fale com o suporte da ImmobIA em {COMPANY.supportEmail} e enviamos um link para você criar uma senha nova.</p>
+            </div>
+          ) : null}
           {error ? <div className="error-box">{error}</div> : null}
           <button disabled={loading} type="submit">
             {loading ? "Entrando..." : "Entrar"}

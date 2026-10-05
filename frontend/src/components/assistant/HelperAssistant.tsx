@@ -2,6 +2,7 @@ import { ArrowLeft, BookOpen, Search, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { ARTICLES, type Article, type HelpContext, SCREENS, type TourStep } from "../../help/content";
 import { openAppLink, pageFromPath, ROUTE_CHANGED_EVENT } from "../../lib/appNavigation";
+import { openFeedback } from "../FeedbackModal";
 import { Modal } from "../Modal";
 import { Mascot } from "./Mascot";
 
@@ -134,6 +135,9 @@ export function HelperAssistant() {
                 ))}
               </div>
             ) : null}
+            <button className="link-button assistant-feedback" onClick={() => { setPanel(false); openFeedback(); }} type="button">
+              Relatar um problema ou enviar sugestão
+            </button>
             <label className="assistant-auto">
               <input checked={autoTips} onChange={(event) => toggleAuto(event.target.checked)} type="checkbox" />
               Mostrar uma dica ao abrir cada tela pela primeira vez

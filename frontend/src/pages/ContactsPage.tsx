@@ -8,6 +8,8 @@ import { Badge } from "../components/Badge";
 import { Modal } from "../components/Modal";
 import { mergeUserContactTags, TagInput, userContactTags } from "../components/TagInput";
 import { formatPhone } from "../lib/format";
+import { isOwnNumber } from "../lib/ownNumber";
+import { useOwnNumber } from "../lib/useOwnNumber";
 
 type ContactForm = Omit<Contact, "id" | "tenant_id" | "created_at" | "updated_at">;
 
@@ -18,6 +20,9 @@ const emptyForm: ContactForm = {
 
 export function ContactsPage() {
   const { token } = useAuth();
+  const ownNumber = useOwnNumber(token);
+  // Decided by the number connected right now; a tag can be left over from a previous number.
+  const isOwn = (contact: Contact) => isOwnNumber(contact.phone, ownNumber);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
@@ -109,7 +114,7 @@ export function ContactsPage() {
                   : `Nenhum contato do tipo ${filters.find((item) => item.key === filter)?.label.toLowerCase()}.`}
             </p>
           ) : null}
-          {filtered.map((contact) => <button className={contact.id === selectedId && !creating ? "contact-row active" : "contact-row"} key={contact.id} onClick={() => { setCreating(false); setSelectedId(contact.id); }} type="button"><span className="conversation-avatar"><UserRoundCog size={16} /></span><span><strong>{contact.name}</strong><small>{formatPhone(contact.phone)}</small><span className="tag-row">{userContactTags(contact.tags).slice(0, 2).map((tag) => <i key={tag}>{tag}</i>)}</span></span><Badge variant={contact.kind === "lead" ? "accent" : "success"}>{kindLabels[contact.kind]}</Badge></button>)}
+          {filtered.map((contact) => <button className={contact.id === selectedId && !creating ? "contact-row active" : "contact-row"} key={contact.id} onClick={() => { setCreating(false); setSelectedId(contact.id); }} type="button"><span className="conversation-avatar"><UserRoundCog size={16} /></span><span><strong>{contact.name}</strong><small>{formatPhone(contact.phone)}</small><span className="tag-row">{userContactTags(contact.tags).slice(0, 2).map((tag) => <i key={tag}>{tag}</i>)}</span></span>{isOwn(contact) ? <Badge variant="muted">Você</Badge> : <Badge variant={contact.kind === "lead" ? "accent" : "success"}>{kindLabels[contact.kind]}</Badge>}</button>)}
         </div>
       </section>
       {!creating && !selected ? (
@@ -126,7 +131,7 @@ export function ContactsPage() {
         </aside>
       ) : (
       <aside className="contact-detail-panel">
-        <div className="contact-detail-header"><div><h2>{creating ? "Novo contato" : selected?.name}</h2></div>{creating ? <button className="icon-button" onClick={() => setCreating(false)} type="button"><X size={18} /></button> : null}</div>
+        <div className="contact-detail-header"><div><h2>{creating ? "Novo contato" : selected?.name}</h2>{!creating && selected && isOwn(selected) ? <span className="you-chip">Você · número conectado ao WhatsApp</span> : null}</div>{creating ? <button className="icon-button" onClick={() => setCreating(false)} type="button"><X size={18} /></button> : null}</div>
         <div className="contact-info-grid"><div><Phone size={15}/><span>{formatPhone(form.phone) || "—"}</span></div><div><Mail size={15}/><span>{form.email || "—"}</span></div><div><Tags size={15}/><span>{userContactTags(form.tags).join(", ") || "—"}</span></div></div>
         <div className="settings-subsection"><div className="form-grid">
           <label>Nome<input onChange={(e) => setForm({...form, name:e.target.value})} value={form.name}/></label>

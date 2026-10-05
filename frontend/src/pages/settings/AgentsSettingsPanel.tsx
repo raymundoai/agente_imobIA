@@ -138,6 +138,7 @@ export function AgentsSettingsPanel({
             <option value="active">Ativo</option>
             <option value="inactive">Inativo</option>
           </select>
+          <small className="field-hint">Inativo: o agente para de responder e as conversas vão direto para a equipe.</small>
         </label>
       </div>
 

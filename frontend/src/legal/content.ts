@@ -1,7 +1,9 @@
 /**
  * Terms of use and privacy policy shown at /termos and /privacidade and accepted at signup.
  *
- * MINUTA PARA REVISÃO JURÍDICA. Preencha COMPANY antes de abrir o cadastro ao público e,
+ * MINUTA PARA REVISÃO JURÍDICA. Durante o beta a empresa ainda não está formalizada: os campos
+ * nulos de COMPANY deixam de aparecer nos textos. Preencha-os antes de abrir o cadastro ao público,
+ * remova BETA_NOTICE e,
  * a cada mudança relevante no texto, atualize TERMS_VERSION aqui e no backend
  * (app/modules/tenants/api/routes.py), para que novos aceites registrem a versão nova.
  */
@@ -10,22 +12,30 @@ export const TERMS_VERSION = "2026-10-05";
 
 export const COMPANY = {
   brand: "ImmobIA",
-  legalName: "[RAZÃO SOCIAL DA EUGEN.IA]",
-  document: "[CNPJ]",
-  address: "[ENDEREÇO COMPLETO]",
-  supportEmail: "[E-MAIL DE SUPORTE]",
-  privacyEmail: "[E-MAIL DO ENCARREGADO DE DADOS]",
-  city: "[CIDADE/UF DO FORO]",
+  legalName: null as string | null,
+  document: null as string | null,
+  address: null as string | null,
+  supportEmail: "feliperaymundo@outlook.com.br",
+  privacyEmail: "feliperaymundo@outlook.com.br",
+  city: null as string | null,
 };
+
+/** Shown at the top of both documents while the company is not formalized. */
+export const BETA_NOTICE: string | null =
+  "Versão beta: a ImmobIA está em fase de testes com um grupo restrito de clientes. Estes documentos serão atualizados com os dados da empresa responsável ao fim do período beta, e você será avisado antes.";
 
 export type LegalSection = { heading: string; paragraphs?: string[]; items?: string[] };
 export type LegalDocument = { title: string; intro: string; sections: LegalSection[] };
 
 const c = COMPANY;
+const provider = c.legalName
+  ? `, oferecida por ${c.legalName}, inscrita no CNPJ ${c.document}, com sede em ${c.address}`
+  : "";
+const venue = c.city ? ` Fica eleito o foro de ${c.city}, salvo regra legal em contrário.` : "";
 
 export const TERMS: LegalDocument = {
   title: "Termos de uso",
-  intro: `Estes termos regem o uso da plataforma ${c.brand}, oferecida por ${c.legalName}, inscrita no CNPJ ${c.document}, com sede em ${c.address}. Ao criar uma conta, você declara que leu e aceita estes termos e a Política de privacidade.`,
+  intro: `Estes termos regem o uso da plataforma ${c.brand}${provider}. Ao criar uma conta, você declara que leu e aceita estes termos e a Política de privacidade.`,
   sections: [
     {
       heading: "1. O serviço",
@@ -92,14 +102,14 @@ export const TERMS: LegalDocument = {
     {
       heading: "9. Propriedade intelectual",
       paragraphs: [
-        `A plataforma, a marca ${c.brand} e seus elementos visuais pertencem a ${c.legalName}. O uso da plataforma não transfere esses direitos.`,
+        `A plataforma, a marca ${c.brand} e seus elementos visuais pertencem ${c.legalName ? `a ${c.legalName}` : `à ${c.brand}`}. O uso da plataforma não transfere esses direitos.`,
       ],
     },
     {
       heading: "10. Alterações e contato",
       paragraphs: [
         "Podemos atualizar estes termos. Mudanças relevantes serão avisadas na plataforma com antecedência razoável; o uso continuado depois disso indica concordância.",
-        `Dúvidas: ${c.supportEmail}. Fica eleito o foro de ${c.city}, salvo regra legal em contrário.`,
+        `Dúvidas: ${c.supportEmail}.${venue}`,
       ],
     },
   ],
@@ -107,7 +117,7 @@ export const TERMS: LegalDocument = {
 
 export const PRIVACY: LegalDocument = {
   title: "Política de privacidade",
-  intro: `Esta política explica como ${c.legalName} (${c.brand}) trata dados pessoais, em conformidade com a Lei Geral de Proteção de Dados (Lei 13.709/2018).`,
+  intro: `Esta política explica como ${c.legalName ? `${c.legalName} (${c.brand})` : `a ${c.brand}`} trata dados pessoais, em conformidade com a Lei Geral de Proteção de Dados (Lei 13.709/2018).`,
   sections: [
     {
       heading: "1. Papéis",

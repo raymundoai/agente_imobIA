@@ -29,6 +29,8 @@ import { Badge } from "../components/Badge";
 import { DemandModal } from "../components/DemandModal";
 import { mergeUserContactTags, TagInput, userContactTags } from "../components/TagInput";
 import { formatCurrency, formatPhone, labelOrDash } from "../lib/format";
+import { isOwnNumber } from "../lib/ownNumber";
+import { useOwnNumber } from "../lib/useOwnNumber";
 import {
   propertyShareFilename,
   propertyShareMimeType,
@@ -39,6 +41,7 @@ type ChatMessage = Message & { sharedProperty?: Property };
 
 export function ConversationsPage() {
   const { token } = useAuth();
+  const ownNumber = useOwnNumber(token);
   const claims = getTokenClaims(token);
   const [items, setItems] = useState<Conversation[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -683,6 +686,7 @@ export function ConversationsPage() {
             {!listLoading && visibleItems.map((item) => {
               const isActive = item.id === selected?.id;
               const itemAiEnabled = aiEnabledById[item.id] ?? item.mode !== "human";
+              const itemIsOwn = !item.is_group && isOwnNumber(item.phone, ownNumber);
               return (
                 <button
                   className={isActive ? "conversation-item active" : "conversation-item"}
@@ -703,13 +707,17 @@ export function ConversationsPage() {
                     )}
                   </span>
                   <span>
-                    <strong>{item.group_name ?? item.customer_name ?? item.phone}</strong>
+                    <strong>{itemIsOwn ? "Você" : item.group_name ?? item.customer_name ?? item.phone}</strong>
                     <small className="conversation-preview">{lastMessagePreview(item)}</small>
                   </span>
                   <span className="conversation-item-status">
-                    <Badge variant={itemAiEnabled ? "success" : "accent"}>
-                      {item.is_group ? "Grupo" : itemAiEnabled ? "IA" : "Equipe"}
-                    </Badge>
+                    {itemIsOwn ? (
+                      <Badge variant="muted">Seu número</Badge>
+                    ) : (
+                      <Badge variant={itemAiEnabled ? "success" : "accent"}>
+                        {item.is_group ? "Grupo" : itemAiEnabled ? "IA" : "Equipe"}
+                      </Badge>
+                    )}
                     <ChannelMark channel={item.channel} />
                   </span>
                 </button>
@@ -761,7 +769,9 @@ export function ConversationsPage() {
                   >
                     {selected?.group_name ?? selectedContact?.name ?? selected?.customer_name ?? selected?.phone ?? "Conversa"}
                   </button>
-                  {!selected?.is_group ? (
+                  {!selected?.is_group && isOwnNumber(selected?.phone, ownNumber) ? (
+                    <span className="you-chip" title="É o número conectado ao WhatsApp da imobiliária. O agente não responde nesta conversa.">Você · número conectado</span>
+                  ) : !selected?.is_group ? (
                     <span className="interest-chip">
                       {selectedContact?.interest || selected?.current_intent || "Interesse não informado"}
                     </span>

@@ -1962,6 +1962,44 @@ label .optional { font-weight: 400; }
 .legal-body ul { display: grid; gap: 6px; padding-left: 20px; }
 .legal-updated { color: var(--muted-foreground); font-size: 13px; margin: 0 0 18px; }
 .legal-intro { font-size: 16px; }
+.legal-beta { padding: 12px 14px; border-radius: 8px; background: color-mix(in srgb, var(--accent, #f5c518) 18%, transparent); border-left: 3px solid var(--accent, #f5c518); }
 .auth-legal { display: flex; gap: 16px; justify-content: center; margin-top: 18px; }
 .auth-legal a { color: var(--muted-foreground); font-size: 12.5px; text-decoration: none; }
 .auth-legal a:hover { color: var(--foreground); text-decoration: underline; }
+
+/* A taller neighbour (e.g. a field with a hint) must not stretch the controls next to it. */
+.form-grid > label { align-content: start; }
+
+/* The agency's own WhatsApp number */
+.you-chip {
+  background: color-mix(in srgb, var(--placa) 32%, transparent);
+  border-radius: 999px;
+  color: var(--foreground);
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+.contact-detail-header .you-chip { margin-top: 6px; }
+
+/* Feedback */
+.feedback-form { display: grid; gap: 14px; }
+.feedback-form label { display: grid; font-weight: 600; gap: 6px; }
+.feedback-form .segmented { flex-wrap: wrap; }
+.feedback-context { color: var(--muted-foreground); font-size: 13px; margin: 0; overflow-wrap: anywhere; }
+.assistant-feedback { color: var(--primary); font-weight: 600; justify-self: start; padding-left: 0; }
+.feedback-list { display: grid; list-style: none; margin: 12px 0 0; padding: 0; }
+.feedback-list li { border-top: 1px solid var(--border); display: grid; gap: 6px; padding: 14px 0; }
+.feedback-head { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }
+.feedback-head small, .feedback-meta { color: var(--muted-foreground); }
+.feedback-message { line-height: 1.55; margin: 0; white-space: pre-wrap; }
+.feedback-meta { overflow-wrap: anywhere; }
+.feedback-actions { display: grid; gap: 8px; grid-template-columns: 180px 1fr; margin-top: 4px; }
+@media (max-width: 640px) { .feedback-actions { grid-template-columns: 1fr; } }
+
+/* Login: interim forgot-password help (e-mail reset comes in V2) */
+.login-card .forgot-link { background: transparent; border: 0; box-shadow: none; min-height: 0; color: var(--primary); font-size: 13px; font-weight: 600; justify-self: end; margin-top: -6px; padding: 2px 0; width: auto; }
+.login-card .forgot-link:hover { background: transparent; text-decoration: underline; }
+.forgot-help { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); display: grid; font-size: 13px; gap: 6px; padding: 10px 12px; }
+.forgot-help p { line-height: 1.5; margin: 0; }

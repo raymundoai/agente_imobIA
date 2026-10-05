@@ -140,9 +140,7 @@ def list_integration_setups(
 @mvp_router.post("/setup", response_model=IntegrationSetupSummary)
 def request_integration_setup(
     payload: IntegrationSetupRequest,
-    principal: CurrentPrincipal = Depends(
-        require_roles(UserRole.ADMIN, UserRole.GESTOR)
-    ),
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN, UserRole.GESTOR)),
     session: Session = Depends(get_db_session),
 ) -> IntegrationSetupSummary:
     provider = payload.provider.lower()
@@ -188,9 +186,7 @@ def get_tecimob_status(
 
 @mvp_router.post("/telegram/connect", response_model=TelegramConnectionResponse)
 def connect_telegram(
-    principal: CurrentPrincipal = Depends(
-        require_roles(UserRole.ADMIN, UserRole.GESTOR)
-    ),
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN, UserRole.GESTOR)),
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
 ) -> TelegramConnectionResponse:
@@ -266,9 +262,7 @@ def test_tecimob_connection(
 
 @mvp_router.post("/evolution/whatsapp/connect", response_model=EvolutionWhatsappResponse)
 def connect_whatsapp(
-    principal: CurrentPrincipal = Depends(
-        require_roles(UserRole.ADMIN, UserRole.GESTOR)
-    ),
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN, UserRole.GESTOR)),
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
     settings: Settings = Depends(get_settings),
@@ -296,7 +290,7 @@ def connect_whatsapp(
     connected_name = _extract_first_string(
         instance_payload or state_payload, ("name", "profileName", "profile.name")
     )
-    _promote_owner_contact(session, tenant.id, connected_phone)
+    _mark_own_number_contact(session, tenant.id, connected_phone)
     webhook_url = manager.webhook_url(tenant.slug)
 
     updated_settings = _upsert_whatsapp_integration(
@@ -372,7 +366,7 @@ def get_whatsapp_status(
         webhook_error = (
             "BACKEND_PUBLIC_URL não configurada; a Evolution não consegue registrar o webhook."
         )
-    _promote_owner_contact(session, tenant.id, connected_phone)
+    _mark_own_number_contact(session, tenant.id, connected_phone)
 
     updated_settings = _upsert_whatsapp_integration(
         tenant.settings,
@@ -553,9 +547,7 @@ def _get_or_create_webhook_secret(
                 (
                     value
                     for key in settings.integration_secret_previous_keys
-                    if (
-                        value := SecretCipher(key.get_secret_value()).decrypt(encrypted_secret)
-                    )
+                    if (value := SecretCipher(key.get_secret_value()).decrypt(encrypted_secret))
                     is not None
                 ),
                 None,
@@ -567,23 +559,21 @@ def _get_or_create_webhook_secret(
     return cipher, decrypted or secrets.token_urlsafe(32)
 
 
-def _promote_owner_contact(session: Session, tenant_id: Any, phone: str | None) -> None:
+def _mark_own_number_contact(session: Session, tenant_id: Any, phone: str | None) -> None:
     if not phone:
         return
     normalized = normalize_contact_phone(phone)
-    contacts = (
-        session.query(ContactModel)
-        .filter(ContactModel.tenant_id == tenant_id)
-        .all()
-    )
+    contacts = session.query(ContactModel).filter(ContactModel.tenant_id == tenant_id).all()
     for contact in contacts:
-        if not whatsapp_phones_match(contact.phone, normalized):
-            continue
-        if contact.kind not in {"owner", "tenant"}:
-            contact.kind = "owner"
-            contact.tags = list(dict.fromkeys([*contact.tags, "whatsapp-owner"]))
-            session.flush()
-        return
+        own = whatsapp_phones_match(contact.phone, normalized)
+        # Only marked as the agency's own number ("Você" in the panel); the contact type set by
+        # the team is kept, since "owner" means a property owner, not the number's owner.
+        # A number connected earlier loses the mark.
+        if own and "whatsapp-owner" not in contact.tags:
+            contact.tags = [*contact.tags, "whatsapp-owner"]
+        elif not own and "whatsapp-owner" in contact.tags:
+            contact.tags = [tag for tag in contact.tags if tag != "whatsapp-owner"]
+    session.flush()
 
 
 def _normalize_connection_status(payload: dict[str, Any]) -> str | None:

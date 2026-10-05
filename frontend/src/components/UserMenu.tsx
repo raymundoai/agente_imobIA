@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AlertTriangle, Bell, CheckCircle2, ChevronLeft, ChevronsUpDown, LogOut, Moon, Settings, Sun } from "lucide-react";
+import { AlertTriangle, Bell, CheckCircle2, ChevronLeft, ChevronsUpDown, LogOut, MessageSquarePlus, Moon, Settings, Sun } from "lucide-react";
 import { request } from "../api/client";
 import type { Tenant, User } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { getTokenClaims } from "../auth/tokenClaims";
 import { openAppLink } from "../lib/appNavigation";
+import { openFeedback } from "./FeedbackModal";
 import { loadOperationalAlerts, type OperationalAlert } from "../lib/loadOperationalAlerts";
 import { useTheme } from "../lib/useTheme";
 
@@ -133,6 +134,10 @@ export function UserMenu({ onOpenSettings }: { onOpenSettings: () => void }) {
               <button className="user-menu-item" onClick={showNotifications} role="menuitem" type="button">
                 <Bell size={16} />
                 Notificações
+              </button>
+              <button className="user-menu-item" onClick={() => { close(); openFeedback(); }} role="menuitem" type="button">
+                <MessageSquarePlus size={16} />
+                Enviar feedback
               </button>
               <div className="user-menu-separator" role="separator" />
               <button className="user-menu-item danger" onClick={logout} role="menuitem" type="button">

@@ -19,6 +19,7 @@ import { MetricCard } from "../components/MetricCard";
 import { runWithLoading } from "../lib/asyncState";
 import { AgentPromptSettings, TenantAgentInstructions } from "./AgentPromptSettings";
 import { BetaPricesSettings } from "./BetaPricesSettings";
+import { FeedbackInbox } from "./FeedbackInbox";
 import { TenantAccess } from "./TenantAccess";
 import { BrandMark } from "../components/BrandMark";
 
@@ -130,6 +131,7 @@ const platformTabs = [
   { key: "overview", label: "Visão geral", icon: LayoutDashboard },
   { key: "clients", label: "Clientes", icon: Building2 },
   { key: "agent", label: "Agente de IA", icon: Bot },
+  { key: "feedback", label: "Feedback", icon: MessageSquare },
   { key: "settings", label: "Configurações", icon: Cable },
 ] as const;
 type PlatformTab = (typeof platformTabs)[number]["key"];
@@ -325,6 +327,7 @@ export function PlatformApp() {
       </section>
       ) : null}
       {!loading && activeTab === "agent" && token ? <AgentPromptSettings token={token} /> : null}
+      {!loading && activeTab === "feedback" && token ? <FeedbackInbox token={token} /> : null}
       {!loading && activeTab === "settings" ? (
         <section className="page-stack">
           <div>

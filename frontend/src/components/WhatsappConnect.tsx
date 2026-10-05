@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+// WhatsApp QR codes expire after about a minute; ask for a fresh one a little before that.
+const QR_REFRESH_MS = 30_000;
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { request } from "../api/client";
 import type { EvolutionWhatsappConnection } from "../api/types";
@@ -17,7 +20,11 @@ export function useWhatsappConnection(token: string | null) {
   const refresh = useCallback(async () => {
     if (!token) return;
     try {
-      setConnection(await request<EvolutionWhatsappConnection>("/integrations/evolution/whatsapp/status", {}, token));
+      const status = await request<EvolutionWhatsappConnection>("/integrations/evolution/whatsapp/status", {}, token);
+      // The status check carries no QR code: keep the one on screen until the connection is made.
+      setConnection((current) =>
+        status.status !== "connected" && !status.qrcode && current?.qrcode ? { ...status, qrcode: current.qrcode } : status,
+      );
       setStatusError(false);
     } catch {
       setStatusError(true);
@@ -37,19 +44,42 @@ export function useWhatsappConnection(token: string | null) {
     return () => window.clearInterval(handle);
   }, [modalOpen, connection?.status, refresh]);
 
+  const requestQr = useCallback(
+    async (quiet: boolean) => {
+      if (!token) return;
+      if (!quiet) {
+        setGenerating(true);
+        setError(null);
+      }
+      try {
+        const fresh = await request<EvolutionWhatsappConnection>("/integrations/evolution/whatsapp/connect", { method: "POST" }, token);
+        setConnection((current) => (fresh.qrcode || fresh.status === "connected" ? fresh : { ...fresh, qrcode: current?.qrcode ?? null }));
+      } catch (reason) {
+        // A failed silent refresh keeps the current code; only the first request reports errors.
+        if (!quiet) setError(reason instanceof Error ? reason.message : "Não foi possível gerar o QR Code.");
+      } finally {
+        if (!quiet) setGenerating(false);
+      }
+    },
+    [token],
+  );
+
+  // Keep a valid code on screen for as long as the dialog is open and not yet connected.
+  const connectedRef = useRef(false);
+  connectedRef.current = connection?.status === "connected";
+  useEffect(() => {
+    if (!modalOpen) return undefined;
+    const handle = window.setInterval(() => {
+      if (!connectedRef.current) void requestQr(true);
+    }, QR_REFRESH_MS);
+    return () => window.clearInterval(handle);
+  }, [modalOpen, requestQr]);
+
   async function connect() {
     if (!token) return;
     setModalOpen(true);
     if (connection?.status === "connected") return;
-    setGenerating(true);
-    setError(null);
-    try {
-      setConnection(await request<EvolutionWhatsappConnection>("/integrations/evolution/whatsapp/connect", { method: "POST" }, token));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Não foi possível gerar o QR Code.");
-    } finally {
-      setGenerating(false);
-    }
+    await requestQr(false);
   }
 
   return {
@@ -105,15 +135,10 @@ export function WhatsappConnectModal({ whatsapp }: { whatsapp: ReturnType<typeof
               </div>
             ) : connection?.qrcode?.startsWith("data:image") ? (
               <img alt="QR Code para conectar o WhatsApp" src={connection.qrcode} />
-            ) : connection?.qrcode ? (
-              <div className="qr-state"><strong>Código de pareamento</strong><code>{connection.qrcode}</code></div>
             ) : (
               <div className="qr-state"><Loader2 className="spin" size={26} /><span>Aguardando o código…</span></div>
             )}
           </div>
-          {connection?.pairing_code ? (
-            <p className="qr-pairing">Prefere digitar? Use o código <code>{connection.pairing_code}</code></p>
-          ) : null}
           <p className="qr-waiting" aria-live="polite">
             <Loader2 className="spin" size={14} /> Assim que você ler o código, esta janela confirma a conexão.
           </p>

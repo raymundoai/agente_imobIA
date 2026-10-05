@@ -19,6 +19,8 @@ from app.modules.contacts.api import router as contacts_router
 from app.modules.conversations.api.routes import router as conversations_router
 from app.modules.conversations.api.routes import webhook_router
 from app.modules.dashboard.api import router as dashboard_router
+from app.modules.feedback.api import platform_router as feedback_platform_router
+from app.modules.feedback.api import router as feedback_router
 from app.modules.integrations.api import mvp_router as integrations_router
 from app.modules.leads.api import router as leads_router
 from app.modules.messaging.api import router as messaging_router
@@ -84,6 +86,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(billing_router, prefix=resolved.api_prefix)
     application.include_router(network_router, prefix=resolved.api_prefix)
     application.include_router(activity_router, prefix=resolved.api_prefix)
+    application.include_router(feedback_router, prefix=resolved.api_prefix)
+    application.include_router(feedback_platform_router, prefix=resolved.api_prefix)
 
     @application.get("/health", tags=["system"])
     def health() -> dict[str, str]:
