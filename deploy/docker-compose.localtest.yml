@@ -1,0 +1,6 @@
+# Only for testing the production stack on this machine: exposes the two front ends.
+services:
+  web:
+    ports: ["8081:80"]
+  admin:
+    ports: ["8082:80"]

@@ -29,3 +29,4 @@ def test_every_way_of_writing_a_mobile_is_the_same_person() -> None:
 
 def test_landlines_do_not_gain_a_ninth_digit() -> None:
     assert phone_variants("555133334444") == ["555133334444"]
+

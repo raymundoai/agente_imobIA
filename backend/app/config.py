@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: list[str] = Field(default_factory=list)
     backend_public_url: HttpUrl | None = None
+    # Address of the agency panel, used in links sent to people (e.g. a new-password link).
+    app_public_url: HttpUrl | None = None
     asaas_api_base_url: HttpUrl | None = None
     asaas_api_key: SecretStr | None = None
     asaas_webhook_token: SecretStr | None = None
@@ -139,7 +141,11 @@ class Settings(BaseSettings):
         return value
 
     @field_validator(
-        "backend_public_url", "evolution_base_url", "asaas_api_base_url", mode="before"
+        "backend_public_url",
+        "app_public_url",
+        "evolution_base_url",
+        "asaas_api_base_url",
+        mode="before",
     )
     @classmethod
     def empty_url_to_none(cls, value: object) -> object:
@@ -147,7 +153,15 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("evolution_api_key", "asaas_api_key", "asaas_webhook_token", mode="before")
+    @field_validator(
+        "evolution_api_key",
+        "asaas_api_key",
+        "asaas_webhook_token",
+        "openai_api_key",
+        "integration_secret_key",
+        "platform_bootstrap_token",
+        mode="before",
+    )
     @classmethod
     def empty_secret_to_none(cls, value: object) -> object:
         if value == "":
