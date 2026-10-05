@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import case, func, or_, select, text
@@ -30,6 +31,13 @@ COMMERCIAL_RESOURCES = (
 )
 PILOT_PLAN_CODE = "piloto_mvp"
 TRIAL_PLAN_CODE = "teste_gratis"
+# Placeholder for accounts waiting for their first subscription: no allowance at all.
+NO_PLAN_CODE = "sem_plano"
+# Pack sizes per resource; the price comes from the contracted plan's reference unit price.
+PACK_UNITS = {AI_ATTENDANCE: 50, PROPERTY_SEARCH_STANDARD: 50, IMAGE_OPTIMIZATION: 20}
+# A pack costs slightly more than the same units inside the plan, so upgrading stays better.
+PACK_PREMIUM = Decimal("0.15")
+PACK_VALIDITY_DAYS = 90
 
 RESOURCE_LABELS = {
     AI_ATTENDANCE: "atendimentos da IA",
@@ -55,6 +63,34 @@ class AttendancePreparation:
     session_id: UUID
     is_new_attendance: bool
     expires_at: datetime | None
+
+
+def effective_price_cents(plan: CommercialPlanModel, *, beta: bool) -> int:
+    """What this tenant pays for the plan: the beta price when it is on beta pricing."""
+
+    beta_price = (plan.extra or {}).get("beta_price_cents")
+    if beta and isinstance(beta_price, int) and beta_price > 0:
+        return beta_price
+    return plan.monthly_price_cents
+
+
+def pack_offers(plan: CommercialPlanModel) -> list[dict[str, int | str]]:
+    """Extra-allowance packs for the contracted plan, priced from its reference unit prices.
+
+    Price = units × reference price × (1 + premium), rounded to whole reais.
+    """
+
+    references = (plan.extra or {}).get("reference_unit_cents") or {}
+    offers: list[dict[str, int | str]] = []
+    for resource, units in PACK_UNITS.items():
+        unit_cents = references.get(resource)
+        if not isinstance(unit_cents, int) or unit_cents <= 0:
+            continue
+        reais = (Decimal(units * unit_cents) * (1 + PACK_PREMIUM) / 100).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+        offers.append({"resource": resource, "units": units, "price_cents": int(reais) * 100})
+    return offers
 
 
 def _calendar_cycle(now: datetime) -> tuple[datetime, datetime]:
@@ -366,6 +402,36 @@ class CommercialEntitlementService:
         if subscription.status in {"pilot", "active"}:
             self._provision_plan_grants(subscription, plan)
         self._session.commit()
+        return subscription
+
+    def start_pending(
+        self, tenant_id: UUID, *, commit: bool = True
+    ) -> TenantCommercialSubscriptionModel:
+        """A new account without a trial: everything metered and blocked until it subscribes."""
+
+        plan = self._session.scalar(
+            select(CommercialPlanModel).where(
+                CommercialPlanModel.code == NO_PLAN_CODE,
+                CommercialPlanModel.is_current.is_(True),
+            )
+        )
+        if plan is None:
+            raise RuntimeError("Commercial placeholder plan is not configured")
+        self._advisory_lock(f"commercial-subscription:{tenant_id}")
+        now = datetime.now(UTC)
+        cycle_start, cycle_end = _calendar_cycle(now)
+        subscription = TenantCommercialSubscriptionModel(
+            tenant_id=tenant_id,
+            plan_id=plan.id,
+            status="pending",
+            enforcement_mode="enforce",
+            cycle_started_at=cycle_start,
+            cycle_ends_at=cycle_end,
+        )
+        self._session.add(subscription)
+        self._session.flush()
+        if commit:
+            self._session.commit()
         return subscription
 
     def start_trial(

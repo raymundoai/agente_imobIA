@@ -29,7 +29,7 @@ class SignupResponse(BaseModel):
     tenant_slug: str
     access_token: str
     refresh_token: str
-    trial_ends_at: datetime
+    trial_ends_at: datetime | None
 
 
 class OnboardingStatusRequest(BaseModel):

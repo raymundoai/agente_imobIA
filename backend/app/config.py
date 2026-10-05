@@ -119,7 +119,8 @@ class Settings(BaseSettings):
     public_signup_enabled: bool = False
     # Attempt limits on login and signup; only worth disabling in local load tests.
     auth_rate_limit_enabled: bool = True
-    trial_days: int = Field(default=7, ge=1, le=60)
+    # 0 = no free trial: new accounts wait for their first subscription with no allowance.
+    trial_days: int = Field(default=0, ge=0, le=60)
 
     @field_validator("jwt_secret")
     @classmethod

@@ -26,6 +26,7 @@ class FakeAsaasClient:
     def __init__(self) -> None:
         self.created_subscriptions: list[dict] = []
         self.created_customers: list[dict] = []
+        self.created_payments: list[dict] = []
 
     def find_customer(self, external_reference: str) -> dict | None:
         return None
@@ -41,13 +42,20 @@ class FakeAsaasClient:
     def find_subscription(self, external_reference: str) -> dict | None:
         return None
 
+    def find_payment(self, external_reference: str) -> dict | None:
+        return None
+
+    def create_payment(self, payload: dict) -> dict:
+        self.created_payments.append(payload)
+        return {"id": f"pay_pack_{len(self.created_payments)}", "invoiceUrl": "https://i/pack"}
+
     def subscription_payments(self, subscription_id: str) -> list[dict]:
         return [
             {
                 "id": "pay_self",
                 "status": "PENDING",
                 "dueDate": "2026-10-02",
-                "value": 399.0,
+                "value": 369.0,
                 "invoiceUrl": "https://sandbox.asaas.com/i/pay_self",
             }
         ]
@@ -64,6 +72,7 @@ class FakeAsaasClient:
 @pytest.fixture
 def signup_enabled(client: TestClient) -> TestClient:
     client.app.state.container.settings.public_signup_enabled = True
+    client.app.state.container.settings.trial_days = 0
     return client
 
 
@@ -89,8 +98,21 @@ def test_signup_is_disabled_by_default(client: TestClient) -> None:
     assert client.post("/signup", json=SIGNUP).status_code == 403
 
 
+def test_signup_waits_for_first_subscription_without_allowance(
+    signup_enabled: TestClient,
+) -> None:
+    body = _signup(signup_enabled)
+    assert body["trial_ends_at"] is None
+    usage = signup_enabled.get("/usage/commercial", headers=_auth(body)).json()
+    assert usage["plan"]["code"] == "sem_plano"
+    assert usage["status"] == "pending"
+    assert usage["enforcement_mode"] == "enforce"
+    assert _available(usage, "ai_attendance") == 0
+
+
 def test_signup_starts_enforced_trial_and_pending_onboarding(signup_enabled: TestClient) -> None:
     client = signup_enabled
+    client.app.state.container.settings.trial_days = 7
     body = _signup(client)
     assert body["tenant_slug"] == "imobiliaria-horizonte"
     trial_ends_at = datetime.fromisoformat(body["trial_ends_at"])
@@ -136,6 +158,7 @@ def test_signup_generates_unique_internal_slug_and_rejects_known_email(
 
 def test_trial_allowance_ends_and_does_not_renew(signup_enabled: TestClient) -> None:
     client = signup_enabled
+    client.app.state.container.settings.trial_days = 7
     body = _signup(client)
     tenant_id = UUID(body["tenant_id"])
     past = datetime.now(UTC) - timedelta(minutes=1)
@@ -168,22 +191,23 @@ def test_agency_subscribes_itself_and_payment_activates_plan(
     body = _signup(client)
 
     overview = client.get("/billing", headers=_auth(body)).json()
-    assert overview["status"] == "trial"
+    assert overview["status"] == "pending"
     assert overview["subscription"] is None
     assert overview["payments_enabled"] is True
     assert overview["contact"]["email"] == SIGNUP["email"]
     assert [plan["code"] for plan in overview["plans"]] == [
-        "operacao",
-        "ia_essencial",
-        "ia_profissional",
-        "ia_escala",
+        "essencial",
+        "profissional",
+        "avancado",
+        "escala",
     ]
+    assert overview["packs"] == []
 
     subscribed = client.post(
         "/billing/subscription",
         headers=_auth(body),
         json={
-            "plan_code": "ia_essencial",
+            "plan_code": "essencial",
             "billing_type": "CREDIT_CARD",
             "idempotency_key": "self-service-horizonte-1",
             "customer": {
@@ -214,7 +238,7 @@ def test_agency_subscribes_itself_and_payment_activates_plan(
     assert confirmed.json()["outcome"] == "activated"
 
     usage = client.get("/usage/commercial", headers=_auth(body)).json()
-    assert usage["plan"]["code"] == "ia_essencial"
+    assert usage["plan"]["code"] == "essencial"
     assert usage["status"] == "active"
     # Trial leftovers are replaced by the paid plan's allowance.
     assert _available(usage, "ai_attendance") == 100
@@ -238,7 +262,7 @@ def _subscribe(client: TestClient, body: dict[str, Any], billing_type: str, key:
         "/billing/subscription",
         headers=_auth(body),
         json={
-            "plan_code": "ia_essencial",
+            "plan_code": "essencial",
             "billing_type": billing_type,
             "idempotency_key": key,
             "customer": {
@@ -265,7 +289,7 @@ def test_pix_qr_code_is_served_inside_the_app(
     assert pix.status_code == 200, pix.text
     assert pix.json() == {
         "payment_id": "pay_self",
-        "value_cents": 39900,
+        "value_cents": 36900,
         "due_date": "2026-10-02",
         "payload": "00020101021226820014br.gov.bcb.pix",
         "encoded_image": "iVBORw0KGgo=",
@@ -283,3 +307,103 @@ def test_pix_qr_code_is_refused_for_card_subscription(
     body = _signup(client)
     assert _subscribe(client, body, "CREDIT_CARD", "self-service-card-1").status_code == 201
     assert client.get("/billing/pix", headers=_auth(body)).status_code == 409
+
+
+def _confirm(client: TestClient, event_id: str, payment: dict[str, Any]) -> dict[str, Any]:
+    token = asaas_webhook_token(client.app.state.container.settings)
+    response = client.post(
+        "/webhooks/asaas",
+        headers={"asaas-access-token": token},
+        json={"id": event_id, "event": "PAYMENT_RECEIVED", "payment": payment},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _platform(client: TestClient) -> dict[str, str]:
+    from tests.integration.test_asaas_billing import _platform_token
+
+    return {"Authorization": f"Bearer {_platform_token(client)}"}
+
+
+def test_beta_tenant_sees_and_pays_the_beta_price(
+    signup_enabled: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.modules.billing_usage import api as billing_api
+
+    client = signup_enabled
+    fake = FakeAsaasClient()
+    monkeypatch.setattr(billing_api, "asaas_client_from_settings", lambda *_: fake)
+    body = _signup(client)
+    platform = _platform(client)
+
+    marked = client.patch(
+        f"/platform/tenants/{body['tenant_id']}/beta", headers=platform, json={"beta_pricing": True}
+    )
+    assert marked.status_code == 200, marked.text
+    assert marked.json()["beta_pricing"] is True
+
+    plans = {
+        plan["code"]: plan for plan in client.get("/billing", headers=_auth(body)).json()["plans"]
+    }
+    assert plans["essencial"]["monthly_price_cents"] == 4900
+    assert plans["essencial"]["list_price_cents"] == 36900
+
+    changed = client.patch(
+        "/platform/commercial/plans/essencial/beta-price",
+        headers=platform,
+        json={"beta_price_cents": 5900},
+    )
+    assert changed.json()["beta_price_cents"] == 5900
+    assert _subscribe(client, body, "PIX", "beta-pix-1").status_code == 201
+    assert fake.created_subscriptions[0]["value"] == 59.0
+
+
+def test_pack_is_bought_and_credited_when_paid(
+    signup_enabled: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.modules.billing_usage import api as billing_api
+
+    client = signup_enabled
+    fake = FakeAsaasClient()
+    monkeypatch.setattr(billing_api, "asaas_client_from_settings", lambda *_: fake)
+    body = _signup(client)
+    order_payload = {"resource": "ai_attendance", "idempotency_key": "pack-order-1"}
+
+    early = client.post("/billing/packs", headers=_auth(body), json=order_payload)
+    assert early.status_code == 409
+    assert "Assine um plano" in early.json()["detail"]
+
+    assert _subscribe(client, body, "PIX", "pack-sub-1").status_code == 201
+    _confirm(client, "evt_sub_paid", {"id": "pay_self", "subscription": "sub_self"})
+    overview = client.get("/billing", headers=_auth(body)).json()
+    offers = {pack["resource"]: pack for pack in overview["packs"]}
+    # 50 × R$ 2,00 × 1,15 = R$ 115; 20 photos × R$ 2,50 × 1,15 = R$ 57,50 → R$ 58.
+    assert offers["ai_attendance"] == {
+        "resource": "ai_attendance",
+        "units": 50,
+        "price_cents": 11500,
+    }
+    assert offers["image_optimization"]["price_cents"] == 5800
+
+    created = client.post("/billing/packs", headers=_auth(body), json=order_payload)
+    assert created.status_code == 201, created.text
+    order = created.json()
+    assert order["status"] == "pending_payment"
+    assert fake.created_payments[0]["value"] == 115.0
+    again = client.post("/billing/packs", headers=_auth(body), json=order_payload)
+    assert again.json()["id"] == order["id"]
+    assert len(fake.created_payments) == 1
+
+    before = _available(
+        client.get("/usage/commercial", headers=_auth(body)).json(), "ai_attendance"
+    )
+    reference = f"immobia:pack:{order['id']}"
+    result = _confirm(client, "evt_pack_paid", {"id": "pay_pack_1", "externalReference": reference})
+    assert result["outcome"] == "pack_granted"
+    after = _available(client.get("/usage/commercial", headers=_auth(body)).json(), "ai_attendance")
+    assert after == before + 50
+    repeat = _confirm(
+        client, "evt_pack_paid_again", {"id": "pay_pack_1", "externalReference": reference}
+    )
+    assert repeat["outcome"] == "pack_already_paid"

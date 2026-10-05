@@ -3,7 +3,7 @@
 import hashlib
 import hmac
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -14,12 +14,18 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.modules.billing_usage.adapters.models import (
     AsaasCustomerLinkModel,
+    AsaasPackOrderModel,
     AsaasSubscriptionModel,
     AsaasWebhookConfigModel,
     AsaasWebhookEventModel,
     CommercialPlanModel,
 )
-from app.modules.billing_usage.commercial import CommercialEntitlementService
+from app.modules.billing_usage.commercial import (
+    PACK_VALIDITY_DAYS,
+    CommercialEntitlementService,
+    effective_price_cents,
+    pack_offers,
+)
 from app.shared.errors.exceptions import (
     AuthenticationError,
     ConfigurationError,
@@ -44,6 +50,7 @@ SUBSCRIPTION_END_EVENTS = set(SUBSCRIPTION_EVENTS)
 # Statuses that still bill (or may bill) the customer in Asaas. A tenant can have only one.
 OPEN_SUBSCRIPTION_STATUSES = ("creating", "pending_payment", "active", "past_due")
 EXTERNAL_REFERENCE_PREFIX = "immobia:subscription:"
+PACK_REFERENCE_PREFIX = "immobia:pack:"
 
 
 class AsaasAmbiguousError(ExternalServiceError):
@@ -88,6 +95,15 @@ class AsaasClient:
         payload = self._request("GET", f"/subscriptions/{subscription_id}/payments")
         items = payload.get("data")
         return [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+
+    def create_payment(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/payments", json=payload)
+
+    def find_payment(self, external_reference: str) -> dict[str, Any] | None:
+        payload = self._request(
+            "GET", "/payments", params={"externalReference": external_reference, "limit": 1}
+        )
+        return _first_item(payload)
 
     def pix_qr_code(self, payment_id: str) -> dict[str, Any]:
         return self._request("GET", f"/payments/{payment_id}/pixQrCode")
@@ -261,6 +277,7 @@ class AsaasBillingService:
             raise ConflictError("Plano comercial indisponível para cobrança")
         if plan.monthly_price_cents <= 0:
             raise ConflictError("O plano precisa ter preço mensal definido antes da cobrança")
+        beta = CommercialEntitlementService(self._session).subscription(tenant_id).beta_pricing
         customer = self._ensure_customer(tenant_id, request.customer)
         local_id = uuid4()
         subscription = AsaasSubscriptionModel(
@@ -271,7 +288,7 @@ class AsaasBillingService:
             external_reference=f"{EXTERNAL_REFERENCE_PREFIX}{local_id}",
             idempotency_key=request.idempotency_key,
             billing_type=request.billing_type,
-            value_cents=plan.monthly_price_cents,
+            value_cents=effective_price_cents(plan, beta=beta),
             next_due_date=request.next_due_date,
             enforcement_mode=request.enforcement_mode,
             status="creating",
@@ -338,6 +355,146 @@ class AsaasBillingService:
             "expiration_date": qr_code.get("expirationDate"),
         }
 
+    def create_pack_order(
+        self, tenant_id: UUID, *, resource: str, idempotency_key: str
+    ) -> AsaasPackOrderModel:
+        """One-off charge for an extra-allowance pack of the tenant's current plan."""
+
+        self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            {"lock_key": f"asaas-pack:{tenant_id}"},
+        )
+        existing = self._session.scalar(
+            select(AsaasPackOrderModel)
+            .where(
+                AsaasPackOrderModel.tenant_id == tenant_id,
+                AsaasPackOrderModel.idempotency_key == idempotency_key,
+            )
+            .with_for_update()
+        )
+        if existing is not None:
+            return existing if existing.status != "creating" else self._submit_pack(existing)
+        commercial = CommercialEntitlementService(self._session).subscription(tenant_id)
+        plan = self._session.get(CommercialPlanModel, commercial.plan_id)
+        if plan is None or commercial.status not in {"active", "past_due"} or not plan.is_public:
+            raise ConflictError("Assine um plano antes de comprar pacotes adicionais")
+        offer = next((item for item in pack_offers(plan) if item["resource"] == resource), None)
+        if offer is None:
+            raise ConflictError("Este pacote não está disponível no seu plano")
+        customer = self._session.get(AsaasCustomerLinkModel, tenant_id)
+        if customer is None:
+            raise ConflictError("Assine um plano antes de comprar pacotes adicionais")
+        local_id = uuid4()
+        order = AsaasPackOrderModel(
+            id=local_id,
+            tenant_id=tenant_id,
+            resource=resource,
+            units=int(offer["units"]),
+            value_cents=int(offer["price_cents"]),
+            plan_code=plan.code,
+            idempotency_key=idempotency_key,
+            external_reference=f"{PACK_REFERENCE_PREFIX}{local_id}",
+            status="creating",
+        )
+        self._session.add(order)
+        self._session.commit()
+        return self._submit_pack(order)
+
+    def pix_for_pack_order(self, tenant_id: UUID, order_id: UUID) -> dict[str, Any]:
+        order = self._session.scalar(
+            select(AsaasPackOrderModel).where(
+                AsaasPackOrderModel.id == order_id, AsaasPackOrderModel.tenant_id == tenant_id
+            )
+        )
+        if order is None or order.provider_payment_id is None:
+            raise NotFoundError("Pedido de pacote não encontrado")
+        if order.status != "pending_payment":
+            raise ConflictError("Este pedido não está aguardando pagamento")
+        qr_code = self._client.pix_qr_code(order.provider_payment_id)
+        if not _string(qr_code.get("payload")) or not _string(qr_code.get("encodedImage")):
+            raise ExternalServiceError("Asaas não retornou o QR Code do PIX")
+        return {
+            "payment_id": order.provider_payment_id,
+            "value": order.value_cents / 100,
+            "due_date": None,
+            "payload": qr_code["payload"],
+            "encoded_image": qr_code["encodedImage"],
+            "expiration_date": qr_code.get("expirationDate"),
+        }
+
+    def _submit_pack(self, order: AsaasPackOrderModel) -> AsaasPackOrderModel:
+        customer = self._session.get(AsaasCustomerLinkModel, order.tenant_id)
+        if customer is None:
+            raise ConflictError("Cliente Asaas não encontrado para este pedido")
+        try:
+            # A retry after a lost response finds the charge instead of creating a second one.
+            remote = self._client.find_payment(order.external_reference)
+            remote = remote or self._client.create_payment(
+                {
+                    "customer": customer.provider_customer_id,
+                    "billingType": "UNDEFINED",
+                    "value": order.value_cents / 100,
+                    "dueDate": (datetime.now(UTC) + timedelta(days=3)).date().isoformat(),
+                    "description": f"ImmobIA · pacote de {order.units} unidades",
+                    "externalReference": order.external_reference,
+                }
+            )
+        except AsaasAmbiguousError:
+            raise
+        except ExternalServiceError as exc:
+            order.status = "failed"
+            order.last_error = str(exc)
+            self._session.commit()
+            raise
+        order.provider_payment_id = _required_id(remote, "cobrança")
+        order.invoice_url = _string(remote.get("invoiceUrl"))
+        order.status = "pending_payment"
+        self._session.commit()
+        return order
+
+    def _pack_order_for_event(self, payment: dict[str, Any]) -> AsaasPackOrderModel | None:
+        reference = _string(payment.get("externalReference"))
+        payment_id = _string(payment.get("id"))
+        if reference and reference.startswith(PACK_REFERENCE_PREFIX):
+            return self._session.scalar(
+                select(AsaasPackOrderModel)
+                .where(AsaasPackOrderModel.external_reference == reference)
+                .with_for_update()
+            )
+        if payment_id:
+            return self._session.scalar(
+                select(AsaasPackOrderModel)
+                .where(AsaasPackOrderModel.provider_payment_id == payment_id)
+                .with_for_update()
+            )
+        return None
+
+    def _settle_pack(self, order: AsaasPackOrderModel, event_type: str) -> str:
+        if event_type in PAYMENT_SUCCESS_EVENTS:
+            if order.status == "paid":
+                return "pack_already_paid"
+            now = datetime.now(UTC)
+            # Marked first: grant() commits, and the order must never look unpaid once credited.
+            order.status = "paid"
+            order.paid_at = now
+            grant = CommercialEntitlementService(self._session).grant(
+                order.tenant_id,
+                resource=order.resource,
+                quantity=order.units,
+                source="pack",
+                idempotency_key=f"pack-order:{order.id}",
+                reference=order.plan_code,
+                expires_at=now + timedelta(days=PACK_VALIDITY_DAYS),
+                created_by=None,
+                extra={"pack_order_id": str(order.id)},
+            )
+            order.grant_id = grant.id
+            return "pack_granted"
+        if event_type in PAYMENT_PROBLEM_EVENTS and order.status != "paid":
+            order.status = "cancelled"
+            return "pack_cancelled"
+        return "recorded"
+
     def provision_webhook(self, notification_email: str) -> AsaasWebhookConfigModel:
         url = asaas_webhook_url(self._settings)
         token = asaas_webhook_token(self._settings)
@@ -391,6 +548,21 @@ class AsaasBillingService:
             return AsaasWebhookResult(duplicate=True, outcome="duplicate", subscription_id=None)
 
         payment = _dict(payload.get("payment"))
+        pack_order = self._pack_order_for_event(payment) if payment else None
+        if pack_order is not None:
+            event = AsaasWebhookEventModel(
+                id=uuid4(),
+                provider_event_id=event_id,
+                event_type=event_type,
+                subscription_id=None,
+                payload=payload,
+                outcome="recorded",
+                processed_at=datetime.now(UTC),
+            )
+            self._session.add(event)
+            event.outcome = self._settle_pack(pack_order, event_type)
+            self._session.commit()
+            return AsaasWebhookResult(duplicate=False, outcome=event.outcome, subscription_id=None)
         subscription = self._subscription_for_event(payment, _dict(payload.get("subscription")))
         event = AsaasWebhookEventModel(
             id=uuid4(),

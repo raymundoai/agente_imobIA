@@ -17,6 +17,7 @@ from app.modules.auth.api.dependencies import (
 )
 from app.modules.billing_usage.adapters.models import (
     AiAttendanceSessionModel,
+    AsaasPackOrderModel,
     AsaasSubscriptionModel,
     CommercialPackModel,
     CommercialPlanModel,
@@ -36,6 +37,8 @@ from app.modules.billing_usage.commercial import (
     COMMERCIAL_RESOURCES,
     RESOURCE_LABELS,
     CommercialEntitlementService,
+    effective_price_cents,
+    pack_offers,
 )
 from app.modules.billing_usage.service import (
     CHAT_RATES_USD_PER_MILLION,
@@ -344,7 +347,9 @@ def receive_asaas_webhook(
 class BillingPlan(BaseModel):
     code: str
     name: str
+    # What this tenant pays (the beta price when on beta pricing) and the regular price.
     monthly_price_cents: int
+    list_price_cents: int
     ai_attendances: int
     property_searches: int
     image_optimizations: int
@@ -368,8 +373,25 @@ class BillingContact(BaseModel):
     cpf_cnpj: str | None
 
 
+class PackOffer(BaseModel):
+    resource: str
+    units: int
+    price_cents: int
+
+
+class PackOrder(BaseModel):
+    id: UUID
+    resource: str
+    units: int
+    value_cents: int
+    status: str
+    invoice_url: str | None
+    created_at: datetime
+
+
 class BillingOverview(BaseModel):
     status: str
+    beta_pricing: bool
     plan: BillingPlan
     trial_ends_at: datetime | None
     cycle_ends_at: datetime
@@ -377,6 +399,8 @@ class BillingOverview(BaseModel):
     plans: list[BillingPlan]
     subscription: BillingSubscription | None
     contact: BillingContact
+    packs: list[PackOffer]
+    pack_orders: list[PackOrder]
 
 
 class SelfServiceCustomer(BaseModel):
@@ -401,8 +425,21 @@ class SelfServiceSubscriptionRequest(BaseModel):
     customer: SelfServiceCustomer
 
 
-def _billing_plan(plan: CommercialPlanModel) -> BillingPlan:
-    return BillingPlan.model_validate(plan, from_attributes=True)
+def _billing_plan(plan: CommercialPlanModel, *, beta: bool) -> BillingPlan:
+    return BillingPlan(
+        code=plan.code,
+        name=plan.name,
+        monthly_price_cents=effective_price_cents(plan, beta=beta),
+        list_price_cents=plan.monthly_price_cents,
+        ai_attendances=plan.ai_attendances,
+        property_searches=plan.property_searches,
+        image_optimizations=plan.image_optimizations,
+        max_users=plan.max_users,
+    )
+
+
+def _pack_order(order: AsaasPackOrderModel) -> PackOrder:
+    return PackOrder.model_validate(order, from_attributes=True)
 
 
 def _billing_overview(session: Session, tenant_id: UUID, container: Container) -> BillingOverview:
@@ -419,6 +456,17 @@ def _billing_overview(session: Session, tenant_id: UUID, container: Container) -
             CommercialPlanModel.monthly_price_cents > 0,
         )
         .order_by(CommercialPlanModel.monthly_price_cents)
+    ).all()
+    beta = commercial.beta_pricing
+    subscribed = commercial.status in {"active", "past_due"} and current_plan.is_public
+    orders = session.scalars(
+        select(AsaasPackOrderModel)
+        .where(
+            AsaasPackOrderModel.tenant_id == tenant_id,
+            AsaasPackOrderModel.status.in_(("pending_payment", "paid")),
+        )
+        .order_by(AsaasPackOrderModel.created_at.desc())
+        .limit(5)
     ).all()
     latest = session.execute(
         select(AsaasSubscriptionModel, CommercialPlanModel)
@@ -440,11 +488,14 @@ def _billing_overview(session: Session, tenant_id: UUID, container: Container) -
     )
     return BillingOverview(
         status=commercial.status,
-        plan=_billing_plan(current_plan),
+        beta_pricing=beta,
+        plan=_billing_plan(current_plan, beta=beta),
         trial_ends_at=commercial.trial_ends_at,
         cycle_ends_at=commercial.cycle_ends_at,
         payments_enabled=container.settings.asaas_api_key is not None,
-        plans=[_billing_plan(plan) for plan in plans],
+        plans=[_billing_plan(plan, beta=beta) for plan in plans],
+        packs=[PackOffer(**offer) for offer in pack_offers(current_plan)] if subscribed else [],
+        pack_orders=[_pack_order(order) for order in orders],
         subscription=(
             BillingSubscription(
                 id=latest[0].id,
@@ -481,7 +532,7 @@ def billing_overview(
 class PixCharge(BaseModel):
     payment_id: str
     value_cents: int
-    due_date: date
+    due_date: date | None
     payload: str
     encoded_image: str
     expiration_date: datetime | None
@@ -500,6 +551,52 @@ def billing_pix(
         asaas_client_from_settings(container.settings, container.http_client),
         container.settings,
     ).pix_for_open_charge(principal.tenant_id)
+    return PixCharge(
+        payment_id=charge["payment_id"],
+        value_cents=round(Decimal(str(charge["value"] or 0)) * 100),
+        due_date=charge["due_date"],
+        payload=charge["payload"],
+        encoded_image=charge["encoded_image"],
+        expiration_date=charge["expiration_date"],
+    )
+
+
+class PackOrderRequest(BaseModel):
+    resource: str = Field(pattern="^(ai_attendance|property_search_standard|image_optimization)$")
+    idempotency_key: str = Field(min_length=8, max_length=200)
+
+
+@billing_router.post("/packs", response_model=PackOrder, status_code=201)
+def buy_pack(
+    payload: PackOrderRequest,
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN, UserRole.GESTOR)),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> PackOrder:
+    """One-off charge for extra allowance; it is credited when the payment arrives."""
+
+    order = AsaasBillingService(
+        session,
+        asaas_client_from_settings(container.settings, container.http_client),
+        container.settings,
+    ).create_pack_order(
+        principal.tenant_id, resource=payload.resource, idempotency_key=payload.idempotency_key
+    )
+    return _pack_order(order)
+
+
+@billing_router.get("/packs/{order_id}/pix", response_model=PixCharge)
+def pack_pix(
+    order_id: UUID,
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> PixCharge:
+    charge = AsaasBillingService(
+        session,
+        asaas_client_from_settings(container.settings, container.http_client),
+        container.settings,
+    ).pix_for_pack_order(principal.tenant_id, order_id)
     return PixCharge(
         payment_id=charge["payment_id"],
         value_cents=round(Decimal(str(charge["value"] or 0)) * 100),

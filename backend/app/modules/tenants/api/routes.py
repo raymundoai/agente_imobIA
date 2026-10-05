@@ -44,7 +44,7 @@ def signup(
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
 ) -> SignupResponse:
-    """Self-service account: tenant, master admin and a free trial, then an open session."""
+    """Self-service account: tenant, master admin and (if enabled) a free trial, then a session."""
 
     if not container.settings.public_signup_enabled:
         raise ForbiddenError("O cadastro de novas contas está desativado")
@@ -66,8 +66,12 @@ def signup(
             "profile": {"display_name": payload.company_name.strip()},
         },
     )
-    trial = CommercialEntitlementService(session).start_trial(
-        tenant.id, days=container.settings.trial_days
+    commercial = CommercialEntitlementService(session)
+    trial_days = container.settings.trial_days
+    trial = (
+        commercial.start_trial(tenant.id, days=trial_days)
+        if trial_days > 0
+        else commercial.start_pending(tenant.id)
     )
     tokens = container.token_service
     return SignupResponse(
@@ -79,7 +83,7 @@ def signup(
         refresh_token=tokens.create_refresh_token(
             admin.id, tenant.id, admin.role.value, admin.session_version
         ),
-        trial_ends_at=trial.trial_ends_at or trial.cycle_ends_at,
+        trial_ends_at=trial.trial_ends_at,
     )
 
 

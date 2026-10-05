@@ -230,7 +230,7 @@ class TenantCommercialSubscriptionModel(Base):
     __tablename__ = "tenant_commercial_subscriptions"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pilot', 'trial', 'active', 'past_due', 'cancelled')",
+            "status IN ('pilot', 'trial', 'pending', 'active', 'past_due', 'cancelled')",
             name="status",
         ),
         CheckConstraint(
@@ -262,6 +262,10 @@ class TenantCommercialSubscriptionModel(Base):
     cycle_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     cycle_ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Beta testers pay the plan's beta price (set by the platform team per tenant).
+    beta_pricing: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -557,3 +561,39 @@ class AiAttendanceSessionModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class AsaasPackOrderModel(Base):
+    """A one-off Asaas charge for extra allowance; granted when the payment is received."""
+
+    __tablename__ = "asaas_pack_orders"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('creating', 'pending_payment', 'paid', 'failed', 'cancelled')",
+            name="ck_asaas_pack_orders_status",
+        ),
+        CheckConstraint("units > 0", name="ck_asaas_pack_orders_units"),
+        CheckConstraint("value_cents >= 500", name="ck_asaas_pack_orders_value"),
+        UniqueConstraint("tenant_id", "idempotency_key", name="uq_asaas_pack_orders_key"),
+        Index("ix_asaas_pack_orders_tenant_created", "tenant_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    resource: Mapped[str] = mapped_column(Text, nullable=False)
+    units: Mapped[int] = mapped_column(Integer, nullable=False)
+    value_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    plan_code: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
+    external_reference: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    provider_payment_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    invoice_url: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="creating")
+    grant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

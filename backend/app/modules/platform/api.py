@@ -107,6 +107,7 @@ class PlatformTenantSummary(BaseModel):
     commercial_enforcement: str
     commercial_cycle_ends_at: datetime
     commercial_available: dict[str, int]
+    beta_pricing: bool
     integrations: dict[str, str]
 
 
@@ -136,6 +137,7 @@ class CommercialPlanItem(BaseModel):
     image_optimizations: int
     max_users: int
     is_public: bool
+    beta_price_cents: int | None = None
 
 
 class CommercialPackItem(BaseModel):
@@ -541,7 +543,66 @@ def platform_commercial_plans(
         .where(CommercialPlanModel.is_current.is_(True))
         .order_by(CommercialPlanModel.monthly_price_cents, CommercialPlanModel.name)
     ).all()
-    return [CommercialPlanItem.model_validate(item, from_attributes=True) for item in items]
+    return [_plan_item(item) for item in items]
+
+
+def _plan_item(plan: CommercialPlanModel) -> CommercialPlanItem:
+    item = CommercialPlanItem.model_validate(plan, from_attributes=True)
+    beta = (plan.extra or {}).get("beta_price_cents")
+    item.beta_price_cents = beta if isinstance(beta, int) else None
+    return item
+
+
+class BetaPriceRequest(BaseModel):
+    beta_price_cents: int | None = Field(default=None, ge=500, le=10_000_000)
+
+
+@router.patch("/commercial/plans/{code}/beta-price", response_model=CommercialPlanItem)
+def platform_set_beta_price(
+    code: str,
+    payload: BetaPriceRequest,
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> CommercialPlanItem:
+    """Beta price of a plan; null removes it (beta tenants then pay the regular price)."""
+
+    plan = session.scalar(
+        select(CommercialPlanModel).where(
+            CommercialPlanModel.code == code, CommercialPlanModel.is_current.is_(True)
+        )
+    )
+    if plan is None:
+        raise NotFoundError("Plano não encontrado")
+    extra = dict(plan.extra or {})
+    if payload.beta_price_cents is None:
+        extra.pop("beta_price_cents", None)
+    else:
+        extra["beta_price_cents"] = payload.beta_price_cents
+    plan.extra = extra
+    session.commit()
+    return _plan_item(plan)
+
+
+class BetaPricingRequest(BaseModel):
+    beta_pricing: bool
+
+
+@router.patch("/tenants/{tenant_id}/beta", response_model=PlatformTenantSummary)
+def platform_set_tenant_beta(
+    tenant_id: UUID,
+    payload: BetaPricingRequest,
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> PlatformTenantSummary:
+    """Beta testers see and pay the plans' beta prices from their next subscription on."""
+
+    tenant = session.get(TenantModel, tenant_id)
+    if tenant is None:
+        raise NotFoundError("Tenant not found")
+    commercial = CommercialEntitlementService(session).subscription(tenant_id, lock=True)
+    commercial.beta_pricing = payload.beta_pricing
+    session.commit()
+    return _tenant_summary(session, tenant)
 
 
 @router.get("/commercial/packs", response_model=list[CommercialPackItem])
@@ -858,6 +919,7 @@ def _tenant_summary(session: Session, tenant: TenantModel) -> PlatformTenantSumm
         commercial_available={
             resource: values["available"] for resource, values in commercial_resources.items()
         },
+        beta_pricing=commercial_subscription.beta_pricing,
         integrations=safe_integrations,
     )
 

@@ -39,7 +39,7 @@ class FakeAsaasClient:
         assert payload["customer"] == "cus_sandbox"
         assert payload["billingType"] == "PIX"
         assert payload["cycle"] == "MONTHLY"
-        assert payload["value"] == 399.0
+        assert payload["value"] == 369.0
         failure = self.create_failures.pop(0) if self.create_failures else None
         if isinstance(failure, Exception):
             raise failure
@@ -115,7 +115,7 @@ def _create(client: TestClient, tenant: dict, auth: dict, key: str = "asaas-key-
         f"/platform/tenants/{tenant['id']}/asaas/subscriptions",
         headers=auth,
         json={
-            "plan_code": "ia_essencial",
+            "plan_code": "essencial",
             "billing_type": "PIX",
             "next_due_date": due_date,
             "enforcement_mode": "enforce",
@@ -174,7 +174,7 @@ def test_asaas_subscription_activates_commercial_plan_from_webhook(
     assert _event(client, "evt_confirmed", "PAYMENT_CONFIRMED", "sub_sandbox_1")["duplicate"]
 
     after = _commercial(client, tenant_auth)
-    assert after["plan"]["code"] == "ia_essencial"
+    assert after["plan"]["code"] == "essencial"
     assert after["status"] == "active"
     assert after["enforcement_mode"] == "enforce"
 
