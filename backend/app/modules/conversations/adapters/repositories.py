@@ -129,9 +129,7 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
                     else ConversationStatus.OPEN.value
                 ),
                 mode=(
-                    ConversationMode.HUMAN.value
-                    if incoming.is_group
-                    else ConversationMode.AI.value
+                    ConversationMode.HUMAN.value if incoming.is_group else ConversationMode.AI.value
                 ),
                 current_agent="leads",
                 is_group=incoming.is_group,
@@ -196,19 +194,21 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
                 job_id = pending_job.id
             else:
                 job_id = uuid4()
-                self._session.add(MessageJobModel(
-                    id=job_id,
-                    tenant_id=tenant_id,
-                    conversation_id=conversation.id,
-                    message_id=message.id,
-                    channel=incoming.channel.value,
-                    status="received",
-                    attempts=0,
-                    max_attempts=incoming.max_attempts,
-                    send_to_channel=incoming.send_to_channel,
-                    available_at=available_at,
-                    result={},
-                ))
+                self._session.add(
+                    MessageJobModel(
+                        id=job_id,
+                        tenant_id=tenant_id,
+                        conversation_id=conversation.id,
+                        message_id=message.id,
+                        channel=incoming.channel.value,
+                        status="received",
+                        attempts=0,
+                        max_attempts=incoming.max_attempts,
+                        send_to_channel=incoming.send_to_channel,
+                        available_at=available_at,
+                        result={},
+                    )
+                )
         self._session.commit()
         self._session.refresh(conversation)
         return InboundRecordResult(
@@ -219,9 +219,7 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
             job_id=job_id,
         )
 
-    def record_outbound(
-        self, tenant_id: UUID, message: Message, *, commit: bool = True
-    ) -> Message:
+    def record_outbound(self, tenant_id: UUID, message: Message, *, commit: bool = True) -> Message:
         if message.tenant_id != tenant_id:
             raise ValueError("Message tenant does not match repository scope")
         conversation = self._session.scalar(
@@ -272,9 +270,7 @@ class SqlAlchemyConversationRepository(ConversationRepositoryPort):
                 MessageModel.id.desc(),
             )
         ).all()
-        latest_by_conversation = {
-            message.conversation_id: message for message in latest_messages
-        }
+        latest_by_conversation = {message.conversation_id: message for message in latest_messages}
         for conversation in conversations:
             latest = latest_by_conversation.get(conversation.id)
             if latest is not None:

@@ -62,9 +62,7 @@ class RedeGauchaConnector(PortalConnector):
                 if isinstance(item, dict) and item.get("id") and item.get("url")
             ]
             records.extend(
-                record
-                for record in candidates
-                if slug(record.city) == slug(demand.city)
+                record for record in candidates if slug(record.city) == slug(demand.city)
             )
             page += 1
         records.sort(key=lambda record: _relevance(record, demand), reverse=True)

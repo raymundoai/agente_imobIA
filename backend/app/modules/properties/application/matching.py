@@ -145,9 +145,7 @@ def meets_required_constraints(property_: Property, demand: LeadDemand) -> bool:
     demand_state = normalize_search_text(demand.state)
     if demand_state and property_state and property_state != demand_state:
         return False
-    price = property_offer_price(
-        property_, demand.purpose.value if demand.purpose else None
-    )
+    price = property_offer_price(property_, demand.purpose.value if demand.purpose else None)
     if demand.price_min is not None or demand.price_max is not None:
         if price is None:
             return False

@@ -112,6 +112,7 @@ class PlatformTenantSummary(BaseModel):
     commercial_cycle_ends_at: datetime
     commercial_available: dict[str, int]
     beta_pricing: bool
+    internal_test: bool
     integrations: dict[str, str]
 
 
@@ -609,6 +610,26 @@ def platform_set_tenant_beta(
     return _tenant_summary(session, tenant)
 
 
+class InternalTestRequest(BaseModel):
+    internal_test: bool
+
+
+@router.patch("/tenants/{tenant_id}/internal-test", response_model=PlatformTenantSummary)
+def platform_set_tenant_internal_test(
+    tenant_id: UUID,
+    payload: InternalTestRequest,
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> PlatformTenantSummary:
+    """The team's own accounts: unlimited use, and only the R$ 5,00 test plan to subscribe."""
+
+    tenant = session.get(TenantModel, tenant_id)
+    if tenant is None:
+        raise NotFoundError("Tenant not found")
+    CommercialEntitlementService(session).set_internal_test(tenant_id, payload.internal_test)
+    return _tenant_summary(session, tenant)
+
+
 @router.get("/commercial/packs", response_model=list[CommercialPackItem])
 def platform_commercial_packs(
     _: PlatformPrincipal = Depends(get_platform_principal),
@@ -924,6 +945,7 @@ def _tenant_summary(session: Session, tenant: TenantModel) -> PlatformTenantSumm
             resource: values["available"] for resource, values in commercial_resources.items()
         },
         beta_pricing=commercial_subscription.beta_pricing,
+        internal_test=commercial_subscription.internal_test,
         integrations=safe_integrations,
     )
 

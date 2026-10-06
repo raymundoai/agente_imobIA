@@ -518,6 +518,9 @@ function statusHeadline(overview: BillingOverview) {
     const days = trialDaysLeft(overview);
     return days ? `Teste grátis: ${days} dia${days === 1 ? "" : "s"} restante${days === 1 ? "" : "s"}` : "Seu teste grátis terminou";
   }
+  if (overview.internal_test) {
+    return overview.status === "active" ? `Conta interna · ${overview.plan.name} ativo` : "Conta interna de testes";
+  }
   if (overview.status === "pending") return "Escolha um plano para ativar a IA";
   if (overview.status === "active") return `Plano ${overview.plan.name} ativo`;
   if (overview.status === "past_due") return "Pagamento em atraso";
@@ -530,6 +533,9 @@ function statusDetail(overview: BillingOverview) {
     return overview.trial_ends_at
       ? `O teste vai até ${new Date(overview.trial_ends_at).toLocaleDateString("pt-BR")}. Assine para continuar usando a IA e as buscas.`
       : "";
+  }
+  if (overview.internal_test) {
+    return "Uso ilimitado da IA, das buscas e da otimização de fotos. A contratação abaixo cobra R$ 5,00 de verdade, só para validar o pagamento.";
   }
   if (overview.status === "pending") {
     return overview.beta_pricing

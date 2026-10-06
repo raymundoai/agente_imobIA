@@ -22,9 +22,7 @@ def test_local_property_image_storage_scopes_file_by_tenant(tmp_path: Path) -> N
         content=b"\x89PNG\r\n\x1a\ncontent",
     )
     storage = LocalPropertyImageStorage(tmp_path)
-    key = storage.build_key(
-        tenant_id, property_id, image_id, "original", upload.content_type
-    )
+    key = storage.build_key(tenant_id, property_id, image_id, "original", upload.content_type)
     storage.put(tenant_id, key, upload.content, upload.content_type)
 
     with storage.open(tenant_id, key) as stored:
@@ -57,6 +55,8 @@ def test_property_media_validation_accepts_video_and_rejects_spoofed_content() -
             max_image_bytes=100,
             max_video_bytes=100,
         )
+
+
 def test_optimization_prompt_forbids_inventing_property_elements() -> None:
     prompt = optimization_prompt(["corrigir iluminação"], "manter cores naturais")
     assert "Não adicione, remova nem invente elementos" in prompt

@@ -103,9 +103,7 @@ class FakeConversations:
         self.messages.append(message)
         return message
 
-    def update_mode(
-        self, tenant_id, conversation_id, mode, assigned_user_id, *, commit=True
-    ):
+    def update_mode(self, tenant_id, conversation_id, mode, assigned_user_id, *, commit=True):
         self.conversation.mode = mode
         self.conversation.assigned_user_id = assigned_user_id
         return self.conversation

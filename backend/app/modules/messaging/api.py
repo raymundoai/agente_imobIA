@@ -39,9 +39,7 @@ class MessageJobResponse(BaseModel):
 def list_jobs(
     status: str | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
-    principal: CurrentPrincipal = Depends(
-        require_roles(UserRole.ADMIN, UserRole.GESTOR)
-    ),
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN, UserRole.GESTOR)),
     session: Session = Depends(get_db_session),
 ) -> list[MessageJobResponse]:
     return [
@@ -53,9 +51,7 @@ def list_jobs(
 @router.post("/{job_id}/retry", response_model=MessageJobResponse)
 def retry_job(
     job_id: UUID,
-    principal: CurrentPrincipal = Depends(
-        require_roles(UserRole.ADMIN, UserRole.GESTOR)
-    ),
+    principal: CurrentPrincipal = Depends(require_roles(UserRole.ADMIN, UserRole.GESTOR)),
     session: Session = Depends(get_db_session),
 ) -> MessageJobResponse:
     job = MessageJobRepository(session).retry(principal.tenant_id, job_id)

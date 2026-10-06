@@ -24,6 +24,7 @@ from app.modules.billing_usage.commercial import (
     PACK_VALIDITY_DAYS,
     CommercialEntitlementService,
     effective_price_cents,
+    is_internal_test_plan,
     pack_offers,
 )
 from app.shared.errors.exceptions import (
@@ -273,11 +274,15 @@ class AsaasBillingService:
                 CommercialPlanModel.is_current.is_(True),
             )
         )
-        if plan is None or not plan.is_public:
+        commercial = CommercialEntitlementService(self._session).subscription(tenant_id)
+        offered = plan is not None and (
+            plan.is_public if not commercial.internal_test else is_internal_test_plan(plan)
+        )
+        if plan is None or not offered:
             raise ConflictError("Plano comercial indisponível para cobrança")
         if plan.monthly_price_cents <= 0:
             raise ConflictError("O plano precisa ter preço mensal definido antes da cobrança")
-        beta = CommercialEntitlementService(self._session).subscription(tenant_id).beta_pricing
+        beta = commercial.beta_pricing and not commercial.internal_test
         customer = self._ensure_customer(tenant_id, request.customer)
         local_id = uuid4()
         subscription = AsaasSubscriptionModel(

@@ -182,9 +182,7 @@ def test_profile_settings_update_preserves_agents_and_integrations(client: TestC
 def test_profile_settings_reject_invalid_document_and_business_hours(
     client: TestClient,
 ) -> None:
-    tenant, token = _provision(
-        client, "profile-validation", "admin@profile-validation.example.com"
-    )
+    tenant, token = _provision(client, "profile-validation", "admin@profile-validation.example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     invalid_document = client.patch(
@@ -199,9 +197,7 @@ def test_profile_settings_reject_invalid_document_and_business_hours(
             "profile": {
                 "business_hours": {
                     "timezone": "America/Sao_Paulo",
-                    "days": {
-                        "monday": {"enabled": True, "start": "18:00", "end": "09:00"}
-                    },
+                    "days": {"monday": {"enabled": True, "start": "18:00", "end": "09:00"}},
                 }
             }
         },
@@ -246,12 +242,8 @@ def test_last_active_admin_cannot_be_demoted_or_deactivated(client: TestClient) 
     users = client.get("/users", headers=headers).json()
     admin_id = users[0]["id"]
 
-    demote = client.patch(
-        f"/users/{admin_id}", headers=headers, json={"role": "gestor"}
-    )
-    deactivate = client.patch(
-        f"/users/{admin_id}", headers=headers, json={"status": "inactive"}
-    )
+    demote = client.patch(f"/users/{admin_id}", headers=headers, json={"role": "gestor"})
+    deactivate = client.patch(f"/users/{admin_id}", headers=headers, json={"status": "inactive"})
 
     assert demote.status_code == 409, demote.text
     assert deactivate.status_code == 409, deactivate.text

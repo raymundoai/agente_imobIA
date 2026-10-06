@@ -417,3 +417,92 @@ def test_pack_is_bought_and_credited_when_paid(
         client, "evt_pack_paid_again", {"id": "pay_pack_1", "externalReference": reference}
     )
     assert repeat["outcome"] == "pack_already_paid"
+
+
+def test_internal_test_account_is_unlimited_and_offered_only_the_test_plan(
+    signup_enabled: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.modules.billing_usage import api as billing_api
+
+    client = signup_enabled
+    fake = FakeAsaasClient()
+    monkeypatch.setattr(billing_api, "asaas_client_from_settings", lambda *_: fake)
+    customer = _signup(client, email="cliente@horizonte.example.com")
+    body = _signup(client)
+    platform = _platform(client)
+
+    # Regular customers never see nor buy the private test plan.
+    regular = client.get("/billing", headers=_auth(customer)).json()
+    assert "teste_pagamento" not in [plan["code"] for plan in regular["plans"]]
+    refused = client.post(
+        "/billing/subscription",
+        headers=_auth(customer),
+        json={
+            "plan_code": "teste_pagamento",
+            "billing_type": "PIX",
+            "idempotency_key": "regular-test-plan",
+            "customer": {
+                "name": "Cliente",
+                "email": "cliente@horizonte.example.com",
+                "cpf_cnpj": "11.222.333/0001-81",
+            },
+        },
+    )
+    assert refused.status_code == 409
+
+    marked = client.patch(
+        f"/platform/tenants/{body['tenant_id']}/internal-test",
+        headers=platform,
+        json={"internal_test": True},
+    )
+    assert marked.status_code == 200, marked.text
+    assert marked.json()["internal_test"] is True
+    assert marked.json()["commercial_enforcement"] == "meter_only"
+
+    overview = client.get("/billing", headers=_auth(body)).json()
+    assert overview["internal_test"] is True
+    assert [plan["code"] for plan in overview["plans"]] == ["teste_pagamento"]
+    assert overview["plans"][0]["monthly_price_cents"] == 500
+    assert _subscribe(client, body, "PIX", "internal-essencial").status_code == 409
+
+    subscribed = client.post(
+        "/billing/subscription",
+        headers=_auth(body),
+        json={
+            "plan_code": "teste_pagamento",
+            "billing_type": "PIX",
+            "idempotency_key": "internal-test-plan",
+            "customer": {
+                "name": "Imobiliária Horizonte Ltda",
+                "email": "financeiro@horizonte.example.com",
+                "cpf_cnpj": "11.222.333/0001-81",
+            },
+        },
+    )
+    assert subscribed.status_code == 201, subscribed.text
+    assert fake.created_subscriptions[0]["value"] == 5.0
+
+    token = asaas_webhook_token(client.app.state.container.settings)
+    confirmed = client.post(
+        "/webhooks/asaas",
+        headers={"asaas-access-token": token},
+        json={
+            "id": "evt_internal_confirmed",
+            "event": "PAYMENT_CONFIRMED",
+            "payment": {"id": "pay_self", "subscription": "sub_self", "status": "CONFIRMED"},
+        },
+    )
+    assert confirmed.json()["outcome"] == "activated"
+    summary = client.get(f"/platform/tenants/{body['tenant_id']}", headers=platform).json()
+    assert summary["commercial_plan"] == "teste_pagamento"
+    assert summary["commercial_status"] == "active"
+    # Paying the test plan keeps the account unlimited.
+    assert summary["commercial_enforcement"] == "meter_only"
+
+    unmarked = client.patch(
+        f"/platform/tenants/{body['tenant_id']}/internal-test",
+        headers=platform,
+        json={"internal_test": False},
+    )
+    assert unmarked.json()["internal_test"] is False
+    assert unmarked.json()["commercial_enforcement"] == "enforce"

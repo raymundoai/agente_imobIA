@@ -209,9 +209,7 @@ class SqlAlchemyKnowledgeRepository(KnowledgeDocumentRepositoryPort, KnowledgeSe
 
 
 class SqlAlchemyAiAuditLogRepository(AiAuditLogRepositoryPort):
-    def __init__(
-        self, session: Session, *, credit_reservation_key: str | None = None
-    ) -> None:
+    def __init__(self, session: Session, *, credit_reservation_key: str | None = None) -> None:
         self._session = session
         self._credit_reservation_key = credit_reservation_key
 

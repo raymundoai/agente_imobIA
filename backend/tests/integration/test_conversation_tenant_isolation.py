@@ -134,9 +134,7 @@ def test_conversation_archiving_is_tenant_isolated(client: TestClient) -> None:
         json={"archived": True},
     )
     assert response.status_code == 404
-    active = client.get(
-        "/conversations", headers={"Authorization": f"Bearer {token_a}"}
-    ).json()
+    active = client.get("/conversations", headers={"Authorization": f"Bearer {token_a}"}).json()
     assert [item["id"] for item in active] == [conversation_id]
 
 

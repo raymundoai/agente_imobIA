@@ -24,8 +24,7 @@ class FoxterConnector(PortalConnector):
 
     def supports(self, demand: LeadDemand) -> bool:
         return (
-            infer_state(demand.city, demand.state) == "RS"
-            and requested_purpose(demand) != "rent"
+            infer_state(demand.city, demand.state) == "RS" and requested_purpose(demand) != "rent"
         )
 
     def search(self, demand: LeadDemand, *, limit: int = 24) -> ConnectorBatch:

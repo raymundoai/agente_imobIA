@@ -64,9 +64,7 @@ class QuintoAndarConnector(PortalConnector):
             purpose=purpose,
             property_type=property_type,
             state=str(
-                address.get("addressRegion")
-                or infer_state(demand.city, demand.state)
-                or ""
+                address.get("addressRegion") or infer_state(demand.city, demand.state) or ""
             ).upper()
             or None,
             city=str(address.get("addressLocality") or demand.city or ""),
@@ -75,8 +73,7 @@ class QuintoAndarConnector(PortalConnector):
                 "street": street or None,
                 "neighborhood": neighborhood,
                 "city": address.get("addressLocality") or demand.city,
-                "state": address.get("addressRegion")
-                or infer_state(demand.city, demand.state),
+                "state": address.get("addressRegion") or infer_state(demand.city, demand.state),
             },
             price=price,
             sale_price=price if purpose == "buy" else None,

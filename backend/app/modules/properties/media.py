@@ -104,6 +104,7 @@ class LocalPropertyImageStorage:
         self._path(tenant_id, key)
         return None
 
+
 class S3PropertyImageStorage:
     def __init__(
         self,
@@ -140,18 +141,16 @@ class S3PropertyImageStorage:
         )
 
     def open(self, tenant_id: UUID, key: str) -> BinaryIO:
-        return self._client.get_object(
-            Bucket=self._bucket, Key=self._scoped(tenant_id, key)
-        )["Body"]
+        return self._client.get_object(Bucket=self._bucket, Key=self._scoped(tenant_id, key))[
+            "Body"
+        ]
 
     def delete(self, tenant_id: UUID, key: str) -> None:
         self._client.delete_object(Bucket=self._bucket, Key=self._scoped(tenant_id, key))
 
     def exists(self, tenant_id: UUID, key: str) -> bool:
         try:
-            self._client.head_object(
-                Bucket=self._bucket, Key=self._scoped(tenant_id, key)
-            )
+            self._client.head_object(Bucket=self._bucket, Key=self._scoped(tenant_id, key))
         except Exception as exc:
             response = getattr(exc, "response", {})
             if response.get("ResponseMetadata", {}).get("HTTPStatusCode") == 404:

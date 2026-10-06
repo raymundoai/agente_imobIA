@@ -38,6 +38,7 @@ from app.modules.billing_usage.commercial import (
     RESOURCE_LABELS,
     CommercialEntitlementService,
     effective_price_cents,
+    is_internal_test_plan,
     pack_offers,
 )
 from app.modules.billing_usage.service import (
@@ -392,6 +393,7 @@ class PackOrder(BaseModel):
 class BillingOverview(BaseModel):
     status: str
     beta_pricing: bool
+    internal_test: bool
     plan: BillingPlan
     trial_ends_at: datetime | None
     cycle_ends_at: datetime
@@ -448,16 +450,22 @@ def _billing_overview(session: Session, tenant_id: UUID, container: Container) -
     current_plan = session.get(CommercialPlanModel, commercial.plan_id)
     if current_plan is None:
         raise RuntimeError("Commercial plan not found")
-    plans = session.scalars(
-        select(CommercialPlanModel)
-        .where(
-            CommercialPlanModel.is_current.is_(True),
-            CommercialPlanModel.is_public.is_(True),
-            CommercialPlanModel.monthly_price_cents > 0,
-        )
-        .order_by(CommercialPlanModel.monthly_price_cents)
-    ).all()
-    beta = commercial.beta_pricing
+    internal = commercial.internal_test
+    plans = [
+        plan
+        for plan in session.scalars(
+            select(CommercialPlanModel)
+            .where(
+                CommercialPlanModel.is_current.is_(True),
+                CommercialPlanModel.is_public.is_(not internal),
+                CommercialPlanModel.monthly_price_cents > 0,
+            )
+            .order_by(CommercialPlanModel.monthly_price_cents)
+        ).all()
+        # Internal test accounts are offered only the private test plan, in place of the others.
+        if not internal or is_internal_test_plan(plan)
+    ]
+    beta = commercial.beta_pricing and not internal
     subscribed = commercial.status in {"active", "past_due"} and current_plan.is_public
     orders = session.scalars(
         select(AsaasPackOrderModel)
@@ -489,6 +497,7 @@ def _billing_overview(session: Session, tenant_id: UUID, container: Container) -
     return BillingOverview(
         status=commercial.status,
         beta_pricing=beta,
+        internal_test=internal,
         plan=_billing_plan(current_plan, beta=beta),
         trial_ends_at=commercial.trial_ends_at,
         cycle_ends_at=commercial.cycle_ends_at,
@@ -627,7 +636,10 @@ def subscribe(
             plan_code=payload.plan_code,
             billing_type=payload.billing_type,
             next_due_date=datetime.now(BILLING_TIMEZONE).date(),
-            enforcement_mode="enforce",
+            # Internal test accounts keep unlimited use after the test payment.
+            enforcement_mode="meter_only"
+            if CommercialEntitlementService(session).subscription(principal.tenant_id).internal_test
+            else "enforce",
             idempotency_key=payload.idempotency_key,
             customer=AsaasCustomerInput(
                 name=payload.customer.name,

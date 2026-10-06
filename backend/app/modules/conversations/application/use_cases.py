@@ -69,10 +69,7 @@ def phone_is_allowed_for_auto_reply(phone: str, allowed_phones: list[str]) -> bo
     if not allowed_phones:
         return True
     incoming_variants = _whatsapp_phone_variants(phone)
-    return any(
-        incoming_variants & _whatsapp_phone_variants(allowed)
-        for allowed in allowed_phones
-    )
+    return any(incoming_variants & _whatsapp_phone_variants(allowed) for allowed in allowed_phones)
 
 
 def _whatsapp_phone_variants(phone: str) -> set[str]:
@@ -135,9 +132,7 @@ class HandleIncomingWhatsappWebhookUseCase:
         if incoming.is_group and not resolved_group_name:
             resolver = getattr(self._channel, "resolve_group_name", None)
             if callable(resolver):
-                resolved_group_name = resolver(
-                    channel_credentials, incoming.external_contact_id
-                )
+                resolved_group_name = resolver(channel_credentials, incoming.external_contact_id)
         connected_phone = _connected_whatsapp_phone(tenant.settings)
         if (
             not incoming.from_me

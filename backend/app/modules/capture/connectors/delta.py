@@ -67,9 +67,7 @@ class DeltaConnector(PortalConnector):
                 if isinstance(item, dict) and item.get("id")
             ]
             records.extend(
-                record
-                for record in candidates
-                if slug(record.city) == slug(demand.city)
+                record for record in candidates if slug(record.city) == slug(demand.city)
             )
         records.sort(key=lambda record: _relevance(record, demand), reverse=True)
         return ConnectorBatch(self.descriptor, self.parser_version, self.endpoint, records[:limit])

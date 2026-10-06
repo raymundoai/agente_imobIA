@@ -74,6 +74,12 @@ def effective_price_cents(plan: CommercialPlanModel, *, beta: bool) -> int:
     return plan.monthly_price_cents
 
 
+def is_internal_test_plan(plan: CommercialPlanModel) -> bool:
+    """Private plans offered only to internal test accounts (a real charge to validate payments)."""
+
+    return not plan.is_public and bool((plan.extra or {}).get("internal_test"))
+
+
 def pack_offers(plan: CommercialPlanModel) -> list[dict[str, int | str]]:
     """Extra-allowance packs for the contracted plan, priced from its reference unit prices.
 
@@ -403,6 +409,29 @@ class CommercialEntitlementService:
             self._provision_plan_grants(subscription, plan)
         self._session.commit()
         return subscription
+
+    def set_internal_test(
+        self, tenant_id: UUID, enabled: bool
+    ) -> TenantCommercialSubscriptionModel:
+        """Turn a tenant into an internal test account (unlimited use) or back into a customer."""
+
+        subscription = self.subscription(tenant_id, lock=True)
+        subscription.internal_test = enabled
+        if enabled:
+            if subscription.status in {"active", "past_due"}:
+                subscription.enforcement_mode = "meter_only"
+                self._session.commit()
+                return subscription
+            return self.assign_plan(
+                tenant_id, plan_code=PILOT_PLAN_CODE, enforcement_mode="meter_only"
+            )
+        if subscription.status in {"active", "past_due"}:
+            subscription.enforcement_mode = "enforce"
+            self._session.commit()
+            return subscription
+        return self.assign_plan(
+            tenant_id, plan_code=NO_PLAN_CODE, enforcement_mode="enforce", status="pending"
+        )
 
     def start_pending(
         self, tenant_id: UUID, *, commit: bool = True

@@ -117,7 +117,5 @@ def test_telegram_auto_reply_uses_persistent_queue(client: TestClient) -> None:
     )
     assert response.status_code == 200
     assert response.json()["job_id"] is not None
-    processed = MessageJobProcessor(
-        client.app.state.container, "telegram-worker"
-    ).process_next()
+    processed = MessageJobProcessor(client.app.state.container, "telegram-worker").process_next()
     assert processed["status"] == "delivery_pending"

@@ -55,6 +55,7 @@ type Tenant = {
   commercial_plan: string;
   commercial_status: "pilot" | "trial" | "pending" | "active" | "past_due" | "cancelled";
   beta_pricing: boolean;
+  internal_test: boolean;
   commercial_enforcement: "meter_only" | "enforce";
   commercial_cycle_ends_at: string;
   commercial_available: Record<string, number>;
@@ -687,6 +688,21 @@ function TenantDetail({
     }
   }
 
+  async function toggleInternalTest(next: boolean) {
+    setFeedback(null);
+    try {
+      await request(
+        `/platform/tenants/${tenant.id}/internal-test`,
+        { method: "PATCH", body: JSON.stringify({ internal_test: next }) },
+        token,
+      );
+      setFeedback(next ? "Conta marcada como interna de testes: uso ilimitado." : "Conta voltou a ser cliente comum.");
+      onChanged();
+    } catch (reason) {
+      setFeedback(readError(reason));
+    }
+  }
+
   async function grantUnits(event: FormEvent) {
     event.preventDefault();
     if (!window.confirm(`Adicionar ${Number(units).toLocaleString("pt-BR")} unidades para ${tenant.name}?`)) return;
@@ -838,6 +854,13 @@ function TenantDetail({
           <span>
             <strong>Beta tester</strong>
             <small>Vê e paga os preços beta (Configurações → Preços beta). Vale a partir da próxima assinatura.</small>
+          </span>
+        </label>
+        <label className="beta-toggle">
+          <input checked={tenant.internal_test} onChange={(event) => void toggleInternalTest(event.target.checked)} type="checkbox" />
+          <span>
+            <strong>Conta interna de testes</strong>
+            <small>Uso ilimitado (medido, nunca bloqueado). No lugar dos planos, a conta vê só a contratação de teste de R$ 5,00, para validar o pagamento.</small>
           </span>
         </label>
         <div className="contact-info-grid">

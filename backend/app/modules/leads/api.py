@@ -276,15 +276,11 @@ def delete_demand(
     ledger = CreditLedgerService(session)
     if any(
         run.billing_reservation_key
-        and ledger.reservation_status(
-            principal.tenant_id, run.billing_reservation_key
-        )
+        and ledger.reservation_status(principal.tenant_id, run.billing_reservation_key)
         in {"reserved", "started"}
         for run in search_runs
     ):
-        raise ConflictError(
-            "Aguarde a finalização da cobrança da busca antes de excluir a demanda"
-        )
+        raise ConflictError("Aguarde a finalização da cobrança da busca antes de excluir a demanda")
     demand = session.scalar(
         select(LeadDemandModel).where(
             LeadDemandModel.tenant_id == principal.tenant_id, LeadDemandModel.id == demand_id
@@ -304,9 +300,7 @@ def delete_demand(
             summary=f"Demanda de {demand.lead_name} excluída: {interest}",
             snapshot=model_snapshot(demand),
         )
-    deleted = SqlAlchemyLeadDemandRepository(session).delete(
-        principal.tenant_id, demand_id
-    )
+    deleted = SqlAlchemyLeadDemandRepository(session).delete(principal.tenant_id, demand_id)
     if not deleted:
         raise NotFoundError("Lead demand not found")
 

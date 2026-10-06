@@ -536,6 +536,7 @@ export type PackOrder = {
 export type BillingOverview = {
   status: "pilot" | "trial" | "pending" | "active" | "past_due" | "cancelled";
   beta_pricing: boolean;
+  internal_test: boolean;
   packs: PackOffer[];
   pack_orders: PackOrder[];
   plan: BillingPlan;

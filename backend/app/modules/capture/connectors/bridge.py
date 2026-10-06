@@ -33,11 +33,7 @@ class BridgeConnector(PortalConnector):
         response = self.get_public(url)
         products = _products(response.text)
         records = [self._record(item, demand, response.text) for item in products]
-        records = [
-            record
-            for record in records
-            if slug(record.city) == slug(demand.city)
-        ][:limit]
+        records = [record for record in records if slug(record.city) == slug(demand.city)][:limit]
         return ConnectorBatch(self.descriptor, self.parser_version, url, records)
 
     def _record(self, item: dict[str, Any], demand: LeadDemand, html: str) -> ExternalListingRecord:

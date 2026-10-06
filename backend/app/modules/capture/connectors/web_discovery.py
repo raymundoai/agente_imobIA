@@ -363,9 +363,7 @@ def _search_prompt(demand: LeadDemand, limit: int) -> str:
     minimum = str(demand.price_min) if demand.price_min is not None else "sem mínimo"
     maximum = str(demand.price_max) if demand.price_max is not None else "sem máximo"
     bedrooms = str(demand.bedrooms) if demand.bedrooms is not None else "não informado"
-    parking = (
-        str(demand.parking_spaces) if demand.parking_spaces is not None else "não informado"
-    )
+    parking = str(demand.parking_spaces) if demand.parking_spaces is not None else "não informado"
     area = str(demand.min_area) if demand.min_area is not None else "não informada"
     excluded = ", ".join(_EXCLUDED_DOMAINS)
     return (

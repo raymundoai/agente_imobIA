@@ -164,9 +164,7 @@ class MessageJobRepository:
         )
         return outbound.text if outbound is not None else None
 
-    def delivery_completed(
-        self, job_id: UUID, token: UUID, external_message_id: str
-    ) -> None:
+    def delivery_completed(self, job_id: UUID, token: UUID, external_message_id: str) -> None:
         job = self.session.scalar(
             select(MessageJobModel).where(
                 MessageJobModel.id == job_id,
@@ -272,9 +270,7 @@ class MessageJobRepository:
         self.session.commit()
         return job
 
-    def list(
-        self, tenant_id: UUID, status: str | None, limit: int
-    ) -> list[MessageJobModel]:
+    def list(self, tenant_id: UUID, status: str | None, limit: int) -> list[MessageJobModel]:
         query = select(MessageJobModel).where(MessageJobModel.tenant_id == tenant_id)
         if status:
             query = query.where(MessageJobModel.status == status)

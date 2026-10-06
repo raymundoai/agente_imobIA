@@ -210,7 +210,9 @@ class EvolutionApiAdapter(MessageChannelPort):
             customer_name=(
                 group_name
                 if is_group
-                else customer_name if isinstance(customer_name, str) else None
+                else customer_name
+                if isinstance(customer_name, str)
+                else None
             ),
             attachments=attachments,
             from_me=bool(key.get("fromMe", False)),
@@ -261,9 +263,7 @@ class EvolutionApiAdapter(MessageChannelPort):
         resolved = self._group_names.get(cache_key)
         return resolved[1] if resolved is not None else None
 
-    def profile_picture_url(
-        self, credentials: ChannelCredentials, phone: str
-    ) -> str | None:
+    def profile_picture_url(self, credentials: ChannelCredentials, phone: str) -> str | None:
         try:
             response = self._client.post(
                 f"{credentials.base_url}/chat/fetchProfilePictureUrl/{credentials.instance}",

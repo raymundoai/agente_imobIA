@@ -98,9 +98,7 @@ def test_resolve_group_name_fetches_and_caches_group_catalog() -> None:
         requests.append(request)
         return httpx.Response(
             200,
-            json=[
-                {"id": "120363424428788822@g.us", "subject": "Grupo de corretores"}
-            ],
+            json=[{"id": "120363424428788822@g.us", "subject": "Grupo de corretores"}],
         )
 
     adapter = EvolutionApiAdapter(httpx.Client(transport=httpx.MockTransport(handler)))

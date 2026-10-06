@@ -50,8 +50,7 @@ class ConnectorRegistry:
 
     def catalog_version(self, source_ids: list[str]) -> str:
         material = "|".join(
-            f"{source_id}:{self.get(source_id).parser_version}"
-            for source_id in sorted(source_ids)
+            f"{source_id}:{self.get(source_id).parser_version}" for source_id in sorted(source_ids)
         )
         return hashlib.sha256(material.encode()).hexdigest()[:20]
 

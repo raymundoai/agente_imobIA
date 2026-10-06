@@ -244,9 +244,7 @@ class PropertyImageModel(Base):
     is_primary: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
-    sort_order: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default="0"
-    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     optimization_prompt: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
@@ -276,9 +274,7 @@ class PropertyMediaCleanupModel(Base):
         Text, nullable=False, default="pending", server_default="pending"
     )
     error: Mapped[str | None] = mapped_column(Text)
-    attempts: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default="0"
-    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     available_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -318,9 +314,7 @@ class PropertyImageOperationModel(Base):
             ["property_images.tenant_id", "property_images.id"],
             ondelete="CASCADE",
         ),
-        CheckConstraint(
-            "status IN ('processing', 'ready', 'failed', 'uncertain')", name="status"
-        ),
+        CheckConstraint("status IN ('processing', 'ready', 'failed', 'uncertain')", name="status"),
         UniqueConstraint("tenant_id", "id", name="uq_property_image_operations_id"),
         Index("ix_property_image_operations_image", "tenant_id", "image_id", "created_at"),
     )

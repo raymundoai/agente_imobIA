@@ -44,9 +44,7 @@ class CapturePropertyUseCase:
         saved = (
             self._properties.upsert_captured(tenant_id, property_, demand_id)
             if commit
-            else self._properties.upsert_captured(
-                tenant_id, property_, demand_id, commit=False
-            )
+            else self._properties.upsert_captured(tenant_id, property_, demand_id, commit=False)
         )
         self._events.publish(
             DomainEvent(
@@ -107,7 +105,8 @@ class GetCaptureMissionUseCase:
                     if property_offer_price(
                         match.property,
                         demand.purpose.value if demand.purpose else None,
-                    ) is not None
+                    )
+                    is not None
                     else None,
                     "score": match.score,
                     "matched": match.matched,

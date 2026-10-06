@@ -232,9 +232,7 @@ def test_web_discovery_keeps_usage_when_structured_output_is_invalid() -> None:
         httpx.Client(),
         api_key="test-key",
         openai_client=SimpleNamespace(
-            responses=_Responses(
-                SimpleNamespace(output_text="", output=[], usage=usage)
-            )
+            responses=_Responses(SimpleNamespace(output_text="", output=[], usage=usage))
         ),
     )
 

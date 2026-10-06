@@ -122,9 +122,7 @@ class Container:
                 refresh_ttl_days=settings.refresh_token_ttl_days,
             ),
             event_bus=InMemoryEventBus(),
-            channel_credentials=PersistentEvolutionCredentialsProvider(
-                database, settings
-            ),
+            channel_credentials=PersistentEvolutionCredentialsProvider(database, settings),
             message_channel=EvolutionApiAdapter(
                 http_client,
                 retry_attempts=settings.integration_retry_attempts,

@@ -24,9 +24,7 @@ def test_builds_regional_and_partnership_searches_from_demand() -> None:
     assert "spimovel" in ids
     assert "dfimoveis" not in ids
     assert "fastsale" in ids
-    assert next(item for item in sources if item["id"] == "fastsale")[
-        "partnership_friendly"
-    ]
+    assert next(item for item in sources if item["id"] == "fastsale")["partnership_friendly"]
     assert all("google.com/search?" in str(item["search_url"]) for item in sources)
     assert "2+quartos" in str(sources[0]["search_url"])
 

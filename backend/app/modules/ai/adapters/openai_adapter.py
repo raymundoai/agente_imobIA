@@ -41,9 +41,7 @@ class OpenAiAdapter(AiProviderPort):
         self._transcription_model = transcription_model
         self._vision_model = vision_model or chat_model
 
-    def transcribe_audio(
-        self, content: bytes, *, filename: str, content_type: str
-    ) -> str:
+    def transcribe_audio(self, content: bytes, *, filename: str, content_type: str) -> str:
         audio = BytesIO(content)
         audio.name = filename
         try:
@@ -92,15 +90,11 @@ class OpenAiAdapter(AiProviderPort):
                 max_output_tokens=800,
             )
         except (APIConnectionError, APITimeoutError) as exc:
-            raise AiProviderDispatchUncertainError(
-                "OpenAI vision dispatch is uncertain"
-            ) from exc
+            raise AiProviderDispatchUncertainError("OpenAI vision dispatch is uncertain") from exc
         except APIStatusError as exc:
             if exc.status_code < 500:
                 raise AiProviderRejectedError("OpenAI rejected the image analysis") from exc
-            raise AiProviderDispatchUncertainError(
-                "OpenAI vision dispatch is uncertain"
-            ) from exc
+            raise AiProviderDispatchUncertainError("OpenAI vision dispatch is uncertain") from exc
         description = str(
             getattr(response, "output_text", "") or self._extract_text(response)
         ).strip()

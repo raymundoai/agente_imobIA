@@ -24,8 +24,7 @@ class UrbanConnector(PortalConnector):
 
     def supports(self, demand: LeadDemand) -> bool:
         return (
-            infer_state(demand.city, demand.state) == "RS"
-            and requested_purpose(demand) != "rent"
+            infer_state(demand.city, demand.state) == "RS" and requested_purpose(demand) != "rent"
         )
 
     def search(self, demand: LeadDemand, *, limit: int = 24) -> ConnectorBatch:
@@ -103,7 +102,7 @@ def _cards(value: str) -> list[str]:
         )
         zero_catalog = re.search(
             r'<meta\b[^>]*name=["\']description["\'][^>]*content=["\'][^"\']*\b0\s+'
-            r'(?:casas?|apartamentos?|im[oó]veis)\b',
+            r"(?:casas?|apartamentos?|im[oó]veis)\b",
             value,
             re.I,
         )

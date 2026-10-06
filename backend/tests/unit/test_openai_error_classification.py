@@ -39,9 +39,7 @@ def test_openai_4xx_is_definitively_rejected() -> None:
 
 
 def test_openai_transport_failure_is_dispatch_uncertain() -> None:
-    error = APIConnectionError(
-        request=httpx.Request("POST", "https://api.openai.com/v1/responses")
-    )
+    error = APIConnectionError(request=httpx.Request("POST", "https://api.openai.com/v1/responses"))
     with pytest.raises(AiProviderDispatchUncertainError):
         _adapter(error).chat_completion(system_prompt="x", messages=[], tools=[])
 

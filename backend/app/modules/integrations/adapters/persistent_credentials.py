@@ -21,9 +21,7 @@ class PersistentEvolutionCredentialsProvider(ChannelCredentialsPort):
             if settings.integration_secret_key
             else None
         )
-        self.cipher = integration_cipher(
-            settings.jwt_secret.get_secret_value(), dedicated
-        )
+        self.cipher = integration_cipher(settings.jwt_secret.get_secret_value(), dedicated)
         self.legacy_cipher = SecretCipher(settings.jwt_secret.get_secret_value())
         self.previous_ciphers = [
             SecretCipher(key.get_secret_value())

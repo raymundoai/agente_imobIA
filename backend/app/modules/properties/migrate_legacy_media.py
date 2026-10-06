@@ -78,9 +78,7 @@ def migrate(container: Container) -> dict[str, int]:
                 except ValueError:
                     invalid += 1
                     continue
-                container.property_image_storage.put(
-                    image.tenant_id, key, content, content_type
-                )
+                container.property_image_storage.put(image.tenant_id, key, content, content_type)
                 image.original_content_type = content_type
                 image.original_size = len(content)
                 migrated += 1

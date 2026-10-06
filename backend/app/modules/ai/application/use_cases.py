@@ -149,9 +149,7 @@ class ProcessKnowledgeDocumentUseCase:
         if not words:
             return []
         if len(words) > self._max_words:
-            raise ValueError(
-                "Documento muito extenso; reduza-o para no máximo 50 mil palavras"
-            )
+            raise ValueError("Documento muito extenso; reduza-o para no máximo 50 mil palavras")
         chunks: list[str] = []
         step = max(1, self._chunk_size_words - self._overlap_words)
         for start in range(0, len(words), step):
@@ -391,9 +389,7 @@ class GenerateAiReplyUseCase:
         if send_to_channel:
             channel_credentials = self._credentials.get(tenant.slug)
             if channel_credentials is None:
-                raise ConfigurationError(
-                    "Canal de mensagens não configurado para esta empresa"
-                )
+                raise ConfigurationError("Canal de mensagens não configurado para esta empresa")
         for index, part in enumerate(response_parts):
             message_id = base_message_id if index == 0 else uuid5(base_message_id, str(index))
             outbound = Message(
@@ -586,9 +582,7 @@ class GenerateAiReplyUseCase:
         if send_to_channel:
             channel_credentials = self._credentials.get(tenant_slug)
             if channel_credentials is None:
-                raise ConfigurationError(
-                    "Canal de mensagens não configurado para esta empresa"
-                )
+                raise ConfigurationError("Canal de mensagens não configurado para esta empresa")
             sent = self._channel.send_message(channel_credentials, phone, text)
             outbound.external_message_id = sent.external_message_id
         self._conversations.record_outbound(tenant_id, outbound, commit=False)
@@ -653,9 +647,7 @@ class GenerateAiReplyUseCase:
                 converted.append({"role": role, "content": f"{prefix}{content}"})
         return converted
 
-    def _conversation_context(
-        self, tenant_id: UUID, conversation: Any
-    ) -> dict[str, Any]:
+    def _conversation_context(self, tenant_id: UUID, conversation: Any) -> dict[str, Any]:
         context: dict[str, Any] = {
             "customer_name": conversation.customer_name,
             "phone": conversation.phone,
@@ -729,9 +721,7 @@ class GenerateAiReplyUseCase:
             ensure_ascii=False,
             default=str,
         )
-        structured_context = json.dumps(
-            conversation_context or {}, ensure_ascii=False, default=str
-        )
+        structured_context = json.dumps(conversation_context or {}, ensure_ascii=False, default=str)
         rag = "\n\n".join(chunk.content for chunk in chunks)
         return (
             f"{_agent_identity(agent_settings, profile)} "
@@ -1013,10 +1003,7 @@ def _effective_agent_settings(configured: dict[str, Any]) -> dict[str, Any]:
         "voice_tone": "friendly",
         "emoji_usage": "low",
     }
-    return {
-        key: configured.get(key, default)
-        for key, default in defaults.items()
-    }
+    return {key: configured.get(key, default) for key, default in defaults.items()}
 
 
 def _active_agent_channels(settings: dict[str, Any]) -> list[str]:
@@ -1029,9 +1016,9 @@ def _active_agent_channels(settings: dict[str, Any]) -> list[str]:
             continue
         status = str(configuration.get("status") or "pending").lower()
         configured_agents = configuration.get("agents")
-        has_lead_agent = (
-            isinstance(configured_agents, list) and "leads" in configured_agents
-        ) or (configured_agents is None and configuration.get("agent", "leads") == "leads")
+        has_lead_agent = (isinstance(configured_agents, list) and "leads" in configured_agents) or (
+            configured_agents is None and configuration.get("agent", "leads") == "leads"
+        )
         if status == "connected" and has_lead_agent:
             active.append(str(name))
     return active

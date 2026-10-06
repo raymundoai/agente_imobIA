@@ -15,9 +15,7 @@ from app.modules.capture.connectors.vila_rica import VilaRicaConnector
 from app.modules.leads.domain.entities import LeadDemand, LeadPurpose
 
 
-def _demand(
-    *, city: str = "Porto Alegre", purpose: LeadPurpose = LeadPurpose.BUY
-) -> LeadDemand:
+def _demand(*, city: str = "Porto Alegre", purpose: LeadPurpose = LeadPurpose.BUY) -> LeadDemand:
     return LeadDemand(
         tenant_id=uuid4(),
         lead_name="Teste",
@@ -110,9 +108,7 @@ def test_terramar_treats_redirect_for_city_outside_catalog_as_empty() -> None:
             return httpx.Response(302, headers={"location": "/"})
         return httpx.Response(200, text="<html>Página inicial</html>")
 
-    connector = TerramarConnector(
-        httpx.Client(transport=httpx.MockTransport(handler))
-    )
+    connector = TerramarConnector(httpx.Client(transport=httpx.MockTransport(handler)))
 
     assert connector.search(_demand(city="Porto Alegre")).records == []
 
@@ -229,9 +225,7 @@ def test_dapper_connector_reads_public_catalog_and_applies_demand_filters() -> N
                 "LotArea": 301.6,
                 "IPTUValue": 1200,
                 "CondominiumValue": 0,
-                "Photos": [
-                    {"Path": "/Content/Artifacts/RealEstate/Realty/6396.jpg"}
-                ],
+                "Photos": [{"Path": "/Content/Artifacts/RealEstate/Realty/6396.jpg"}],
                 "CurrentSpot": {
                     "Latitude": -2968091919999999,
                     "Longitude": -51106893600000032,
@@ -258,9 +252,11 @@ def test_dapper_connector_reads_public_catalog_and_applies_demand_filters() -> N
     demand.price_min = Decimal("300000")
     demand.price_max = Decimal("600000")
     demand.parking_spaces = 2
-    record = DapperConnector(
-        httpx.Client(transport=httpx.MockTransport(handler))
-    ).search(demand, limit=12).records[0]
+    record = (
+        DapperConnector(httpx.Client(transport=httpx.MockTransport(handler)))
+        .search(demand, limit=12)
+        .records[0]
+    )
 
     query = requested_urls[0].params
     assert query["nt"] == "2"
@@ -306,9 +302,11 @@ def test_dapper_connector_keeps_rent_separate_from_sale() -> None:
     client = httpx.Client(
         transport=httpx.MockTransport(lambda _: httpx.Response(200, json=payload))
     )
-    record = DapperConnector(client).search(
-        _demand(city="Novo Hamburgo", purpose=LeadPurpose.RENT), limit=1
-    ).records[0]
+    record = (
+        DapperConnector(client)
+        .search(_demand(city="Novo Hamburgo", purpose=LeadPurpose.RENT), limit=1)
+        .records[0]
+    )
 
     assert record.purpose == "rent"
     assert record.price == Decimal("90000")

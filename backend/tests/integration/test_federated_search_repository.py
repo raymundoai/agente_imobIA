@@ -110,17 +110,13 @@ def test_federated_run_persists_parent_before_jobs_and_aggregates_results(
         reusable = repository.find_reusable_run(tenant_id, demand, ["test_source"])
         assert reusable is not None
         assert reusable.id == run.id
-        latest = repository.latest_compatible_run(
-            tenant_id, demand, ["test_source"]
-        )
+        latest = repository.latest_compatible_run(tenant_id, demand, ["test_source"])
         assert latest is not None
         assert latest.id == run.id
         assert repository.find_reusable_run(tenant_id, demand, ["other_source"]) is None
         demand.price_max = Decimal("900000")
         assert repository.find_reusable_run(tenant_id, demand, ["test_source"]) is None
-        assert repository.latest_compatible_run(
-            tenant_id, demand, ["test_source"]
-        ) is None
+        assert repository.latest_compatible_run(tenant_id, demand, ["test_source"]) is None
         demand.price_max = Decimal("1000000")
 
         persisted = repository.get_run(tenant_id, run.id)

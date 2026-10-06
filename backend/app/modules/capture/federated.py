@@ -166,9 +166,7 @@ class FederatedSearchRepository:
                     SearchRunModel.tenant_id == tenant_id,
                     SearchRunModel.demand_id == demand.id,
                     SearchRunModel.cache_key == cache_key,
-                    SearchRunModel.status.in_(
-                        ("queued", "running", "partial", "completed")
-                    ),
+                    SearchRunModel.status.in_(("queued", "running", "partial", "completed")),
                 )
                 .order_by(SearchRunModel.created_at.desc())
                 .limit(5)
@@ -238,13 +236,9 @@ class FederatedSearchRepository:
         ).all()
         expected_filters = _demand_filters(demand)
         for run in legacy_runs:
-            run_sources = {
-                item.source_id for item in self.list_run_sources(tenant_id, run.id)
-            }
+            run_sources = {item.source_id for item in self.list_run_sources(tenant_id, run.id)}
             is_premium = run_sources == {"web_discovery"}
-            if is_premium == premium and _legacy_filters_match(
-                run.filters, expected_filters
-            ):
+            if is_premium == premium and _legacy_filters_match(run.filters, expected_filters):
                 return run
         return None
 
@@ -416,8 +410,7 @@ class FederatedSearchRepository:
         if result is None:
             return False
         match = self.session.scalar(
-            select(DemandExternalMatchModel)
-            .where(
+            select(DemandExternalMatchModel).where(
                 DemandExternalMatchModel.tenant_id == tenant_id,
                 DemandExternalMatchModel.demand_id == run.demand_id,
                 DemandExternalMatchModel.external_listing_id == listing_id,
@@ -568,8 +561,7 @@ class FederatedSearchRepository:
                     select(ExternalListingModel).where(
                         ExternalListingModel.source_id == record.source_id,
                         or_(
-                            ExternalListingModel.source_listing_id
-                            == record.source_listing_id,
+                            ExternalListingModel.source_listing_id == record.source_listing_id,
                             ExternalListingModel.canonical_url == record.canonical_url,
                         ),
                     )
@@ -629,9 +621,7 @@ class FederatedSearchRepository:
                 listing_snapshot=_listing_snapshot(listing),
                 created_at=now,
             )
-            .on_conflict_do_nothing(
-                constraint="uq_capture_search_run_result"
-            )
+            .on_conflict_do_nothing(constraint="uq_capture_search_run_result")
         )
         # Sessions intentionally disable autoflush; persist the match before the run
         # aggregates its result count or another duplicate record is evaluated.
@@ -923,18 +913,14 @@ def _demand_filters(demand: LeadDemand) -> dict[str, Any]:
     }
 
 
-def _legacy_filters_match(
-    persisted: dict[str, Any], expected: dict[str, Any]
-) -> bool:
+def _legacy_filters_match(persisted: dict[str, Any], expected: dict[str, Any]) -> bool:
     for field, expected_value in expected.items():
         persisted_value = persisted.get(field)
         if field == "neighborhoods":
             if sorted(persisted_value or []) != sorted(expected_value or []):
                 return False
         elif field in {"price_min", "price_max"}:
-            normalized_persisted = (
-                str(persisted_value) if persisted_value is not None else None
-            )
+            normalized_persisted = str(persisted_value) if persisted_value is not None else None
             if normalized_persisted != expected_value:
                 return False
         elif persisted_value != expected_value:
@@ -942,17 +928,15 @@ def _legacy_filters_match(
     return True
 
 
-def _snapshot_meets_required_constraints(
-    listing: dict[str, Any], filters: dict[str, Any]
-) -> bool:
+def _snapshot_meets_required_constraints(listing: dict[str, Any], filters: dict[str, Any]) -> bool:
     purpose = str(filters.get("purpose") or "")
     listing_purpose = str(listing.get("purpose") or "")
     if purpose and listing_purpose not in {purpose, "both"}:
         return False
     city = str(filters.get("city") or "")
-    if city and normalize_search_text(
-        str(listing.get("city") or "")
-    ) != normalize_search_text(city):
+    if city and normalize_search_text(str(listing.get("city") or "")) != normalize_search_text(
+        city
+    ):
         return False
     state = normalize_search_text(str(filters.get("state") or ""))
     listing_state = normalize_search_text(str(listing.get("state") or ""))
@@ -969,9 +953,7 @@ def _snapshot_meets_required_constraints(
         price = _decimal_snapshot_value(listing.get("price"))
     if price is None:
         return False
-    return (minimum is None or price >= minimum) and (
-        maximum is None or price <= maximum
-    )
+    return (minimum is None or price >= minimum) and (maximum is None or price <= maximum)
 
 
 def _decimal_snapshot_value(value: Any) -> Decimal | None:
@@ -1064,9 +1046,7 @@ def _listing_snapshot(listing: ExternalListingModel) -> dict[str, Any]:
     return {
         "id": str(listing.id),
         "source_id": listing.source_id,
-        "source_domain": (
-            urlsplit(listing.canonical_url).hostname or ""
-        ).removeprefix("www."),
+        "source_domain": (urlsplit(listing.canonical_url).hostname or "").removeprefix("www."),
         "source_listing_id": listing.source_listing_id,
         "canonical_url": listing.canonical_url,
         "title": listing.title,

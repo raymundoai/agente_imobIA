@@ -67,7 +67,8 @@ class SqlAlchemyLeadDemandRepository(LeadDemandRepositoryPort):
 
     def get_open_by_phone(self, tenant_id: UUID, phone: str) -> LeadDemand | None:
         model = self._session.scalar(
-            select(LeadDemandModel).where(
+            select(LeadDemandModel)
+            .where(
                 LeadDemandModel.tenant_id == tenant_id,
                 LeadDemandModel.phone.in_(phone_variants(phone)),
                 LeadDemandModel.status != LeadDemandStatus.CLOSED.value,
@@ -134,8 +135,7 @@ class SqlAlchemyLeadDemandRepository(LeadDemandRepositoryPort):
         if contact_id is not None:
             statement = statement.where(LeadDemandModel.contact_id == contact_id)
         models = self._session.scalars(
-            statement
-            .order_by(LeadDemandModel.created_at.desc(), LeadDemandModel.id)
+            statement.order_by(LeadDemandModel.created_at.desc(), LeadDemandModel.id)
             .limit(limit)
             .offset(offset)
         ).all()

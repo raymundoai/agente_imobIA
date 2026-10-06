@@ -34,9 +34,7 @@ class CountingChannel(MessageChannelPort):
     def receive_message(self, payload):
         raise NotImplementedError
 
-    def send_message(
-        self, credentials, phone, text, *, idempotency_key=None
-    ) -> SentChannelMessage:
+    def send_message(self, credentials, phone, text, *, idempotency_key=None) -> SentChannelMessage:
         self.sent += 1
         self.keys.append(idempotency_key)
         return SentChannelMessage(external_message_id=f"remote-{self.sent}")
@@ -91,9 +89,7 @@ def test_generation_crash_reuses_persisted_outbound_and_charge(
             {"id": job_id},
         )
     client.app.state.container.ai_provider = None
-    recovered = MessageJobProcessor(
-        client.app.state.container, "worker-b"
-    ).process_next()
+    recovered = MessageJobProcessor(client.app.state.container, "worker-b").process_next()
     assert recovered["status"] == "sent"
     assert recovered["recovered"] is True
     with engine.connect() as connection:
@@ -224,9 +220,7 @@ def test_handoff_outbound_and_billing_roll_back_together_on_audit_failure(
         raise RuntimeError("simulated audit failure")
 
     monkeypatch.setattr(SqlAlchemyAiAuditLogRepository, "create", fail_audit)
-    processed = MessageJobProcessor(
-        client.app.state.container, "rollback-worker"
-    ).process_next()
+    processed = MessageJobProcessor(client.app.state.container, "rollback-worker").process_next()
     assert processed["status"] == "retrying"
 
     engine = create_engine(migrated_database)
@@ -268,9 +262,7 @@ def test_persistent_provider_survives_restart_and_previous_key_rotation(
             "evolution_base_url": "https://evolution.example.com",
             "evolution_api_key": SecretStr("global-api-key"),
             "integration_secret_key": SecretStr("current-integration-key"),
-            "integration_secret_previous_keys": [
-                SecretStr("previous-integration-key")
-            ],
+            "integration_secret_previous_keys": [SecretStr("previous-integration-key")],
         }
     )
 
