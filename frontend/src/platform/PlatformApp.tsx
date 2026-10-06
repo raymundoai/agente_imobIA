@@ -476,7 +476,7 @@ function PlatformLogin({
     }
   }
   return (
-    <AuthLayout signLine="administração da plataforma" signWord="ADMIN">
+    <AuthLayout badge="Administração">
       <form className="login-card" onSubmit={submit}>
         <div>
           <h1>Entrar na administração</h1>
