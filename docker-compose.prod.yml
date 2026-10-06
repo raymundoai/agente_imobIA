@@ -4,11 +4,12 @@
 #   web   → painel da imobiliária (ex.: app.immobia.com.br)
 #   admin → painel admin           (ex.: admin.immobia.com.br)
 # O backend não tem porta pública: tudo chega por /api nos dois painéis.
-# As variáveis vêm do .env deste diretório (modelo em .env.production.example).
+# As variáveis vêm do .env deste diretório (a raiz do repositório), que o Easypanel cria a partir
+# da aba Environment. Modelo em deploy/.env.production.example; detalhes em deploy/README.md.
 
 x-backend: &backend
   build:
-    context: ../backend
+    context: ./backend
   env_file: .env
   environment:
     APP_ENV: production
@@ -68,7 +69,7 @@ services:
 
   web:
     build:
-      context: ../frontend
+      context: ./frontend
       args:
         APP: agency
     environment:
@@ -79,7 +80,7 @@ services:
 
   admin:
     build:
-      context: ../frontend
+      context: ./frontend
       args:
         APP: platform
     environment:
@@ -99,7 +100,7 @@ services:
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
     entrypoint: ["sh", "/scripts/backup.sh"]
     volumes:
-      - ./backup.sh:/scripts/backup.sh:ro
+      - ./deploy/backup.sh:/scripts/backup.sh:ro
       - backups:/backups
       - property_media:/data/property-images:ro
       - conversation_media:/data/conversation-media:ro

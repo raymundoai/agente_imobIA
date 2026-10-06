@@ -1,4 +1,5 @@
 .env
+.env.production
 .playwright-mcp/
 *:Zone.Identifier
 .venv/

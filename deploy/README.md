@@ -1,6 +1,6 @@
 # Deploy da ImmobIA no Easypanel
 
-Tudo roda num único serviço **Compose** do Easypanel, a partir de `deploy/docker-compose.prod.yml`.
+Tudo roda num único serviço **Compose** do Easypanel, a partir de `docker-compose.prod.yml`, na raiz do repositório.
 
 | Serviço          | O que faz                                                        | Domínio        |
 |------------------|------------------------------------------------------------------|----------------|
@@ -15,7 +15,7 @@ Tudo roda num único serviço **Compose** do Easypanel, a partir de `deploy/dock
 ## 1. Preparar as variáveis
 
 1. Rode `sh deploy/generate-secrets.sh` no seu computador e guarde a saída num cofre de senhas.
-2. Copie `deploy/.env.production.example` e preencha:
+2. Copie `deploy/.env.production.example` para `deploy/.env.production` (fica fora do Git) e preencha:
    - as chaves geradas no passo 1;
    - `APP_PUBLIC_URL` e `BACKEND_PUBLIC_URL` com o domínio do serviço `web` (este último terminando em `/api`);
    - `EVOLUTION_BASE_URL` e `EVOLUTION_API_KEY` da Evolution que já está no Easypanel;
@@ -25,10 +25,10 @@ Tudo roda num único serviço **Compose** do Easypanel, a partir de `deploy/dock
 ## 2. Criar o serviço
 
 1. No projeto do Easypanel, **+ Service → Compose**.
-2. Fonte: o repositório do GitHub, branch `main`, arquivo `deploy/docker-compose.prod.yml`.
-3. Em **Environment**, cole o `.env` preenchido. O compose lê as variáveis de um arquivo `.env`
-   ao lado de `docker-compose.prod.yml`; se o build reclamar que `.env` não existe, confira no
-   Easypanel onde ele grava as variáveis do Compose e ajuste o `env_file` do arquivo.
+2. Fonte: o repositório do GitHub, branch `main`, arquivo `docker-compose.prod.yml`.
+3. Em **Environment**, cole o conteúdo de `deploy/.env.production` e marque a opção de criar o
+   arquivo `.env`. O Easypanel grava esse arquivo na raiz do repositório, ao lado de
+   `docker-compose.prod.yml`, que é de onde o compose lê as variáveis.
 4. **Deploy**. O primeiro build leva alguns minutos.
 5. Em **Domains**, adicione um domínio para `web` (porta 80) e outro para `admin` (porta 80).
    O Easypanel oferece domínios temporários; o HTTPS é automático.
@@ -65,12 +65,13 @@ Vale também copiar os arquivos para fora do servidor de tempos em tempos.
 
 ## Testar a stack de produção localmente
 
+Na raiz do repositório (o `.env` criado ali fica fora do Git):
+
 ```sh
-cd deploy
-sh generate-secrets.sh > .env && cat .env.production.example | grep -v -E "^(POSTGRES_PASSWORD|JWT_SECRET|INTEGRATION_SECRET_KEY|PLATFORM_BOOTSTRAP_TOKEN|ASAAS_WEBHOOK_TOKEN)=" >> .env
-docker compose -p immobia-prodtest -f docker-compose.prod.yml -f docker-compose.localtest.yml up -d --build
+sh deploy/generate-secrets.sh > .env && grep -v -E "^(POSTGRES_PASSWORD|JWT_SECRET|INTEGRATION_SECRET_KEY|PLATFORM_BOOTSTRAP_TOKEN|ASAAS_WEBHOOK_TOKEN)=" deploy/.env.production.example >> .env
+docker compose -p immobia-prodtest -f docker-compose.prod.yml -f deploy/docker-compose.localtest.yml up -d --build
 # painel: http://localhost:8081  · admin: http://localhost:8082
-docker compose -p immobia-prodtest -f docker-compose.prod.yml -f docker-compose.localtest.yml down -v && rm .env
+docker compose -p immobia-prodtest -f docker-compose.prod.yml -f deploy/docker-compose.localtest.yml down -v && rm .env
 ```
 
 Sem conta conectada nem chave da Evolution, o worker de mensagens não tem para quem enviar.
