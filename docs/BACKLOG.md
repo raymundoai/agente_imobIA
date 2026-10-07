@@ -36,6 +36,7 @@ o commit em **Decisão**.
 | B-004 | Backup fora do servidor | Melhoria | Equipe | Alta | Aprovado |
 | B-005 | Kanban de leads | Ideia | Equipe | A definir | Novo |
 | B-006 | Revisão de segurança da infraestrutura | Correção | Equipe | Alta | Em andamento |
+| B-007 | Diferenciar os planos por recurso, não só pela franquia | Ideia | Equipe | A definir | Novo |
 
 ## Itens
 
@@ -109,5 +110,27 @@ o commit em **Decisão**.
 - **Descrição:** juntar num documento interno, fora deste repositório público, as recomendações
   de segurança do servidor e dos serviços que rodam junto com o ImmobIA, e somar com a lista que
   a equipe já tem. A execução das correções é feita pela equipe.
+- **Decisão:** —
+
+### B-007 · Diferenciar os planos por recurso, não só pela franquia
+
+- **Tipo:** Ideia · **Origem:** Equipe · **Registrado em:** 07/10/2026
+- **Prioridade:** A definir · **Status:** Novo
+- **Descrição:** hoje os quatro planos têm os mesmos recursos e só mudam o tamanho das
+  franquias. A ideia é diferenciar também pelo que cada plano inclui. Por exemplo:
+  - **Essencial:** focado no atendimento com IA, com uma franquia de atendimentos maior que a de
+    hoje (100) e sem buscas nos portais nem otimização de fotos;
+  - **Profissional em diante:** buscas de imóveis e otimização de fotos incluídas, com franquias
+    que crescem a cada plano.
+- **Por quê:** o recurso que mais pesa na decisão de compra é o atendimento com IA. Deixar buscas e
+  fotos a partir do Profissional dá um motivo claro para o upgrade, além do volume.
+- **Pontos a levantar antes de aprovar:**
+  - o novo tamanho da franquia de atendimentos do Essencial, e se o preço muda;
+  - o custo e a margem no simulador de precificação. A margem do atendimento já é alta (90% ou
+    mais em conversas típicas), então dá espaço para uma franquia maior;
+  - se o Essencial pode comprar pacotes avulsos de buscas e fotos ou se precisa fazer upgrade;
+  - o que acontece com os beta testers que já assinaram o Essencial;
+  - os ajustes no sistema: o plano sem um recurso esconde a função ou mostra um convite para o
+    upgrade.
 - **Decisão:** —
 
