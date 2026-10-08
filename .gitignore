@@ -22,3 +22,7 @@ storage/
 
 # Transcrições e materiais de reuniões: ficam só na máquina (repositório público)
 docs/*.pdf
+
+# Documentos internos: ficam só na máquina (registro paralelo ao Git)
+docs/estado-atual.md
+docs/Changelog.md
