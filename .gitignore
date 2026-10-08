@@ -19,3 +19,6 @@ storage/
 *.egg-info/
 .DS_Store
 *.log
+
+# Transcrições e materiais de reuniões: ficam só na máquina (repositório público)
+docs/*.pdf

@@ -37,6 +37,9 @@ o commit em **Decisão**.
 | B-005 | Kanban de leads | Ideia | Equipe | A definir | Novo |
 | B-006 | Revisão de segurança da infraestrutura | Correção | Equipe | Alta | Em andamento |
 | B-007 | Diferenciar os planos por recurso, não só pela franquia | Ideia | Equipe | A definir | Novo |
+| B-008 | Planos para corretor autônomo | Ideia | Equipe | Alta | Em análise |
+| B-009 | Imposto real na precificação | Correção | Equipe | Alta | Novo |
+| B-010 | Testar o agente em conversas fora do escopo | Correção | Equipe | Alta | Aprovado |
 
 ## Itens
 
@@ -132,5 +135,50 @@ o commit em **Decisão**.
   - o que acontece com os beta testers que já assinaram o Essencial;
   - os ajustes no sistema: o plano sem um recurso esconde a função ou mostra um convite para o
     upgrade.
+- **Decisão:** —
+
+### B-008 · Planos para corretor autônomo
+
+- **Tipo:** Ideia · **Origem:** Equipe (reunião de 07/10/2026) · **Registrado em:** 07/10/2026
+- **Prioridade:** Alta · **Status:** Em análise
+- **Descrição:** o Essencial (R$ 369) é acessível para uma imobiliária, mas caro para um corretor
+  autônomo. A proposta é uma linha de planos própria para corretores:
+  - entrada a **R$ 59,90**, para atrair os corretores em grande volume: atendimento com IA, sem
+    buscas nem otimização de fotos na franquia, só como compra avulsa;
+  - um degrau a **R$ 89,90**, ainda aceitável para o corretor, com um volume pequeno de buscas
+    e fotos.
+- **No sistema:** o assistente de configuração já pergunta se a conta é de corretor (CPF) ou de
+  imobiliária (CNPJ). A tela de planos pode mostrar a linha certa para cada perfil, sem criar dois
+  produtos. Falta definir o que acontece se o corretor virar imobiliária (troca de linha).
+- **Pontos a levantar antes de aprovar:**
+  - os volumes de cada franquia: quantos atendimentos e buscas um corretor faz por mês. Validar
+    com os beta testers e com a pesquisa quantitativa (com apoio de Creci e Secovi), que deve
+    incluir essas faixas de preço;
+  - as margens no simulador, já com o imposto real (B-009);
+  - a relação com o B-007, que diferencia os planos por recurso.
+- **Decisão:** —
+
+### B-009 · Imposto real na precificação
+
+- **Tipo:** Correção · **Origem:** Equipe (reunião de 07/10/2026) · **Registrado em:** 07/10/2026
+- **Prioridade:** Alta · **Status:** Novo
+- **Descrição:** a planilha financeira e o painel de precificação usam 6% de imposto (Simples
+  Nacional, primeira faixa). Na reunião, a estimativa como PJ foi de 18,5%. A diferença muda
+  todas as margens.
+- **Próximo passo:** confirmar o regime e a alíquota com a contabilidade e atualizar a planilha, o
+  simulador e, se preciso, os preços de referência por unidade.
+- **Decisão:** —
+
+### B-010 · Testar o agente em conversas fora do escopo
+
+- **Tipo:** Correção · **Origem:** Equipe (reunião de 07/10/2026) · **Registrado em:** 07/10/2026
+- **Prioridade:** Alta · **Status:** Aprovado
+- **Descrição:** o agente já tem instrução para recusar assuntos fora do atendimento imobiliário.
+  É preciso testar no beta se ela se sustenta quando o lead insiste em puxar outros assuntos,
+  como usar a IA de companhia ou desabafar. Isso protege o cliente (custo e imagem) e evita
+  atendimentos que chegam ao teto de 50 respostas.
+- **Como:** um roteiro de conversas que tentam desviar o assunto, rodado na conta interna de
+  testes. Se a instrução falhar, reforçar o prompt ou encerrar a conversa e passar para a equipe
+  depois de algumas tentativas.
 - **Decisão:** —
 
