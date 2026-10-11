@@ -4,6 +4,7 @@ set -eu
 
 : "${AWS_S3_BUCKET:?AWS_S3_BUCKET is required}"
 : "${AWS_DEFAULT_REGION:?AWS_DEFAULT_REGION is required}"
+prefix="${AWS_S3_PREFIX:-}"
 
 upload() {
   latest=""
@@ -13,14 +14,14 @@ upload() {
   done
   [ -n "$latest" ] || { echo "[backup-upload] no database dump found"; return 1; }
 
-  aws s3 sync /backups "s3://${AWS_S3_BUCKET}/database/" \
+  aws s3 sync /backups "s3://${AWS_S3_BUCKET}/${prefix}database/" \
     --exclude '*' --include 'db-*.dump' --no-progress --only-show-errors
-  aws s3 sync /data/property-images "s3://${AWS_S3_BUCKET}/media/property-images/" \
+  aws s3 sync /data/property-images "s3://${AWS_S3_BUCKET}/${prefix}media/property-images/" \
     --no-follow-symlinks --no-progress --only-show-errors
-  aws s3 sync /data/conversation-media "s3://${AWS_S3_BUCKET}/media/conversation-media/" \
+  aws s3 sync /data/conversation-media "s3://${AWS_S3_BUCKET}/${prefix}media/conversation-media/" \
     --no-follow-symlinks --no-progress --only-show-errors
   aws s3api head-object --bucket "$AWS_S3_BUCKET" \
-    --key "database/${latest##*/}" >/dev/null
+    --key "${prefix}database/${latest##*/}" >/dev/null
   echo "[backup-upload] database and media synchronized"
 }
 
