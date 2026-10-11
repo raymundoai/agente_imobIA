@@ -6,6 +6,11 @@ set -eu
 : "${AWS_DEFAULT_REGION:?AWS_DEFAULT_REGION is required}"
 prefix="${AWS_S3_PREFIX:-}"
 
+case "${AWS_ENDPOINT_URL:-}" in
+  ''|https://*) ;;
+  *) echo "[backup-upload] AWS_ENDPOINT_URL must use HTTPS" >&2; exit 1 ;;
+esac
+
 aws_backup() {
   if [ -n "${AWS_ENDPOINT_URL:-}" ]; then
     aws --endpoint-url "$AWS_ENDPOINT_URL" "$@"
