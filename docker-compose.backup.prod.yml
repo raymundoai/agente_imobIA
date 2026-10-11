@@ -1,7 +1,7 @@
 # Separate service: the AWS credentials never enter the ImmobIA application containers.
 services:
   backup-upload:
-    image: amazon/aws-cli:2
+    image: amazon/aws-cli:2.34.21
     entrypoint: ["/bin/sh", "/scripts/backup-upload.sh"]
     environment:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
