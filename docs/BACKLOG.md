@@ -37,7 +37,7 @@ o commit em **Decisão**.
 | B-005 | Kanban de leads | Ideia | Equipe | A definir | Novo |
 | B-006 | Revisão de segurança da infraestrutura | Correção | Equipe | Alta | Em andamento |
 | B-007 | Diferenciar os planos por recurso, não só pela franquia | Ideia | Equipe | A definir | Novo |
-| B-008 | Planos para corretor autônomo | Ideia | Equipe | Alta | Aprovado (beta) |
+| B-008 | Planos para corretor autônomo | Ideia | Equipe | Alta | Implementado (beta) |
 | B-009 | Imposto real na precificação | Correção | Equipe | Alta | Novo |
 | B-010 | Testar o agente em conversas fora do escopo | Correção | Equipe | Alta | Aprovado |
 | B-011 | Endereço com CEP no cadastro e estudo de exclusividade territorial | Melhoria | Equipe | A definir | Novo |
@@ -141,15 +141,14 @@ o commit em **Decisão**.
 ### B-008 · Planos para corretor autônomo
 
 - **Tipo:** Ideia · **Origem:** Equipe (reunião de 07/10/2026) · **Registrado em:** 07/10/2026
-- **Prioridade:** Alta · **Status:** Aprovado (beta); preço definitivo em análise
+- **Prioridade:** Alta · **Status:** Implementado (beta); preço definitivo em análise
 - **Descrição:** o Essencial (R$ 369) é acessível para uma imobiliária, mas caro para um corretor
   autônomo. Criar uma oferta própria para corretores; os preços anteriores abaixo são hipóteses
   históricas e a condição beta vigente está na decisão de 11/10/2026.
-- **No sistema:** o cadastro inicial ainda não pergunta o tipo de conta; o assistente posterior
-  pergunta se é corretor ou imobiliária, mas essa informação fica no perfil editável e o
-  assistente pode ser pulado. Registrar a categoria comercial da conta e validar a elegibilidade
-  dos planos no servidor, inclusive quando a categoria mudar. CPF ou CNPJ não devem definir
-  sozinhos a categoria.
+- **No sistema:** o cadastro inicial pergunta o tipo de conta e o guarda como categoria
+  comercial. A oferta beta exige corretor e liberação pelo admin; a elegibilidade é validada
+  também no servidor. Os planos existentes de imobiliárias continuam registrados para as
+  contas anteriores, mas ficam ocultos nas novas contratações.
 - **Pontos a levantar antes de aprovar:**
   - os volumes de cada franquia: quantos atendimentos e buscas um corretor faz por mês. Validar
     com os beta testers e com a pesquisa quantitativa (com apoio de Creci e Secovi), que deve
@@ -217,6 +216,12 @@ o commit em **Decisão**.
   Restringir também a contratação no servidor, pois ocultar cartões na interface não impede
   pedidos diretos. Antes do lançamento, definir o tratamento da 21ª busca, a validade do pacote,
   o limite de usuários e a cobrança mensal do consumo variável.
+- **Implementação em 11/10/2026 (`f2db16a`, aguardando deploy):** a 21ª busca bloqueia até o
+  próximo ciclo; o pacote de 15 fotos vale 90 dias e é consumido antes das fotos avulsas; o
+  plano permite dois usuários durante o beta. Uma fatura mensal reúne a nova mensalidade e as
+  conversas/fotos avulsas ainda não faturadas. O pagamento da fatura libera o ciclo seguinte.
+  O usuário paga a fatura por PIX ou cartão na página do Asaas. O preço após o beta permanece
+  em análise.
 
 ### B-009 · Imposto real na precificação
 
