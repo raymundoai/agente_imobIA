@@ -63,9 +63,21 @@ Se mudar o domínio do `web`, atualize `APP_PUBLIC_URL` e `BACKEND_PUBLIC_URL` e
 
 ## Backups
 
-O serviço `backup` grava em seu volume `backups`, todo dia, `db-*.dump` (banco) e `media-*.tar.gz` (fotos e mídias das conversas).
-Para restaurar o banco: `pg_restore --clean --if-exists -d immobia db-AAAA-MM-DD...dump` dentro do container `postgres`.
-Vale também copiar os arquivos para fora do servidor de tempos em tempos.
+O serviço `backup` grava diariamente `db-*.dump` e, enquanto `BACKUP_MEDIA_ARCHIVE=true`,
+`media-*.tar.gz` no volume local. Os arquivos só recebem o nome final depois de completos.
+
+O serviço separado definido em `docker-compose.backup.prod.yml` envia os dumps para
+`database/` e sincroniza somente as mídias novas ou alteradas em `media/` a cada hora. Ele monta
+os três volumes da aplicação somente para leitura. Configure nele o bucket, a região, os nomes
+reais dos volumes e uma chave AWS com acesso apenas ao bucket de backup, usando
+`deploy/.env.backup.example` como lista de variáveis. Nunca coloque essa chave no `.env` da
+aplicação. A chave precisa de `s3:ListBucket` no bucket e `s3:PutObject`/`s3:GetObject` nos
+objetos. Ative a retenção dos dumps no bucket e bloqueie todo acesso público.
+
+Para conferir uma cópia externa, baixe um dump e execute `pg_restore --list <arquivo>`.
+Para uma recuperação completa, restaure o dump com `pg_restore --clean --if-exists` em um banco
+vazio e sincronize os diretórios `media/property-images/` e `media/conversation-media/` de volta
+para os respectivos volumes. Teste a restauração antes de desativar os arquivos locais de mídia.
 
 ## Testar a stack de produção localmente
 

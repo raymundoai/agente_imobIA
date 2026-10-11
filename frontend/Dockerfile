@@ -16,6 +16,7 @@ RUN if [ "$APP" = "platform" ]; then \
 FROM nginx:1.27-alpine
 COPY --from=build /app/out /usr/share/nginx/html
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY deploy/security-headers.conf /etc/nginx/snippets/security-headers.conf
 # Address of the API inside the Docker network; /api/* is forwarded there.
 ENV BACKEND_UPSTREAM=backend:8000
 EXPOSE 80

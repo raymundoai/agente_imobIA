@@ -1,0 +1,27 @@
+# Separate service: the AWS credentials never enter the ImmobIA application containers.
+services:
+  backup-upload:
+    image: amazon/aws-cli:2
+    entrypoint: ["/bin/sh", "/scripts/backup-upload.sh"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET}
+    volumes:
+      - ./deploy/backup-upload.sh:/scripts/backup-upload.sh:ro
+      - backups:/backups:ro
+      - property_media:/data/property-images:ro
+      - conversation_media:/data/conversation-media:ro
+    restart: unless-stopped
+
+volumes:
+  backups:
+    external: true
+    name: ${IMMOBIA_BACKUPS_VOLUME}
+  property_media:
+    external: true
+    name: ${IMMOBIA_PROPERTY_MEDIA_VOLUME}
+  conversation_media:
+    external: true
+    name: ${IMMOBIA_CONVERSATION_MEDIA_VOLUME}

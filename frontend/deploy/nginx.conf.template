@@ -21,6 +21,7 @@ server {
     gzip_min_length 1024;
 
     location /api/ {
+        include /etc/nginx/snippets/security-headers.conf;
         proxy_pass http://${BACKEND_UPSTREAM}/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -33,12 +34,14 @@ server {
 
     # Built assets carry a content hash in the name: cache them for a year.
     location /assets/ {
+        include /etc/nginx/snippets/security-headers.conf;
         expires 1y;
         add_header Cache-Control "public, immutable";
         try_files $uri =404;
     }
 
     location / {
+        include /etc/nginx/snippets/security-headers.conf;
         add_header Cache-Control "no-cache";
         try_files $uri $uri/ /index.html;
     }

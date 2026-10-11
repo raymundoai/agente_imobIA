@@ -33,7 +33,7 @@ o commit em **Decisão**.
 | B-001 | Volume de mensagens por horário no painel | Melhoria | Equipe | A definir | Novo |
 | B-002 | Emissão de certidões pela API da InfoSimples | Melhoria | Equipe | A definir | Em análise |
 | B-003 | Recuperação de senha por e-mail | Melhoria | Equipe | Média | Aprovado |
-| B-004 | Backup fora do servidor | Melhoria | Equipe | Alta | Aprovado |
+| B-004 | Backup fora do servidor | Melhoria | Equipe | Alta | Em andamento |
 | B-005 | Kanban de leads | Ideia | Equipe | A definir | Novo |
 | B-006 | Revisão de segurança da infraestrutura | Correção | Equipe | Alta | Em andamento |
 | B-007 | Diferenciar os planos por recurso, não só pela franquia | Ideia | Equipe | A definir | Novo |
@@ -86,7 +86,7 @@ o commit em **Decisão**.
 ### B-004 · Backup fora do servidor
 
 - **Tipo:** Melhoria · **Origem:** Equipe · **Registrado em:** 06/10/2026
-- **Prioridade:** Alta · **Status:** Aprovado
+- **Prioridade:** Alta · **Status:** Em andamento
 - **Descrição:** hoje o backup diário guarda, no mesmo disco do servidor, 14 cópias completas do
   banco e de todas as mídias. Isso ocupa muito espaço e se perde junto se o servidor falhar.
   Proposta:
@@ -96,7 +96,9 @@ o commit em **Decisão**.
 - **Depois:** guardar as fotos dos imóveis no mesmo armazenamento. O sistema já suporta isso
   (`PROPERTY_STORAGE_BACKEND=s3`).
 - **Quando:** antes dos primeiros 20 a 30 clientes.
-- **Decisão:** —
+- **Decisão (11/10/2026):** armazenamento externo privado e rotina de sincronização incremental
+  preparados. A ativação depende de uma credencial de acesso restrita ao bucket e de uma
+  restauração de teste. Os arquivos locais continuam ativos até a validação.
 
 ### B-005 · Kanban de leads
 
@@ -114,7 +116,10 @@ o commit em **Decisão**.
 - **Descrição:** juntar num documento interno, fora deste repositório público, as recomendações
   de segurança do servidor e dos serviços que rodam junto com o ImmobIA, e somar com a lista que
   a equipe já tem. A execução das correções é feita pela equipe.
-- **Decisão:** —
+- **Decisão (11/10/2026):** revisão iniciada após o deploy da oferta beta. Portas públicas de
+  bancos de apoio foram fechadas, credenciais expostas foram trocadas, o webhook de cobrança foi
+  atualizado e os painéis ganharam cabeçalhos de proteção. Faltam validação em produção dessa
+  última mudança e recomendações operacionais internas.
 
 ### B-007 · Diferenciar os planos por recurso, não só pela franquia
 
