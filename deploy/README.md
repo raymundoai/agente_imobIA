@@ -73,10 +73,17 @@ O serviço opcional definido em `docker-compose.backup.prod.yml` envia os dumps 
 os três volumes da aplicação somente para leitura. Antes de ativá-lo, escolha uma conta de
 armazenamento exclusiva para o ImmobIA. Configure nele o bucket, a região, os nomes reais dos
 volumes e credenciais limitadas ao destino, usando `deploy/.env.backup.example` como lista de
-variáveis. Nunca coloque essas credenciais no `.env` da aplicação. Para S3, são necessários
-`s3:ListBucket` no bucket e `s3:PutObject`/`s3:GetObject` nos objetos. Ative a retenção dos
-dumps e bloqueie todo acesso público. Esse serviço opcional não está implantado; o backup atual
-permanece somente no VPS.
+variáveis. Nunca coloque essas credenciais no `.env` da aplicação. O bucket deve ser privado.
+Esse serviço opcional não está implantado; o backup atual permanece somente no VPS.
+
+Para **Cloudflare R2**, use armazenamento Standard, `AWS_DEFAULT_REGION=auto` e
+`AWS_ENDPOINT_URL=https://<ACCOUNT_ID>.r2.cloudflarestorage.com`. Crie uma chave S3 com permissão
+**Object Read & Write** limitada somente ao bucket de backup. Configure uma regra de ciclo de vida
+para apagar apenas `database/` após o prazo escolhido (por exemplo, 30 dias). **Não** aplique esse
+prazo a `media/`: uma foto que não mudar deixaria de existir no backup. Para **Backblaze B2**,
+preencha a região e o endpoint S3 informados pelo provedor e restrinja a chave ao bucket. Para
+AWS S3, deixe `AWS_ENDPOINT_URL` vazio; são necessários `s3:ListBucket` no bucket e
+`s3:PutObject`/`s3:GetObject` nos objetos.
 
 Para conferir uma cópia externa, baixe um dump e execute `pg_restore --list <arquivo>`.
 Para uma recuperação completa, restaure o dump com `pg_restore --clean --if-exists` em um banco

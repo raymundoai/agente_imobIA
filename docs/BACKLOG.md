@@ -101,6 +101,8 @@ o commit em **Decisão**.
   Uma rotina de sincronização para um destino externo foi preparada, mas nenhum destino está
   ativo. A conta de armazenamento inicialmente considerada foi retirada do escopo. Falta escolher
   um destino fora do VPS e fazer uma restauração de teste.
+- **Andamento (11/10/2026):** a rotina aceita um endpoint S3 compatível, permitindo usar R2 ou B2
+  em uma conta independente. O destino ainda depende da conta e das credenciais do provedor.
 
 ### B-005 · Kanban de leads
 
