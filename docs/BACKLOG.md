@@ -33,7 +33,7 @@ o commit em **Decisão**.
 | B-001 | Volume de mensagens por horário no painel | Melhoria | Equipe | A definir | Novo |
 | B-002 | Emissão de certidões pela API da InfoSimples | Melhoria | Equipe | A definir | Em análise |
 | B-003 | Recuperação de senha por e-mail | Melhoria | Equipe | Média | Aprovado |
-| B-004 | Backup fora do servidor | Melhoria | Equipe | Alta | Em andamento |
+| B-004 | Backup fora do servidor | Melhoria | Equipe | Alta | Aprovado (antes da abertura pública) |
 | B-005 | Kanban de leads | Ideia | Equipe | A definir | Novo |
 | B-006 | Revisão de segurança da infraestrutura | Correção | Equipe | Alta | Em andamento |
 | B-007 | Diferenciar os planos por recurso, não só pela franquia | Ideia | Equipe | A definir | Novo |
@@ -86,7 +86,7 @@ o commit em **Decisão**.
 ### B-004 · Backup fora do servidor
 
 - **Tipo:** Melhoria · **Origem:** Equipe · **Registrado em:** 06/10/2026
-- **Prioridade:** Alta · **Status:** Em andamento
+- **Prioridade:** Alta · **Status:** Aprovado (antes da abertura pública)
 - **Descrição:** hoje o backup diário guarda, no mesmo disco do servidor, 14 cópias completas do
   banco e de todas as mídias. Isso ocupa muito espaço e se perde junto se o servidor falhar.
   Proposta:
@@ -95,7 +95,7 @@ o commit em **Decisão**.
   - manter o dump diário do banco, que é pequeno.
 - **Depois:** guardar as fotos dos imóveis no mesmo armazenamento. O sistema já suporta isso
   (`PROPERTY_STORAGE_BACKEND=s3`).
-- **Quando:** antes dos primeiros 20 a 30 clientes.
+- **Quando:** antes da abertura pública do MVP; não bloqueia os beta testers convidados.
 - **Decisão (11/10/2026):** o backup diário local já roda em contêiner separado no mesmo VPS.
   Um healthcheck passou a verificar se há dump recente legível e ficou saudável em produção.
   Uma rotina de sincronização para um destino externo foi preparada, mas nenhum destino está
@@ -103,6 +103,9 @@ o commit em **Decisão**.
   um destino fora do VPS e fazer uma restauração de teste.
 - **Andamento (11/10/2026):** a rotina aceita um endpoint S3 compatível, permitindo usar R2 ou B2
   em uma conta independente. O destino ainda depende da conta e das credenciais do provedor.
+- **Decisão (11/10/2026):** usar o backup diário local durante o beta fechado e adiar a ativação
+  da cópia externa para antes da abertura pública do MVP. Na retomada, configurar o destino e
+  validar uma restauração completa.
 
 ### B-005 · Kanban de leads
 
@@ -225,7 +228,7 @@ o commit em **Decisão**.
   Restringir também a contratação no servidor, pois ocultar cartões na interface não impede
   pedidos diretos. Antes do lançamento, definir o tratamento da 21ª busca, a validade do pacote,
   o limite de usuários e a cobrança mensal do consumo variável.
-- **Implementação em 11/10/2026 (`f2db16a`, aguardando deploy):** a 21ª busca bloqueia até o
+- **Implementação publicada em 11/10/2026 (`f2db16a`):** a 21ª busca bloqueia até o
   próximo ciclo; o pacote de 15 fotos vale 90 dias e é consumido antes das fotos avulsas; o
   plano permite dois usuários durante o beta. Uma fatura mensal reúne a nova mensalidade e as
   conversas/fotos avulsas ainda não faturadas. O pagamento da fatura libera o ciclo seguinte.
