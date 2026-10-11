@@ -97,6 +97,7 @@ o commit em **Decisão**.
   (`PROPERTY_STORAGE_BACKEND=s3`).
 - **Quando:** antes dos primeiros 20 a 30 clientes.
 - **Decisão (11/10/2026):** o backup diário local já roda em contêiner separado no mesmo VPS.
+  Um healthcheck passou a verificar se há dump recente legível e ficou saudável em produção.
   Uma rotina de sincronização para um destino externo foi preparada, mas nenhum destino está
   ativo. A conta de armazenamento inicialmente considerada foi retirada do escopo. Falta escolher
   um destino fora do VPS e fazer uma restauração de teste.
