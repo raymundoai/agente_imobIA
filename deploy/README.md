@@ -65,6 +65,8 @@ Se mudar o domínio do `web`, atualize `APP_PUBLIC_URL` e `BACKEND_PUBLIC_URL` e
 
 O serviço `backup` grava diariamente `db-*.dump` e, enquanto `BACKUP_MEDIA_ARCHIVE=true`,
 `media-*.tar.gz` no volume local. Os arquivos só recebem o nome final depois de completos.
+O healthcheck exige um dump das últimas 26 horas legível por `pg_restore --list`. O contêiner e
+o volume ficam no mesmo VPS; essa cópia local não protege contra perda do servidor ou do disco.
 
 O serviço opcional definido em `docker-compose.backup.prod.yml` envia os dumps para
 `database/` e sincroniza somente as mídias novas ou alteradas em `media/` a cada hora. Ele monta

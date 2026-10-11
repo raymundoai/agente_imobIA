@@ -114,6 +114,16 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          latest=$$(find /backups -maxdepth 1 -type f -name 'db-*.dump' -mmin -1560
+          | sort | tail -n 1); test -n "$$latest" && pg_restore --list "$$latest" >/dev/null
+      interval: 1h
+      timeout: 30s
+      retries: 2
+      start_period: 5m
     restart: unless-stopped
 
 volumes:
