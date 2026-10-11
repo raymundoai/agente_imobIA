@@ -33,6 +33,7 @@ PILOT_PLAN_CODE = "piloto_mvp"
 TRIAL_PLAN_CODE = "teste_gratis"
 # Placeholder for accounts waiting for their first subscription: no allowance at all.
 NO_PLAN_CODE = "sem_plano"
+BROKER_BETA_PLAN_CODE = "corretor_beta"
 # Pack sizes per resource; the price comes from the contracted plan's reference unit price.
 PACK_UNITS = {AI_ATTENDANCE: 50, PROPERTY_SEARCH_STANDARD: 50, IMAGE_OPTIMIZATION: 20}
 # A pack costs slightly more than the same units inside the plan, so upgrading stays better.
@@ -80,12 +81,33 @@ def is_internal_test_plan(plan: CommercialPlanModel) -> bool:
     return not plan.is_public and bool((plan.extra or {}).get("internal_test"))
 
 
+def is_offered_plan(
+    plan: CommercialPlanModel, subscription: TenantCommercialSubscriptionModel
+) -> bool:
+    if subscription.internal_test:
+        return is_internal_test_plan(plan)
+    if subscription.commercial_segment is None:
+        # Accounts created before commercial segments existed keep their original offers.
+        return plan.is_public and plan.code != BROKER_BETA_PLAN_CODE
+    return (
+        plan.is_public
+        and plan.code == BROKER_BETA_PLAN_CODE
+        and subscription.commercial_segment == "broker"
+        and subscription.beta_pricing
+    )
+
+
 def pack_offers(plan: CommercialPlanModel) -> list[dict[str, int | str]]:
     """Extra-allowance packs for the contracted plan, priced from its reference unit prices.
 
     Price = units × reference price × (1 + premium), rounded to whole reais.
     """
 
+    if plan.code == BROKER_BETA_PLAN_CODE:
+        pack = (plan.extra or {}).get("image_pack") or {}
+        if pack.get("units") == 15 and pack.get("price_cents") == 3000:
+            return [{"resource": IMAGE_OPTIMIZATION, "units": 15, "price_cents": 3000}]
+        return []
     references = (plan.extra or {}).get("reference_unit_cents") or {}
     offers: list[dict[str, int | str]] = []
     for resource, units in PACK_UNITS.items():
@@ -180,6 +202,12 @@ class CommercialEntitlementService:
             return existing
 
         now = datetime.now(UTC)
+        plan = self._session.get(CommercialPlanModel, subscription.plan_id)
+        if plan is not None and plan.code == BROKER_BETA_PLAN_CODE:
+            if subscription.status != "active" or now >= subscription.cycle_ends_at:
+                raise CommercialAllowanceExhausted(
+                    resource, "Regularize a mensalidade para continuar."
+                )
         grant = self._session.scalar(
             select(CommercialEntitlementGrantModel)
             .where(
@@ -202,7 +230,18 @@ class CommercialEntitlementService:
             .with_for_update()
             .limit(1)
         )
-        if grant is None and subscription.enforcement_mode == "enforce":
+        postpaid_rate = None
+        if grant is None and plan is not None and plan.code == BROKER_BETA_PLAN_CODE:
+            rates = (plan.extra or {}).get("postpaid_unit_cents") or {}
+            rate = rates.get(resource)
+            if (
+                subscription.status == "active"
+                and now < subscription.cycle_ends_at
+                and isinstance(rate, int)
+                and rate > 0
+            ):
+                postpaid_rate = rate
+        if grant is None and subscription.enforcement_mode == "enforce" and postpaid_rate is None:
             raise CommercialAllowanceExhausted(resource)
         if grant is not None:
             grant.reserved_units += units
@@ -212,6 +251,8 @@ class CommercialEntitlementService:
             "subscription_status_snapshot": subscription.status,
             "plan_id_snapshot": str(subscription.plan_id),
         }
+        if postpaid_rate is not None:
+            snapshot["postpaid_unit_cents"] = postpaid_rate
         if existing is None:
             existing = CommercialUsageReservationModel(
                 id=uuid4(),
@@ -380,6 +421,8 @@ class CommercialEntitlementService:
         plan_code: str,
         enforcement_mode: str,
         status: str | None = None,
+        cycle_start: datetime | None = None,
+        cycle_end: datetime | None = None,
     ) -> TenantCommercialSubscriptionModel:
         if enforcement_mode not in {"meter_only", "enforce"}:
             raise ValueError("Invalid commercial enforcement mode")
@@ -395,7 +438,8 @@ class CommercialEntitlementService:
             # As a regular plan it would renew every month; trials only start at signup.
             raise ValueError("The trial plan cannot be assigned")
         now = datetime.now(UTC)
-        cycle_start, cycle_end = _calendar_cycle(now)
+        if cycle_start is None or cycle_end is None:
+            cycle_start, cycle_end = _calendar_cycle(now)
         subscription = self.subscription(tenant_id, lock=True)
         next_status = status or ("pilot" if plan.code == PILOT_PLAN_CODE else "active")
         if subscription.plan_id != plan.id or next_status not in {"pilot", "active"}:
@@ -434,7 +478,7 @@ class CommercialEntitlementService:
         )
 
     def start_pending(
-        self, tenant_id: UUID, *, commit: bool = True
+        self, tenant_id: UUID, *, commercial_segment: str | None = None, commit: bool = True
     ) -> TenantCommercialSubscriptionModel:
         """A new account without a trial: everything metered and blocked until it subscribes."""
 
@@ -456,6 +500,7 @@ class CommercialEntitlementService:
             enforcement_mode="enforce",
             cycle_started_at=cycle_start,
             cycle_ends_at=cycle_end,
+            commercial_segment=commercial_segment,
         )
         self._session.add(subscription)
         self._session.flush()
@@ -464,7 +509,12 @@ class CommercialEntitlementService:
         return subscription
 
     def start_trial(
-        self, tenant_id: UUID, *, days: int, commit: bool = True
+        self,
+        tenant_id: UUID,
+        *,
+        days: int,
+        commercial_segment: str | None = None,
+        commit: bool = True,
     ) -> TenantCommercialSubscriptionModel:
         """Give a new self-service tenant a short, enforced allowance that does not renew."""
 
@@ -494,6 +544,7 @@ class CommercialEntitlementService:
             cycle_started_at=now,
             cycle_ends_at=ends_at,
             trial_ends_at=ends_at,
+            commercial_segment=commercial_segment,
         )
         self._session.add(subscription)
         self._session.flush()
@@ -660,6 +711,12 @@ class CommercialEntitlementService:
         return summaries
 
     def _roll_cycle(self, subscription: TenantCommercialSubscriptionModel, now: datetime) -> None:
+        plan = self._session.get(CommercialPlanModel, subscription.plan_id)
+        if plan is not None and plan.code == BROKER_BETA_PLAN_CODE:
+            # A new broker cycle begins only after its consolidated invoice is paid.
+            if now >= subscription.cycle_ends_at and subscription.status == "active":
+                subscription.status = "past_due"
+            return
         if now < subscription.cycle_ends_at:
             if subscription.status in {"pilot", "active"}:
                 plan = self._session.get(CommercialPlanModel, subscription.plan_id)

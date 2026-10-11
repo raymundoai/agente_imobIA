@@ -539,6 +539,15 @@ export type BillingOverview = {
   internal_test: boolean;
   packs: PackOffer[];
   pack_orders: PackOrder[];
+  broker_usage: {
+    unbilled_ai: number;
+    unbilled_images: number;
+    unbilled_cents: number;
+    invoice_ai: number;
+    invoice_images: number;
+    invoice_base_cents: number;
+    invoice_usage_cents: number;
+  } | null;
   plan: BillingPlan;
   trial_ends_at: string | null;
   cycle_ends_at: string;

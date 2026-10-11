@@ -64,7 +64,10 @@ def signup(
         settings={
             "onboarding": {"status": "pending"},
             # The AI agent introduces itself on behalf of this name even if the wizard is skipped.
-            "profile": {"display_name": payload.company_name.strip()},
+            "profile": {
+                "display_name": payload.company_name.strip(),
+                "business_type": payload.business_type,
+            },
             "legal": {
                 "terms_version": TERMS_VERSION,
                 "accepted_at": datetime.now(UTC).isoformat(),
@@ -75,9 +78,9 @@ def signup(
     commercial = CommercialEntitlementService(session)
     trial_days = container.settings.trial_days
     trial = (
-        commercial.start_trial(tenant.id, days=trial_days)
+        commercial.start_trial(tenant.id, days=trial_days, commercial_segment=payload.business_type)
         if trial_days > 0
-        else commercial.start_pending(tenant.id)
+        else commercial.start_pending(tenant.id, commercial_segment=payload.business_type)
     )
     tokens = container.token_service
     return SignupResponse(
@@ -215,6 +218,10 @@ def update_profile_settings(
     current = repository.get_by_id(principal.tenant_id)
     if current is None:
         raise NotFoundError("Tenant not found")
+    segment = CommercialEntitlementService(session).subscription(tenant_id).commercial_segment
+    selected_type = payload.profile.business_type
+    if segment is not None and selected_type is not None and selected_type != segment:
+        raise ConflictError("Para mudar o tipo de conta, fale com o suporte.")
     settings = {
         **current.settings,
         "profile": payload.profile.model_dump(exclude_unset=True),

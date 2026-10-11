@@ -24,7 +24,7 @@ from app.modules.billing_usage.commercial import (
     PACK_VALIDITY_DAYS,
     CommercialEntitlementService,
     effective_price_cents,
-    is_internal_test_plan,
+    is_offered_plan,
     pack_offers,
 )
 from app.shared.errors.exceptions import (
@@ -275,11 +275,11 @@ class AsaasBillingService:
             )
         )
         commercial = CommercialEntitlementService(self._session).subscription(tenant_id)
-        offered = plan is not None and (
-            plan.is_public if not commercial.internal_test else is_internal_test_plan(plan)
-        )
+        offered = plan is not None and is_offered_plan(plan, commercial)
         if plan is None or not offered:
             raise ConflictError("Plano comercial indisponível para cobrança")
+        if plan.code == "corretor_beta":
+            raise ConflictError("O plano de corretor usa a cobrança mensal por consumo")
         if plan.monthly_price_cents <= 0:
             raise ConflictError("O plano precisa ter preço mensal definido antes da cobrança")
         beta = commercial.beta_pricing and not commercial.internal_test
@@ -383,6 +383,8 @@ class AsaasBillingService:
         plan = self._session.get(CommercialPlanModel, commercial.plan_id)
         if plan is None or commercial.status not in {"active", "past_due"} or not plan.is_public:
             raise ConflictError("Assine um plano antes de comprar pacotes adicionais")
+        if plan.code == "corretor_beta" and commercial.status != "active":
+            raise ConflictError("Regularize a mensalidade antes de comprar um pacote")
         offer = next((item for item in pack_offers(plan) if item["resource"] == resource), None)
         if offer is None:
             raise ConflictError("Este pacote não está disponível no seu plano")
@@ -553,6 +555,30 @@ class AsaasBillingService:
             return AsaasWebhookResult(duplicate=True, outcome="duplicate", subscription_id=None)
 
         payment = _dict(payload.get("payment"))
+        if payment:
+            from app.modules.billing_usage.broker_billing import BrokerBillingService
+
+            broker_invoice = BrokerBillingService(
+                self._session, self._client, self._settings
+            ).invoice_for_payment(payment)
+            if broker_invoice is not None:
+                event = AsaasWebhookEventModel(
+                    id=uuid4(),
+                    provider_event_id=event_id,
+                    event_type=event_type,
+                    subscription_id=None,
+                    payload=payload,
+                    outcome="recorded",
+                    processed_at=datetime.now(UTC),
+                )
+                self._session.add(event)
+                event.outcome = BrokerBillingService(
+                    self._session, self._client, self._settings
+                ).settle_event(broker_invoice, event_type, payment)
+                self._session.commit()
+                return AsaasWebhookResult(
+                    duplicate=False, outcome=event.outcome, subscription_id=None
+                )
         pack_order = self._pack_order_for_event(payment) if payment else None
         if pack_order is not None:
             event = AsaasWebhookEventModel(

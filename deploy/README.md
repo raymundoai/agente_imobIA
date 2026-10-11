@@ -9,6 +9,7 @@ Tudo roda num único serviço **Compose** do Easypanel, a partir de `docker-comp
 | `backend`        | API; roda as migrações do banco a cada início                    | não            |
 | `message-worker` | Envia as respostas do agente pelo WhatsApp                       | não            |
 | `capture-worker` | Faz as buscas de imóveis nos portais                             | não            |
+| `billing-worker` | Gera a fatura mensal do corretor beta ao fim de cada ciclo      | não            |
 | `postgres`       | Banco de dados (com pgvector)                                    | não            |
 | `backup`         | Cópia diária do banco e das mídias (mantém 14 dias)              | não            |
 
@@ -52,9 +53,12 @@ Se mudar o domínio do `web`, atualize `APP_PUBLIC_URL` e `BACKEND_PUBLIC_URL` e
 ## 4. Teste em produção
 
 - Crie uma conta pelo cadastro do painel `web` e passe pelo assistente de configuração.
-- No admin, marque a conta como **Beta tester**; assine o Essencial por PIX (R$ 49).
+- No admin, marque a conta de corretor como **Beta tester**. Confira que ela vê somente o plano
+  Corretor beta (R$ 59,90, 20 buscas) e gere a primeira fatura por PIX ou cartão.
 - Conecte um WhatsApp por QR Code, cadastre um imóvel e converse a partir de outro celular.
-- Compre um pacote adicional e confira os créditos.
+- Compre um pacote de 15 otimizações e confira os créditos. O preço é R$ 30,00.
+- Confira no painel o consumo avulso de IA e imagens; a renovação soma esse consumo à próxima
+  mensalidade. O `billing-worker` gera uma fatura por ciclo, e o pagamento libera a nova franquia.
 - Cancele a assinatura de teste no admin.
 
 ## Backups

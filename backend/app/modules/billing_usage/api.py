@@ -19,6 +19,7 @@ from app.modules.billing_usage.adapters.models import (
     AiAttendanceSessionModel,
     AsaasPackOrderModel,
     AsaasSubscriptionModel,
+    BrokerInvoiceUsageModel,
     CommercialPackModel,
     CommercialPlanModel,
     CommercialUsageEventModel,
@@ -33,12 +34,14 @@ from app.modules.billing_usage.asaas import (
     asaas_client_from_settings,
     verify_asaas_webhook_token,
 )
+from app.modules.billing_usage.broker_billing import BrokerBillingService
 from app.modules.billing_usage.commercial import (
+    BROKER_BETA_PLAN_CODE,
     COMMERCIAL_RESOURCES,
     RESOURCE_LABELS,
     CommercialEntitlementService,
     effective_price_cents,
-    is_internal_test_plan,
+    is_offered_plan,
     pack_offers,
 )
 from app.modules.billing_usage.service import (
@@ -274,7 +277,7 @@ def commercial_usage(
 
 @router.get("/commercial/catalog", response_model=CommercialCatalogResponse)
 def commercial_catalog(
-    _: CurrentPrincipal = Depends(get_current_principal),
+    principal: CurrentPrincipal = Depends(get_current_principal),
     session: Session = Depends(get_db_session),
 ) -> CommercialCatalogResponse:
     plans = session.scalars(
@@ -290,8 +293,13 @@ def commercial_catalog(
             CommercialPackModel.resource, CommercialPackModel.units
         )
     ).all()
+    commercial = CommercialEntitlementService(session).subscription(principal.tenant_id)
     return CommercialCatalogResponse(
-        plans=[CommercialPlanResponse.model_validate(item, from_attributes=True) for item in plans],
+        plans=[
+            CommercialPlanResponse.model_validate(item, from_attributes=True)
+            for item in plans
+            if is_offered_plan(item, commercial)
+        ],
         packs=[CommercialPackResponse.model_validate(item, from_attributes=True) for item in packs],
     )
 
@@ -403,6 +411,7 @@ class BillingOverview(BaseModel):
     contact: BillingContact
     packs: list[PackOffer]
     pack_orders: list[PackOrder]
+    broker_usage: dict[str, int] | None = None
 
 
 class SelfServiceCustomer(BaseModel):
@@ -463,10 +472,12 @@ def _billing_overview(session: Session, tenant_id: UUID, container: Container) -
             .order_by(CommercialPlanModel.monthly_price_cents)
         ).all()
         # Internal test accounts are offered only the private test plan, in place of the others.
-        if not internal or is_internal_test_plan(plan)
+        if is_offered_plan(plan, commercial)
     ]
     beta = commercial.beta_pricing and not internal
     subscribed = commercial.status in {"active", "past_due"} and current_plan.is_public
+    if current_plan.code == BROKER_BETA_PLAN_CODE and commercial.status != "active":
+        subscribed = False
     orders = session.scalars(
         select(AsaasPackOrderModel)
         .where(
@@ -486,6 +497,24 @@ def _billing_overview(session: Session, tenant_id: UUID, container: Container) -
         .order_by(AsaasSubscriptionModel.created_at.desc())
         .limit(1)
     ).first()
+    broker_service = BrokerBillingService(
+        session,
+        asaas_client_from_settings(container.settings, container.http_client)
+        if container.settings.asaas_api_key is not None
+        else None,
+        container.settings,
+    )
+    broker_invoice = broker_service.latest_invoice(tenant_id)
+    broker_events = broker_service.unbilled_usage(tenant_id) if broker_invoice else []
+    broker_lines = (
+        session.scalars(
+            select(BrokerInvoiceUsageModel).where(
+                BrokerInvoiceUsageModel.invoice_id == broker_invoice.id
+            )
+        ).all()
+        if broker_invoice
+        else []
+    )
     tenant = session.get(TenantModel, tenant_id)
     settings = tenant.settings if tenant is not None and isinstance(tenant.settings, dict) else {}
     profile = settings.get("profile") if isinstance(settings.get("profile"), dict) else {}
@@ -505,8 +534,40 @@ def _billing_overview(session: Session, tenant_id: UUID, container: Container) -
         plans=[_billing_plan(plan, beta=beta) for plan in plans],
         packs=[PackOffer(**offer) for offer in pack_offers(current_plan)] if subscribed else [],
         pack_orders=[_pack_order(order) for order in orders],
+        broker_usage=(
+            {
+                "unbilled_ai": sum(e.units for e in broker_events if e.resource == "ai_attendance"),
+                "unbilled_images": sum(
+                    e.units for e in broker_events if e.resource == "image_optimization"
+                ),
+                "unbilled_cents": sum(
+                    e.units * int(e.extra["postpaid_unit_cents"]) for e in broker_events
+                ),
+                "invoice_ai": sum(
+                    line.units for line in broker_lines if line.resource == "ai_attendance"
+                ),
+                "invoice_images": sum(
+                    line.units for line in broker_lines if line.resource == "image_optimization"
+                ),
+                "invoice_base_cents": broker_invoice.base_cents,
+                "invoice_usage_cents": broker_invoice.total_cents - broker_invoice.base_cents,
+            }
+            if broker_invoice
+            else None
+        ),
         subscription=(
             BillingSubscription(
+                id=broker_invoice.id,
+                plan_code=BROKER_BETA_PLAN_CODE,
+                plan_name="Corretor beta",
+                billing_type=broker_invoice.billing_type,
+                status="active" if broker_invoice.status == "paid" else broker_invoice.status,
+                value_cents=broker_invoice.total_cents,
+                next_due_date=broker_invoice.due_date,
+                invoice_url=broker_invoice.invoice_url,
+            )
+            if broker_invoice
+            else BillingSubscription(
                 id=latest[0].id,
                 plan_code=latest[1].code,
                 plan_name=latest[1].name,
@@ -623,13 +684,23 @@ def subscribe(
     container: Container = Depends(get_container),
     session: Session = Depends(get_db_session),
 ) -> BillingOverview:
-    """The agency subscribes itself; the plan is activated by the payment webhook."""
+    """Create an approved beta invoice or the internal test subscription."""
 
-    service = AsaasBillingService(
-        session,
-        asaas_client_from_settings(container.settings, container.http_client),
-        container.settings,
-    )
+    client = asaas_client_from_settings(container.settings, container.http_client)
+    service = AsaasBillingService(session, client, container.settings)
+    if payload.plan_code == BROKER_BETA_PLAN_CODE:
+        BrokerBillingService(session, client, container.settings).create_first_invoice(
+            principal.tenant_id,
+            billing_type=payload.billing_type,
+            customer=AsaasCustomerInput(
+                name=payload.customer.name,
+                email=str(payload.customer.email),
+                cpf_cnpj=payload.customer.cpf_cnpj,
+                mobile_phone=payload.customer.mobile_phone,
+                notification_disabled=False,
+            ),
+        )
+        return _billing_overview(session, principal.tenant_id, container)
     service.create_subscription(
         principal.tenant_id,
         AsaasSubscriptionInput(
@@ -652,3 +723,28 @@ def subscribe(
         ),
     )
     return _billing_overview(session, principal.tenant_id, container)
+
+
+@billing_router.get("/broker/pix", response_model=PixCharge)
+def broker_invoice_pix(
+    principal: CurrentPrincipal = Depends(get_current_principal),
+    container: Container = Depends(get_container),
+    session: Session = Depends(get_db_session),
+) -> PixCharge:
+    service = BrokerBillingService(
+        session,
+        asaas_client_from_settings(container.settings, container.http_client),
+        container.settings,
+    )
+    invoice = service.latest_invoice(principal.tenant_id)
+    qr_code = service.pix_for_invoice(principal.tenant_id)
+    if invoice is None:
+        raise RuntimeError("Fatura não encontrada")
+    return PixCharge(
+        payment_id=invoice.provider_payment_id or "",
+        value_cents=invoice.total_cents,
+        due_date=invoice.due_date,
+        payload=qr_code["payload"],
+        encoded_image=qr_code["encodedImage"],
+        expiration_date=qr_code.get("expirationDate"),
+    )

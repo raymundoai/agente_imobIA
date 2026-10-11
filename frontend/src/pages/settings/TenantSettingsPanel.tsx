@@ -187,7 +187,7 @@ export function TenantSettingsPanel({
       </div>
 
       <fieldset className="settings-form-fieldset" disabled={!canManage}>
-      <BusinessIdentityFields onChange={(identity) => setForm((current) => ({ ...current, identity }))} value={form.identity} />
+      <BusinessIdentityFields lockedBusinessType={tenant?.settings.profile?.business_type} onChange={(identity) => setForm((current) => ({ ...current, identity }))} value={form.identity} />
       <div className="form-grid settings-identity-extra">
         <label>
           {form.identity.business_type === "broker" ? "Nome profissional" : "Nome da imobiliária"}

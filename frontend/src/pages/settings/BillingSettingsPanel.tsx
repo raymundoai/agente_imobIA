@@ -146,13 +146,14 @@ export function BillingSettingsPanel() {
 
   const subscription = overview.subscription;
   const selectedPlan = overview.plans.find((plan) => plan.code === planCode);
+  const broker = subscription?.plan_code === "corretor_beta" || selectedPlan?.code === "corretor_beta";
 
   return (
     <Card className="settings-panel-card">
       <div className="settings-panel-header">
         <div>
           <h2>Plano e cobrança</h2>
-          <p>Assinatura mensal processada pelo Asaas. O plano é liberado assim que o pagamento é confirmado.</p>
+          <p>{broker ? "Fatura mensal pelo Asaas. A cada ciclo, você paga a mensalidade e o consumo avulso do ciclo anterior." : "Assinatura mensal processada pelo Asaas. O plano é liberado assim que o pagamento é confirmado."}</p>
         </div>
         <button className="button-outline" disabled={loading} onClick={() => void load()} type="button">
           <RefreshCw size={14} />
@@ -178,8 +179,8 @@ export function BillingSettingsPanel() {
       {subscription ? (
         <div className="billing-subscription">
           <div>
-            <span className="eyebrow">Assinatura</span>
-            <strong>{subscription.plan_name} · {formatBrl(subscription.value_cents)}/mês</strong>
+            <span className="eyebrow">{broker ? "Última fatura" : "Assinatura"}</span>
+            <strong>{subscription.plan_name} · {formatBrl(subscription.value_cents)}{broker ? " nesta fatura" : "/mês"}</strong>
             <span>
               {subscription.billing_type === "CREDIT_CARD" ? "Cartão de crédito" : "PIX"} ·{" "}
               {subscriptionStatusLabels[subscription.status] ?? subscription.status}
@@ -194,7 +195,7 @@ export function BillingSettingsPanel() {
         </div>
       ) : null}
 
-      {subscription && waiting && subscription.billing_type === "PIX" ? <PixPayment invoiceUrl={subscription.invoice_url} token={token} /> : null}
+      {subscription && waiting && subscription.billing_type === "PIX" ? <PixPayment endpoint={broker ? "/billing/broker/pix" : "/billing/pix"} invoiceUrl={subscription.invoice_url} token={token} /> : null}
       {subscription && waiting && subscription.billing_type === "CREDIT_CARD" ? (
         <p className="billing-waiting" aria-live="polite">
           <Loader2 className="spin" size={16} />
@@ -209,7 +210,11 @@ export function BillingSettingsPanel() {
         <div className="info-box">Somente o administrador da conta pode contratar um plano.</div>
       ) : null}
 
-      {!subscription && overview.payments_enabled && isAdmin ? (
+      {!subscription && overview.payments_enabled && isAdmin && !overview.plans.length ? (
+        <div className="info-box">As novas contratações estão disponíveis para corretores convidados ao beta. Fale com o suporte para liberar sua conta.</div>
+      ) : null}
+
+      {!subscription && overview.payments_enabled && isAdmin && overview.plans.length > 0 ? (
         <form className="billing-form" onSubmit={subscribe}>
           <fieldset className="plan-options">
             <legend>Escolha o plano</legend>
@@ -225,7 +230,7 @@ export function BillingSettingsPanel() {
               <CreditCard size={18} />
               <span>
                 <strong>Cartão de crédito</strong>
-                <small>Cobrança automática todo mês.</small>
+                <small>{broker ? "Uma nova fatura é enviada a cada ciclo." : "Cobrança automática todo mês."}</small>
               </span>
             </label>
             <label className={billingType === "PIX" ? "payment-option selected" : "payment-option"}>
@@ -233,7 +238,7 @@ export function BillingSettingsPanel() {
               <QrCode size={18} />
               <span>
                 <strong>PIX</strong>
-                <small>Uma cobrança por mês, enviada por email.</small>
+                <small>Uma fatura por ciclo, enviada por email.</small>
               </span>
             </label>
           </fieldset>
@@ -270,6 +275,17 @@ export function BillingSettingsPanel() {
         </form>
       ) : error ? (
         <div className="error-box">{error}</div>
+      ) : null}
+
+      {overview.broker_usage ? (
+        <section className="pack-section" aria-label="Consumo do plano beta">
+          <div>
+            <h3>Consumo do plano beta</h3>
+            <p>Atendimento de IA: R$ 2,90 por conversa. Otimização avulsa: R$ 2,50 por imagem. Pacotes de imagens já pagos são consumidos primeiro.</p>
+            <p>Próxima fatura: {formatNumber(overview.broker_usage.unbilled_ai)} conversas e {formatNumber(overview.broker_usage.unbilled_images)} imagens avulsas, total parcial de {formatBrl(overview.broker_usage.unbilled_cents)} em consumo.</p>
+            <p>Última fatura: mensalidade de {formatBrl(overview.broker_usage.invoice_base_cents)} mais {formatBrl(overview.broker_usage.invoice_usage_cents)} em consumo ({formatNumber(overview.broker_usage.invoice_ai)} conversas, {formatNumber(overview.broker_usage.invoice_images)} imagens).</p>
+          </div>
+        </section>
       ) : null}
 
       {overview.packs.length ? (
@@ -499,9 +515,10 @@ function PlanOption({ plan, selected, onSelect }: { plan: BillingPlan; selected:
       ) : null}
       <span className="plan-price">{formatBrl(plan.monthly_price_cents)}<small>/mês</small></span>
       <ul>
-        <li>{plan.ai_attendances ? `${formatNumber(plan.ai_attendances)} atendimentos de IA` : "Sem atendimento de IA"}</li>
+        <li>{plan.code === "corretor_beta" ? "IA a R$ 2,90 por conversa" : plan.ai_attendances ? `${formatNumber(plan.ai_attendances)} atendimentos de IA` : "Sem atendimento de IA"}</li>
         <li>{formatNumber(plan.property_searches)} buscas de imóveis</li>
-        <li>{plan.image_optimizations ? `${formatNumber(plan.image_optimizations)} otimizações de fotos` : "Sem otimização de fotos"}</li>
+        <li>{plan.code === "corretor_beta" ? "Imagens: R$ 2,50 cada ou 15 por R$ 30,00" : plan.image_optimizations ? `${formatNumber(plan.image_optimizations)} otimizações de fotos` : "Sem otimização de fotos"}</li>
+        {plan.code === "corretor_beta" ? <li>Compartilhamento de imóveis</li> : null}
         <li>Até {formatNumber(plan.max_users)} usuários</li>
       </ul>
     </label>
@@ -521,7 +538,10 @@ function statusHeadline(overview: BillingOverview) {
   if (overview.internal_test) {
     return overview.status === "active" ? `Conta interna · ${overview.plan.name} ativo` : "Conta interna de testes";
   }
-  if (overview.status === "pending") return "Escolha um plano para ativar a IA";
+  if (overview.status === "pending") {
+    if (overview.subscription?.plan_code === "corretor_beta") return "Aguardando pagamento da primeira fatura";
+    return overview.plans.length ? "Escolha um plano para ativar a IA" : "Conta aguardando liberação para o beta";
+  }
   if (overview.status === "active") return `Plano ${overview.plan.name} ativo`;
   if (overview.status === "past_due") return "Pagamento em atraso";
   if (overview.status === "cancelled") return "Assinatura encerrada";
@@ -538,11 +558,13 @@ function statusDetail(overview: BillingOverview) {
     return "Uso ilimitado da IA, das buscas e da otimização de fotos. A contratação abaixo cobra R$ 5,00 de verdade, só para validar o pagamento.";
   }
   if (overview.status === "pending") {
+    if (overview.subscription?.plan_code === "corretor_beta") return "O plano é liberado quando o pagamento da primeira fatura for confirmado.";
+    if (!overview.plans.length && !overview.subscription) return "A equipe precisa liberar sua conta antes da contratação.";
     return overview.beta_pricing
       ? "Sua conta tem a condição especial de beta tester. O atendimento com IA, as buscas e a otimização de fotos começam assim que a primeira mensalidade for paga."
       : "O atendimento com IA, as buscas e a otimização de fotos começam assim que a primeira mensalidade for paga.";
   }
-  if (overview.status === "past_due") return "Você ainda usa o que resta deste mês, mas o plano não renova até o pagamento.";
+  if (overview.status === "past_due") return overview.plan.code === "corretor_beta" ? "O uso do plano está suspenso até a fatura ser paga." : "Você ainda usa o que resta deste mês, mas o plano não renova até o pagamento.";
   if (overview.status === "cancelled") return "IA e buscas estão bloqueadas. Escolha um plano para voltar a usar.";
   return `Ciclo atual até ${new Date(overview.cycle_ends_at).toLocaleDateString("pt-BR")}.`;
 }

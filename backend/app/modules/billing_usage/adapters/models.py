@@ -266,6 +266,7 @@ class TenantCommercialSubscriptionModel(Base):
     beta_pricing: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    commercial_segment: Mapped[str | None] = mapped_column(Text)
     # The team's own accounts: metered but never blocked, offered only the private test plan.
     internal_test: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
@@ -345,6 +346,69 @@ class AsaasSubscriptionModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class BrokerInvoiceModel(Base):
+    __tablename__ = "broker_invoices"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "cycle_start", name="uq_broker_invoices_tenant_cycle"),
+        UniqueConstraint("external_reference", name="uq_broker_invoices_reference"),
+        UniqueConstraint("provider_payment_id", name="uq_broker_invoices_payment"),
+        CheckConstraint("cycle_end > cycle_start", name="cycle"),
+        CheckConstraint("total_cents >= base_cents AND base_cents >= 0", name="amount"),
+        CheckConstraint(
+            "status IN ('creating', 'pending_payment', 'paid', 'past_due', 'failed', 'cancelled')",
+            name="status",
+        ),
+        Index("ix_broker_invoices_tenant_created", "tenant_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    plan_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("commercial_plans.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    provider_customer_id: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_payment_id: Mapped[str | None] = mapped_column(Text)
+    external_reference: Mapped[str] = mapped_column(Text, nullable=False)
+    invoice_url: Mapped[str | None] = mapped_column(Text)
+    billing_type: Mapped[str] = mapped_column(Text, nullable=False)
+    cycle_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    cycle_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    base_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="creating")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class BrokerInvoiceUsageModel(Base):
+    __tablename__ = "broker_invoice_usage"
+    __table_args__ = (
+        UniqueConstraint("usage_event_id", name="uq_broker_invoice_usage_event"),
+        CheckConstraint("units > 0 AND unit_price_cents > 0", name="positive"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    invoice_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("broker_invoices.id", ondelete="RESTRICT"), nullable=False
+    )
+    usage_event_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("commercial_usage_events.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    resource: Mapped[str] = mapped_column(Text, nullable=False)
+    units: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class AsaasWebhookConfigModel(Base):

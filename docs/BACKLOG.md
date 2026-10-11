@@ -37,9 +37,10 @@ o commit em **Decisão**.
 | B-005 | Kanban de leads | Ideia | Equipe | A definir | Novo |
 | B-006 | Revisão de segurança da infraestrutura | Correção | Equipe | Alta | Em andamento |
 | B-007 | Diferenciar os planos por recurso, não só pela franquia | Ideia | Equipe | A definir | Novo |
-| B-008 | Planos para corretor autônomo | Ideia | Equipe | Alta | Em análise |
+| B-008 | Planos para corretor autônomo | Ideia | Equipe | Alta | Aprovado (beta) |
 | B-009 | Imposto real na precificação | Correção | Equipe | Alta | Novo |
 | B-010 | Testar o agente em conversas fora do escopo | Correção | Equipe | Alta | Aprovado |
+| B-011 | Endereço com CEP no cadastro e estudo de exclusividade territorial | Melhoria | Equipe | A definir | Novo |
 
 ## Itens
 
@@ -140,23 +141,82 @@ o commit em **Decisão**.
 ### B-008 · Planos para corretor autônomo
 
 - **Tipo:** Ideia · **Origem:** Equipe (reunião de 07/10/2026) · **Registrado em:** 07/10/2026
-- **Prioridade:** Alta · **Status:** Em análise
+- **Prioridade:** Alta · **Status:** Aprovado (beta); preço definitivo em análise
 - **Descrição:** o Essencial (R$ 369) é acessível para uma imobiliária, mas caro para um corretor
-  autônomo. A proposta é uma linha de planos própria para corretores:
-  - entrada a **R$ 59,90**, para atrair os corretores em grande volume: atendimento com IA, sem
-    buscas nem otimização de fotos na franquia, só como compra avulsa;
-  - um degrau a **R$ 89,90**, ainda aceitável para o corretor, com um volume pequeno de buscas
-    e fotos.
-- **No sistema:** o assistente de configuração já pergunta se a conta é de corretor (CPF) ou de
-  imobiliária (CNPJ). A tela de planos pode mostrar a linha certa para cada perfil, sem criar dois
-  produtos. Falta definir o que acontece se o corretor virar imobiliária (troca de linha).
+  autônomo. Criar uma oferta própria para corretores; os preços anteriores abaixo são hipóteses
+  históricas e a condição beta vigente está na decisão de 11/10/2026.
+- **No sistema:** o cadastro inicial ainda não pergunta o tipo de conta; o assistente posterior
+  pergunta se é corretor ou imobiliária, mas essa informação fica no perfil editável e o
+  assistente pode ser pulado. Registrar a categoria comercial da conta e validar a elegibilidade
+  dos planos no servidor, inclusive quando a categoria mudar. CPF ou CNPJ não devem definir
+  sozinhos a categoria.
 - **Pontos a levantar antes de aprovar:**
   - os volumes de cada franquia: quantos atendimentos e buscas um corretor faz por mês. Validar
     com os beta testers e com a pesquisa quantitativa (com apoio de Creci e Secovi), que deve
     incluir essas faixas de preço;
   - as margens no simulador, já com o imposto real (B-009);
   - a relação com o B-007, que diferencia os planos por recurso.
-- **Decisão:** —
+- **Discussão de 08/10/2026 (hipóteses, sem decisão):** estudar preços mensais redondos a partir
+  de R$ 60, com opções até R$ 190. Para o corretor autônomo, considerar 30 buscas padrão no
+  plano de entrada e comparar duas formas de oferecer IA: cobrança de R$ 2,50 por atendimento
+  desde o primeiro uso ou uma pequena franquia incluída, seguida de uso adicional nesse preço.
+  Avaliar otimização de imagens a R$ 3,50 por foto, pacotes adicionais de buscas e limite de dois
+  usuários; o segundo acesso poderia ser um adicional mensal de baixo valor. Examinar o preço
+  por unidade de operação para imobiliárias com várias lojas ou franquias, mantendo por ora os
+  quatro planos de imobiliárias como estão. Medir o custo operacional da busca padrão e separar
+  sua futura versão com IA na precificação. Validar também a percepção dos preços redondos com
+  corretores.
+- **Discussão de 08/10/2026 (continuação, proposta em análise):** priorizar mensalidade baixa e
+  cobrança proporcional ao uso para reduzir o custo fixo nos meses fracos do corretor. Cenário
+  de entrada: R$ 60/mês, 50 buscas padrão incluídas, nenhum atendimento de IA incluído e
+  R$ 2,50 por atendimento realizado. Segundo degrau: R$ 89,90/mês, 100 buscas padrão
+  incluídas, nenhum atendimento de IA incluído e comparar R$ 2,10 com R$ 2,00 por
+  atendimento. Estudar uma única cobrança mensal com assinatura e consumo consolidado, sem
+  transação por atendimento; definir limite de gasto, detalhamento da fatura e tratamento de
+  inadimplência. Os valores e a forma de cobrança seguem sem aprovação final.
+- **Discussão de 08/10/2026 (simulação seguinte, sem decisão):** testar R$ 2,80 por atendimento
+  no plano de R$ 60, preservando as 50 buscas incluídas. Comparar esse desenho com uma linha
+  única de baixo custo fixo e desconto automático por volume de atendimentos, sem obrigar o
+  corretor a trocar de assinatura nos meses de maior movimento. Conferir o preço de mercado
+  por conversa com cuidado, pois a definição de atendimento e os recursos variam entre
+  fornecedores.
+- **Discussão de 08/10/2026 (nova hipótese, sem decisão):** linha única para corretor com
+  R$ 60 fixos, 50 buscas padrão incluídas e IA cobrada por atendimento em faixas de volume:
+  R$ 3,20 até o 30º, R$ 2,80 do 31º ao 90º e R$ 2,15 acima do 150º. Em 08/10, a proposta
+  de R$ 2,50 do 91º ao 150º foi aceita para continuar a análise. A aplicação progressiva ou
+  retroativa do desconto ainda precisa ser definida. Comparar o total em alto volume com o
+  plano Essencial para imobiliárias.
+- **Discussão de 08/10/2026 (preço beta em análise):** avaliar a mensalidade de R$ 60 e as
+  faixas variáveis de IA como condição dos beta testers, com preço público fixo maior para a
+  linha de corretores. Testar R$ 90 como referência pública, mantendo a mesma tarifa por
+  atendimento para ambos os grupos. Definir duração, elegibilidade e comunicação da condição
+  beta a partir da conversão e do uso observados, antes de publicar esses valores. Ao desenhar
+  a oferta, evitar que o mesmo corretor tenha acesso simultâneo ao Essencial beta atual de
+  imobiliárias (R$ 49 com 100 atendimentos incluídos), que seria mais vantajoso que a nova
+  linha beta para corretores.
+- **Discussão de 08/10/2026 (alternativa beta em análise):** simular R$ 60 de mensalidade para
+  corretores beta e R$ 3,00 por atendimento de IA desde o primeiro uso, sem desconto por
+  volume. Avaliar receita e contribuição para um grupo de 20 contas pagantes em meses de
+  diferentes volumes, incluindo as buscas, a cobrança e o servidor. Não confundir margem
+  direta positiva com resultado final, que depende também do suporte e da aquisição.
+- **Decisão parcial em 08/10/2026:** preparar para corretores beta o plano de R$ 59,90/mês,
+  com 50 buscas padrão por ciclo, acesso ao compartilhamento de imóveis e atendimento de IA a
+  R$ 2,90 por conversa cobrável desde a primeira. Otimização de imagem: R$ 2,50 por foto avulsa
+  ou pacote de 15 por R$ 30,00. O preço público definitivo para corretores permanece em análise;
+  os planos das imobiliárias continuam como estão. Definir antes da implementação a regra de
+  início/fim da conversa cobrável, a cobrança consolidada do consumo, o uso após as 50 buscas,
+  a validade do pacote, os limites de usuários e a elegibilidade dos beta testers. Evitar que a
+  conta de corretor receba também a oferta beta Essencial de imobiliárias.
+- **Decisão em 11/10/2026:** aprovada para implementação a oferta beta de corretor por
+  **R$ 59,90/mês**, com **20 buscas padrão por ciclo**, compartilhamento de imóveis,
+  **R$ 2,90 por conversa cobrável de IA** desde a primeira e otimização de imagem a
+  **R$ 2,50 avulsa** ou **15 por R$ 30,00**. Esta decisão substitui as 50 buscas da proposta de
+  08/10. O preço definitivo depois do beta continua em análise. Na fase inicial, apresentar
+  somente a oferta beta aos corretores convidados; estudar ocultar os planos de imobiliária na
+  contratação de novas contas, sem apagar os planos existentes nem mudar assinaturas ativas.
+  Restringir também a contratação no servidor, pois ocultar cartões na interface não impede
+  pedidos diretos. Antes do lançamento, definir o tratamento da 21ª busca, a validade do pacote,
+  o limite de usuários e a cobrança mensal do consumo variável.
 
 ### B-009 · Imposto real na precificação
 
@@ -180,5 +240,18 @@ o commit em **Decisão**.
 - **Como:** um roteiro de conversas que tentam desviar o assunto, rodado na conta interna de
   testes. Se a instrução falhar, reforçar o prompt ou encerrar a conversa e passar para a equipe
   depois de algumas tentativas.
+- **Decisão:** —
+
+### B-011 · Endereço com CEP no cadastro e estudo de exclusividade territorial
+
+- **Tipo:** Melhoria · **Origem:** Equipe · **Registrado em:** 08/10/2026
+- **Prioridade:** A definir · **Status:** Novo
+- **Descrição:** incluir endereço com CEP no cadastro da conta, com número, complemento quando
+  houver, bairro, cidade e UF. Distinguir endereço cadastral do local ou área onde o corretor
+  atende. Guardar a informação de forma estruturada para permitir no futuro estudar uma oferta
+  de exclusividade por raio de atuação.
+- **Antes de oferecer exclusividade:** definir ponto de referência e raio, como tratar áreas
+  sobrepostas, mudança de endereço e contas já existentes, além das condições comerciais.
+  Cadastrar o endereço não concede exclusividade automaticamente.
 - **Decisão:** —
 

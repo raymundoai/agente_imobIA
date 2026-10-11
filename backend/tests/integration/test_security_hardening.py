@@ -106,6 +106,7 @@ def test_signup_is_limited_per_address(client: TestClient) -> None:
                 "email": f"ana{index}@example.com",
                 "password": PASSWORD,
                 "accept_terms": True,
+                "business_type": "agency",
             },
         )
         assert response.status_code == 201, response.text
@@ -117,6 +118,7 @@ def test_signup_is_limited_per_address(client: TestClient) -> None:
             "email": "ana6@example.com",
             "password": PASSWORD,
             "accept_terms": True,
+            "business_type": "agency",
         },
     )
     assert blocked.status_code == 429

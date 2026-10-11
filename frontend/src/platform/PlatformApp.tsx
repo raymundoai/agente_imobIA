@@ -559,7 +559,11 @@ function AsaasSetup({ token }: { token: string }) {
       <div className="settings-panel-header">
         <div>
           <h2>Asaas</h2>
-          <p>Ambiente de Sandbox para homologar assinaturas e eventos de pagamento.</p>
+          <p>
+            {connection?.environment_url?.includes("sandbox")
+              ? "Ambiente de testes (sandbox): as cobranças não são reais."
+              : "Ambiente de produção: as cobranças são reais."}
+          </p>
         </div>
         <button className="button-outline" disabled={loading} onClick={() => void loadStatus()} type="button">
           {loading ? "Verificando..." : "Verificar conexão"}

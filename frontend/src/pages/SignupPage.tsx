@@ -12,6 +12,7 @@ type SignupForm = {
   admin_name: string;
   email: string;
   password: string;
+  business_type: "broker" | "agency" | "";
 };
 
 const emptyForm: SignupForm = {
@@ -20,6 +21,7 @@ const emptyForm: SignupForm = {
   admin_name: "",
   email: "",
   password: "",
+  business_type: "",
 };
 
 export function SignupPage() {
@@ -60,12 +62,17 @@ export function SignupPage() {
       <form className="login-card signup-card" onSubmit={submit}>
         <div>
           <h1>Criar conta</h1>
-          <p>Depois do cadastro, você configura a imobiliária em poucos passos e escolhe o plano.</p>
+          <p>Depois do cadastro, você configura seu atendimento. Nesta fase, a contratação está disponível para corretores convidados ao beta.</p>
         </div>
         <label>
           Seu nome
           <input autoComplete="name" value={form.admin_name} onChange={(event) => update("admin_name", event.target.value)} />
         </label>
+        <fieldset>
+          <legend>Como você trabalha?</legend>
+          <label><input checked={form.business_type === "broker"} name="business_type" onChange={() => update("business_type", "broker")} type="radio" /> Corretor autônomo</label>
+          <label><input checked={form.business_type === "agency"} name="business_type" onChange={() => update("business_type", "agency")} type="radio" /> Imobiliária</label>
+        </fieldset>
         <label>
           Nome da imobiliária ou nome profissional
           <input autoComplete="organization" placeholder="Ex.: Eugênia Imóveis ou Pedro Corretor" value={form.company_name} onChange={(event) => update("company_name", event.target.value)} />
@@ -100,6 +107,7 @@ export function SignupPage() {
 }
 
 function validate(form: SignupForm): string | null {
+  if (!form.business_type) return "Escolha se você é corretor autônomo ou imobiliária.";
   if (form.admin_name.trim().length < 2) return "Informe seu nome.";
   if (form.company_name.trim().length < 2) return "Informe o nome da imobiliária ou seu nome profissional.";
   if (!form.email.includes("@")) return "Informe um email válido.";

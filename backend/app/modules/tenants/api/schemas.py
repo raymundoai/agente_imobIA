@@ -22,6 +22,7 @@ class SignupRequest(BaseModel):
     admin_name: str = Field(min_length=2, max_length=160)
     email: EmailStr
     password: str = Field(min_length=12, max_length=128)
+    business_type: Literal["broker", "agency"]
     # The terms of use and privacy policy must be accepted to open an account.
     accept_terms: bool
 

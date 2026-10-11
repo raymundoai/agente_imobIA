@@ -186,7 +186,7 @@ export function OnboardingWizard({
         {step === "company" ? (
           <>
             <StepTitle title="Como você trabalha?" text="Isso ajuda o agente a se apresentar do jeito certo. O documento é usado na cobrança e pode ficar para depois." />
-            <BusinessIdentityFields onChange={setIdentity} value={identity} />
+            <BusinessIdentityFields lockedBusinessType={savedProfile.business_type} onChange={setIdentity} value={identity} />
           </>
         ) : null}
 

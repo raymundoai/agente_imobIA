@@ -8,9 +8,11 @@ export { type BusinessIdentity, identityFromProfile, identityToProfile, validate
 export function BusinessIdentityFields({
   value,
   onChange,
+  lockedBusinessType,
 }: {
   value: BusinessIdentity;
   onChange: (value: BusinessIdentity) => void;
+  lockedBusinessType?: BusinessType | null;
 }) {
   const isCnpj = value.document_type === "cnpj";
 
@@ -29,6 +31,7 @@ export function BusinessIdentityFields({
       <div className="choice-cards" role="radiogroup" aria-label="Como você trabalha">
         <ChoiceCard
           checked={value.business_type === "broker"}
+          disabled={Boolean(lockedBusinessType && lockedBusinessType !== "broker")}
           icon={<UserRound size={20} />}
           onSelect={() => chooseBusiness("broker")}
           text="Trabalho por conta própria"
@@ -36,12 +39,14 @@ export function BusinessIdentityFields({
         />
         <ChoiceCard
           checked={value.business_type === "agency"}
+          disabled={Boolean(lockedBusinessType && lockedBusinessType !== "agency")}
           icon={<Building2 size={20} />}
           onSelect={() => chooseBusiness("agency")}
           text="Tenho uma equipe ou empresa"
           title="Imobiliária"
         />
       </div>
+      {lockedBusinessType ? <small className="field-hint">Para mudar o tipo de conta, fale com o suporte.</small> : null}
 
       <div className="document-fields">
         <div className="segmented" role="radiogroup" aria-label="Documento">
@@ -87,19 +92,21 @@ export function BusinessIdentityFields({
 
 function ChoiceCard({
   checked,
+  disabled,
   icon,
   title,
   text,
   onSelect,
 }: {
   checked: boolean;
+  disabled: boolean;
   icon: ReactNode;
   title: string;
   text: string;
   onSelect: () => void;
 }) {
   return (
-    <button aria-checked={checked} className={checked ? "choice-card active" : "choice-card"} onClick={onSelect} role="radio" type="button">
+    <button aria-checked={checked} className={checked ? "choice-card active" : "choice-card"} disabled={disabled} onClick={onSelect} role="radio" type="button">
       <span className="choice-card-icon">{icon}</span>
       <span>
         <strong>{title}</strong>

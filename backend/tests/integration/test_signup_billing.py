@@ -11,6 +11,11 @@ from app.modules.billing_usage.adapters.models import (
     TenantCommercialSubscriptionModel,
 )
 from app.modules.billing_usage.asaas import asaas_webhook_token
+from app.modules.billing_usage.broker_billing import BrokerBillingService
+from app.modules.billing_usage.commercial import (
+    CommercialAllowanceExhausted,
+    CommercialEntitlementService,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -20,6 +25,7 @@ SIGNUP = {
     "email": "ana@horizonte.example.com",
     "password": "senha-forte-horizonte-1",
     "accept_terms": True,
+    "business_type": "agency",
 }
 
 
@@ -85,6 +91,15 @@ def _signup(client: TestClient, **overrides: Any) -> dict[str, Any]:
 
 def _auth(body: dict[str, Any]) -> dict[str, str]:
     return {"Authorization": f"Bearer {body['access_token']}"}
+
+
+def _make_legacy(client: TestClient, body: dict[str, Any]) -> None:
+    """Exercise billing for existing agencies, whose subscriptions predate segments."""
+    with client.app.state.container.database.session_factory() as session:
+        subscription = session.get(TenantCommercialSubscriptionModel, UUID(body["tenant_id"]))
+        assert subscription is not None
+        subscription.commercial_segment = None
+        session.commit()
 
 
 def _available(usage: dict[str, Any], resource: str) -> int:
@@ -199,6 +214,7 @@ def test_agency_subscribes_itself_and_payment_activates_plan(
     fake = FakeAsaasClient()
     monkeypatch.setattr(billing_api, "asaas_client_from_settings", lambda *_: fake)
     body = _signup(client)
+    _make_legacy(client, body)
 
     overview = client.get("/billing", headers=_auth(body)).json()
     assert overview["status"] == "pending"
@@ -268,6 +284,7 @@ def test_trial_plan_cannot_be_assigned_as_regular_plan(signup_enabled: TestClien
 
 
 def _subscribe(client: TestClient, body: dict[str, Any], billing_type: str, key: str):
+    _make_legacy(client, body)
     return client.post(
         "/billing/subscription",
         headers=_auth(body),
@@ -345,6 +362,7 @@ def test_beta_tenant_sees_and_pays_the_beta_price(
     fake = FakeAsaasClient()
     monkeypatch.setattr(billing_api, "asaas_client_from_settings", lambda *_: fake)
     body = _signup(client)
+    _make_legacy(client, body)
     platform = _platform(client)
 
     marked = client.patch(
@@ -419,6 +437,163 @@ def test_pack_is_bought_and_credited_when_paid(
     assert repeat["outcome"] == "pack_already_paid"
 
 
+def test_broker_beta_invoice_covers_base_and_unbilled_usage_once(
+    signup_enabled: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.modules.billing_usage import api as billing_api
+
+    client = signup_enabled
+    fake = FakeAsaasClient()
+    monkeypatch.setattr(billing_api, "asaas_client_from_settings", lambda *_: fake)
+    body = _signup(client, business_type="broker")
+    headers = _auth(body)
+    assert client.get("/billing", headers=headers).json()["plans"] == []
+    blocked = client.post(
+        "/billing/subscription",
+        headers=headers,
+        json={
+            "plan_code": "corretor_beta",
+            "billing_type": "PIX",
+            "idempotency_key": "broker-first-charge",
+            "customer": {
+                "name": "Ana Corretora",
+                "email": "ana@horizonte.example.com",
+                "cpf_cnpj": "12345678909",
+            },
+        },
+    )
+    assert blocked.status_code == 409
+    client.patch(
+        f"/platform/tenants/{body['tenant_id']}/beta",
+        headers=_platform(client),
+        json={"beta_pricing": True},
+    )
+    plans = client.get("/billing", headers=headers).json()["plans"]
+    assert [
+        (plan["code"], plan["monthly_price_cents"], plan["property_searches"]) for plan in plans
+    ] == [("corretor_beta", 5990, 20)]
+    first = client.post(
+        "/billing/subscription",
+        headers=headers,
+        json={
+            "plan_code": "corretor_beta",
+            "billing_type": "PIX",
+            "idempotency_key": "broker-first-charge",
+            "customer": {
+                "name": "Ana Corretora",
+                "email": "ana@horizonte.example.com",
+                "cpf_cnpj": "12345678909",
+            },
+        },
+    )
+    assert first.status_code == 201, first.text
+    assert first.json()["subscription"]["value_cents"] == 5990
+    assert len(fake.created_payments) == 1
+    first_reference = fake.created_payments[0]["externalReference"]
+    assert (
+        _confirm(
+            client,
+            "broker-first-paid",
+            {"id": "pay_pack_1", "externalReference": first_reference},
+        )["outcome"]
+        == "broker_invoice_paid"
+    )
+
+    tenant_id = UUID(body["tenant_id"])
+    with client.app.state.container.database.session_factory() as session:
+        commercial = CommercialEntitlementService(session)
+        for index in range(20):
+            key = f"broker-search-{index}"
+            commercial.reserve(
+                tenant_id,
+                resource="property_search_standard",
+                idempotency_key=key,
+                reference_id=None,
+            )
+            commercial.settle(tenant_id, key)
+        with pytest.raises(CommercialAllowanceExhausted):
+            commercial.reserve(
+                tenant_id,
+                resource="property_search_standard",
+                idempotency_key="broker-search-21",
+                reference_id=None,
+            )
+        for resource in ("ai_attendance", "image_optimization"):
+            key = f"broker-{resource}"
+            commercial.reserve(tenant_id, resource=resource, idempotency_key=key, reference_id=None)
+            commercial.settle(tenant_id, key)
+
+    usage = client.get("/billing", headers=headers).json()
+    assert usage["broker_usage"]["unbilled_cents"] == 540
+    assert usage["packs"] == [{"resource": "image_optimization", "units": 15, "price_cents": 3000}]
+    past = datetime.now(UTC) - timedelta(seconds=1)
+    with client.app.state.container.database.session_factory() as session:
+        session.execute(
+            update(CommercialEntitlementGrantModel)
+            .where(CommercialEntitlementGrantModel.tenant_id == tenant_id)
+            .values(expires_at=past)
+        )
+        session.execute(
+            update(TenantCommercialSubscriptionModel)
+            .where(TenantCommercialSubscriptionModel.tenant_id == tenant_id)
+            .values(cycle_started_at=past - timedelta(days=30), cycle_ends_at=past)
+        )
+        session.commit()
+    with client.app.state.container.database.session_factory() as session:
+        service = BrokerBillingService(session, fake, client.app.state.container.settings)
+        renewal = service.create_renewal_invoice(tenant_id)
+        again = service.create_renewal_invoice(tenant_id)
+        assert renewal is not None and again is not None
+        assert renewal.id == again.id
+        assert renewal.total_cents == 6530
+    assert len(fake.created_payments) == 2
+    with client.app.state.container.database.session_factory() as session:
+        with pytest.raises(CommercialAllowanceExhausted):
+            CommercialEntitlementService(session).reserve(
+                tenant_id,
+                resource="ai_attendance",
+                idempotency_key="broker-before-renewal-payment",
+                reference_id=None,
+            )
+    assert (
+        _confirm(
+            client,
+            "broker-renewal-paid",
+            {
+                "id": "pay_pack_2",
+                "externalReference": fake.created_payments[1]["externalReference"],
+            },
+        )["outcome"]
+        == "broker_invoice_paid"
+    )
+    assert (
+        _available(
+            client.get("/usage/commercial", headers=headers).json(), "property_search_standard"
+        )
+        == 20
+    )
+    order = client.post(
+        "/billing/packs",
+        headers=headers,
+        json={"resource": "image_optimization", "idempotency_key": "broker-photo-pack-1"},
+    )
+    assert order.status_code == 201, order.text
+    assert order.json()["value_cents"] == 3000
+    assert _confirm(
+        client,
+        "broker-pack-paid",
+        {"id": "pay_pack_3", "externalReference": f"immobia:pack:{order.json()['id']}"},
+    )["outcome"] == "pack_granted"
+    with client.app.state.container.database.session_factory() as session:
+        commercial = CommercialEntitlementService(session)
+        for index in range(16):
+            key = f"broker-paid-pack-image-{index}"
+            commercial.reserve(
+                tenant_id, resource="image_optimization", idempotency_key=key, reference_id=None
+            )
+            event = commercial.settle(tenant_id, key)
+            assert event.within_allowance is (index < 15)
+    assert client.get("/billing", headers=headers).json()["broker_usage"]["unbilled_cents"] == 250
 def test_internal_test_account_is_unlimited_and_offered_only_the_test_plan(
     signup_enabled: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
