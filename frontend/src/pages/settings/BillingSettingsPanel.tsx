@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Copy, CreditCard, ExternalLink, Image, Loader2, MessageSquare, QrCode, RefreshCw, Search } from "lucide-react";
-import { request } from "../../api/client";
+import { ApiError, request } from "../../api/client";
 import type { BillingOverview, BillingPlan, PackOffer, PackOrder, PixCharge } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { getTokenClaims } from "../../auth/tokenClaims";
@@ -10,6 +10,7 @@ import { BILLING_CHANGED_EVENT } from "../../components/TrialBanner";
 import { formatDocument, formatNumber } from "../../lib/format";
 
 const POLL_INTERVAL_MS = 5000;
+const PIX_RETRY_DELAYS_MS = [1000, 2000, 3000, 5000, 8000];
 const awaitingPayment = new Set(["creating", "pending_payment", "past_due"]);
 
 const subscriptionStatusLabels: Record<string, string> = {
@@ -433,14 +434,37 @@ function PixPayment({
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
+    let retryTimer: number | undefined;
+    let retries = 0;
     setFailed(false);
-    request<PixCharge>(endpoint, {}, token)
-      .then((value) => {
-        setPix(value);
-        setError(null);
-      })
-      // The payment provider's own message is technical; the way out is what matters here.
-      .catch(() => setFailed(true));
+    setPix(null);
+
+    function loadPix() {
+      request<PixCharge>(endpoint, {}, token)
+        .then((value) => {
+          if (cancelled) return;
+          setPix(value);
+          setError(null);
+        })
+        .catch((reason: unknown) => {
+          if (cancelled) return;
+          const retryable = !(reason instanceof ApiError) || [404, 429, 502, 503, 504].includes(reason.status);
+          const delay = PIX_RETRY_DELAYS_MS[retries];
+          if (retryable && delay !== undefined) {
+            retries += 1;
+            retryTimer = window.setTimeout(loadPix, delay);
+          } else {
+            setFailed(true);
+          }
+        });
+    }
+
+    loadPix();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(retryTimer);
+    };
   }, [token, attempt, endpoint]);
 
   async function copy() {
@@ -473,7 +497,7 @@ function PixPayment({
       </div>
     );
   }
-  if (!pix) return <div className="empty-state" aria-live="polite"><Loader2 className="spin" size={16} /> Gerando QR Code do PIX...</div>;
+  if (!pix) return <div className="empty-state" aria-live="polite"><Loader2 className="spin" size={16} /> Preparando QR Code do PIX. Isso pode levar alguns segundos...</div>;
 
   return (
     <div className="pix-payment">
