@@ -66,13 +66,15 @@ Se mudar o domínio do `web`, atualize `APP_PUBLIC_URL` e `BACKEND_PUBLIC_URL` e
 O serviço `backup` grava diariamente `db-*.dump` e, enquanto `BACKUP_MEDIA_ARCHIVE=true`,
 `media-*.tar.gz` no volume local. Os arquivos só recebem o nome final depois de completos.
 
-O serviço separado definido em `docker-compose.backup.prod.yml` envia os dumps para
+O serviço opcional definido em `docker-compose.backup.prod.yml` envia os dumps para
 `database/` e sincroniza somente as mídias novas ou alteradas em `media/` a cada hora. Ele monta
-os três volumes da aplicação somente para leitura. Configure nele o bucket, a região, os nomes
-reais dos volumes e uma chave AWS com acesso apenas ao bucket de backup, usando
-`deploy/.env.backup.example` como lista de variáveis. Nunca coloque essa chave no `.env` da
-aplicação. A chave precisa de `s3:ListBucket` no bucket e `s3:PutObject`/`s3:GetObject` nos
-objetos. Ative a retenção dos dumps no bucket e bloqueie todo acesso público.
+os três volumes da aplicação somente para leitura. Antes de ativá-lo, escolha uma conta de
+armazenamento exclusiva para o ImmobIA. Configure nele o bucket, a região, os nomes reais dos
+volumes e credenciais limitadas ao destino, usando `deploy/.env.backup.example` como lista de
+variáveis. Nunca coloque essas credenciais no `.env` da aplicação. Para S3, são necessários
+`s3:ListBucket` no bucket e `s3:PutObject`/`s3:GetObject` nos objetos. Ative a retenção dos
+dumps e bloqueie todo acesso público. Esse serviço opcional não está implantado; o backup atual
+permanece somente no VPS.
 
 Para conferir uma cópia externa, baixe um dump e execute `pg_restore --list <arquivo>`.
 Para uma recuperação completa, restaure o dump com `pg_restore --clean --if-exists` em um banco

@@ -96,9 +96,10 @@ o commit em **Decisão**.
 - **Depois:** guardar as fotos dos imóveis no mesmo armazenamento. O sistema já suporta isso
   (`PROPERTY_STORAGE_BACKEND=s3`).
 - **Quando:** antes dos primeiros 20 a 30 clientes.
-- **Decisão (11/10/2026):** armazenamento externo privado e rotina de sincronização incremental
-  preparados. A ativação depende de uma credencial de acesso restrita ao bucket e de uma
-  restauração de teste. Os arquivos locais continuam ativos até a validação.
+- **Decisão (11/10/2026):** o backup diário local já roda em contêiner separado no mesmo VPS.
+  Uma rotina de sincronização para um destino externo foi preparada, mas nenhum destino está
+  ativo. A conta de armazenamento inicialmente considerada foi retirada do escopo. Falta escolher
+  um destino fora do VPS e fazer uma restauração de teste.
 
 ### B-005 · Kanban de leads
 
