@@ -14,6 +14,13 @@ services:
       - backups:/backups:ro
       - property_media:/data/property-images:ro
       - conversation_media:/data/conversation-media:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
 volumes:
