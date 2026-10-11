@@ -118,8 +118,8 @@ o commit em **Decisão**.
   a equipe já tem. A execução das correções é feita pela equipe.
 - **Decisão (11/10/2026):** revisão iniciada após o deploy da oferta beta. Portas públicas de
   bancos de apoio foram fechadas, credenciais expostas foram trocadas, o webhook de cobrança foi
-  atualizado e os painéis ganharam cabeçalhos de proteção. Faltam validação em produção dessa
-  última mudança e recomendações operacionais internas.
+  atualizado e os painéis ganharam cabeçalhos de proteção, validados em produção. As recomendações
+  operacionais restantes estão no documento interno de estado atual.
 
 ### B-007 · Diferenciar os planos por recurso, não só pela franquia
 
