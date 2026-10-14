@@ -45,9 +45,9 @@ class CaptureJobProcessor:
             )
         if job is None:
             return None
-        self._start_billing(job)
         connector = None
         try:
+            self._start_billing(job)
             with self.container.database.session_factory() as session:
                 repository = FederatedSearchRepository(session)
                 run = repository.get_run(job.tenant_id, job.search_run_id)

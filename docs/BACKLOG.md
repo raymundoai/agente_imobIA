@@ -41,6 +41,11 @@ o commit em **Decisão**.
 | B-009 | Imposto real na precificação | Correção | Equipe | Alta | Novo |
 | B-010 | Testar o agente em conversas fora do escopo | Correção | Equipe | Alta | Aprovado |
 | B-011 | Endereço com CEP no cadastro e estudo de exclusividade territorial | Melhoria | Equipe | A definir | Novo |
+| B-012 | Ajuda sem cobrir ações da tela | Melhoria | Equipe | Média | Em validação |
+| B-013 | Evitar repetir busca vazia na carteira | Correção | Equipe | Alta | Em validação |
+| B-014 | Transferir à equipe quando o agente prometer fazê-lo | Correção | Equipe | Alta | Em validação |
+| B-015 | Registrar quartos no campo da demanda | Correção | Equipe | Média | Em validação |
+| B-016 | Busca externa sem progresso visível | Correção | Equipe | Alta | Em validação |
 
 ## Itens
 
@@ -271,4 +276,56 @@ o commit em **Decisão**.
   sobrepostas, mudança de endereço e contas já existentes, além das condições comerciais.
   Cadastrar o endereço não concede exclusividade automaticamente.
 - **Decisão:** —
+
+### B-012 · Ajuda sem cobrir ações da tela
+
+- **Tipo:** Melhoria · **Origem:** Equipe · **Registrado em:** 13/10/2026
+- **Prioridade:** Média · **Status:** Em validação
+- **Descrição:** a casinha de ajuda pode cobrir o botão de enviar. Permitir fechá-la e acessá-la
+  pelo botão Dúvidas na barra lateral.
+- **Andamento:** botão Dúvidas e recolhimento da ajuda implementados; falta teste visual em produção.
+- **Decisão (14/10/2026):** manter a ajuda acessível na barra lateral quando for recolhida.
+
+### B-013 · Evitar repetir busca vazia na carteira
+
+- **Tipo:** Correção · **Origem:** Equipe · **Registrado em:** 13/10/2026
+- **Prioridade:** Alta · **Status:** Em validação
+- **Descrição:** quando a carteira não contém imóvel para os critérios do lead, o agente repete
+  a busca e o aviso em respostas seguintes. Guardar esse resultado no contexto da conversa e
+  consultar novamente apenas se os critérios mudarem ou após um prazo.
+- **Andamento:** memória de 24 horas implementada; falta validar em conversa real.
+- **Decisão (14/10/2026):** guardar o resultado da busca vazia por 24 horas, ligado aos critérios.
+
+### B-014 · Transferir à equipe quando o agente prometer fazê-lo
+
+- **Tipo:** Correção · **Origem:** Equipe · **Registrado em:** 13/10/2026
+- **Prioridade:** Alta · **Status:** Em validação
+- **Descrição:** o agente disse que acionaria o corretor, mas a conversa permaneceu com a IA.
+  A promessa de transferência deve colocar o atendimento no modo humano.
+- **Andamento:** troca para atendimento humano implementada; falta validar em conversa real.
+- **Decisão (14/10/2026):** a promessa de acionar a equipe deve transferir a conversa.
+
+### B-015 · Registrar quartos no campo da demanda
+
+- **Tipo:** Correção · **Origem:** Equipe · **Registrado em:** 13/10/2026
+- **Prioridade:** Média · **Status:** Em validação
+- **Descrição:** a quantidade de quartos informada pelo lead foi parar nas observações da
+  demanda, em vez do campo usado pela busca.
+- **Andamento:** extração dos quartos implementada; falta validar em conversa real. A demanda
+  já criada precisa de correção manual no painel.
+- **Decisão (14/10/2026):** guardar quartos no campo estruturado usado pela busca.
+
+### B-016 · Busca externa sem progresso visível
+
+- **Tipo:** Correção · **Origem:** Equipe · **Registrado em:** 13/10/2026
+- **Prioridade:** Alta · **Status:** Em validação
+- **Descrição:** uma busca iniciada a partir da demanda permaneceu em execução sem avançar.
+  Identificar a causa na execução real e garantir estado final ou aviso claro ao usuário.
+- **Andamento (14/10/2026):** o print de 13/10 mostra 0/10 portais consultados e todos na fila
+  cerca de 45 minutos após iniciar. Prints dos logs mostram que o worker falha ao reivindicar
+  a busca porque o modelo de usuário não foi carregado no processo. Correção e teste em
+  processo isolado implementados; o reteste real ainda falta. O aviso de demora e o
+  encerramento de tarefas abandonadas também foram implementados.
+- **Decisão (14/10/2026):** carregar os modelos exigidos pelo worker antes de pegar a busca;
+  mostrar demora ao usuário e encerrar tarefas cujo processamento foi abandonado.
 

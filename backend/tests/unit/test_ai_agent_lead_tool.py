@@ -147,9 +147,10 @@ def test_ai_agent_create_or_update_lead_tool_uses_port() -> None:
     )
     qualifier = FakeLeadQualification()
 
+    conversations = FakeConversations(conversation, inbound)
     result = GenerateAiReplyUseCase(
         FakeTenants(tenant),
-        FakeConversations(conversation, inbound),
+        conversations,
         FakeAi(),
         EmptyKnowledge(),
         FakeAudit(),
@@ -164,6 +165,83 @@ def test_ai_agent_create_or_update_lead_tool_uses_port() -> None:
     assert qualifier.payloads[0][2] == conversation.id
     assert qualifier.payloads[0][3] == "lead pronto para corretor"
     assert result.tools_called[0]["name"] == "create_or_update_lead"
+    assert conversation.mode.value == "human"
+
+
+def test_bedrooms_in_notes_are_moved_to_the_search_field() -> None:
+    tenant = Tenant(name="Tenant", slug="tenant-a")
+    conversation = Conversation(tenant_id=tenant.id, phone="5511999999999")
+    inbound = Message(
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        direction=MessageDirection.INBOUND,
+        author_type=MessageAuthor.CUSTOMER,
+        text="Quero dois quartos e varanda",
+    )
+    ai = FakeAi()
+    original = ai.chat_completion
+
+    def chat_completion(**kwargs):
+        response = original(**kwargs)
+        for call in response.tool_calls or []:
+            call.arguments["bedrooms"] = None
+            call.arguments["notes"] = "2 quartos, varanda"
+            call.arguments["handoff_reason"] = None
+        return response
+
+    ai.chat_completion = chat_completion
+    qualifier = FakeLeadQualification()
+    GenerateAiReplyUseCase(
+        FakeTenants(tenant),
+        FakeConversations(conversation, inbound),
+        ai,
+        EmptyKnowledge(),
+        FakeAudit(),
+        EmptyCredentials(),
+        EmptyChannel(),
+        InMemoryEventBus(),
+        qualifier,
+    ).execute(tenant.id, conversation.id)
+
+    assert qualifier.payloads[0][1]["bedrooms"] == 2
+    assert qualifier.payloads[0][1]["notes"] == "varanda"
+
+
+class PromiseHandoffAi(AiProviderPort):
+    def get_embedding(self, text: str) -> list[float]:
+        return [1.0] * 1536
+
+    def chat_completion(self, *, system_prompt, messages, tools):
+        return AiProviderResponse(
+            text="Vou acionar um corretor da equipe para seguir com as melhores opções.",
+            model="fake",
+            tokens_used=10,
+        )
+
+
+def test_promised_handoff_changes_conversation_to_human_mode() -> None:
+    tenant = Tenant(name="Tenant", slug="tenant-a")
+    conversation = Conversation(tenant_id=tenant.id, phone="5511999999999")
+    inbound = Message(
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        direction=MessageDirection.INBOUND,
+        author_type=MessageAuthor.CUSTOMER,
+        text="Pode chamar o corretor?",
+    )
+    result = GenerateAiReplyUseCase(
+        FakeTenants(tenant),
+        FakeConversations(conversation, inbound),
+        PromiseHandoffAi(),
+        EmptyKnowledge(),
+        FakeAudit(),
+        EmptyCredentials(),
+        EmptyChannel(),
+        InMemoryEventBus(),
+    ).execute(tenant.id, conversation.id)
+
+    assert result.handoff_reason == "transfer_promised"
+    assert conversation.mode.value == "human"
 
 
 class PropertySearchAi(AiProviderPort):
@@ -261,6 +339,89 @@ def test_lead_agent_uses_configured_prompt_and_searches_real_properties() -> Non
     assert "portal.example" not in str(ai.messages)
     assert "Imobiliária Teste" in ai.system_prompt
     assert "Consultora Ana" in ai.system_prompt
+
+
+class EmptyPropertySearchAi(PropertySearchAi):
+    def chat_completion(self, *, system_prompt, messages, tools):
+        self.calls += 1
+        self.system_prompt = system_prompt
+        if self.calls % 2:
+            return AiProviderResponse(
+                text="",
+                model="fake",
+                tokens_used=5,
+                tool_calls=[
+                    AiToolCall(
+                        name="search_properties",
+                        arguments={
+                            "city": "São Paulo",
+                            "purpose": "buy",
+                            "property_type": "apartamento",
+                            "neighborhoods": ["Pinheiros"],
+                            "price_min": None,
+                            "price_max": 800000,
+                            "bedrooms": 2,
+                            "parking_spaces": None,
+                        },
+                    )
+                ],
+            )
+        return AiProviderResponse(
+            text="Vou procurar outras alternativas.", model="fake", tokens_used=7
+        )
+
+
+class EmptyProperties:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def search_by_filters(self, tenant_id, **filters):
+        self.calls += 1
+        return []
+
+
+def test_inventory_miss_is_remembered_in_the_conversation() -> None:
+    tenant = Tenant(name="Tenant", slug="tenant-a")
+    conversation = Conversation(tenant_id=tenant.id, phone="5511999999999")
+    inbound = Message(
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        direction=MessageDirection.INBOUND,
+        author_type=MessageAuthor.CUSTOMER,
+        text="Apartamento em Pinheiros até 800 mil",
+    )
+    conversations = FakeConversations(conversation, inbound)
+    audit = FakeAudit()
+    ai = EmptyPropertySearchAi()
+    properties = EmptyProperties()
+    use_case = GenerateAiReplyUseCase(
+        FakeTenants(tenant),
+        conversations,
+        ai,
+        EmptyKnowledge(),
+        audit,
+        EmptyCredentials(),
+        EmptyChannel(),
+        InMemoryEventBus(),
+        properties=properties,
+    )
+
+    first = use_case.execute(tenant.id, conversation.id)
+    conversations.messages.append(
+        Message(
+            tenant_id=tenant.id,
+            conversation_id=conversation.id,
+            direction=MessageDirection.INBOUND,
+            author_type=MessageAuthor.CUSTOMER,
+            text="E agora?",
+        )
+    )
+    second = use_case.execute(tenant.id, conversation.id)
+
+    assert first.tools_called[0]["result_status"] == "not_found"
+    assert second.tools_called[0]["result_status"] == "not_found_recently"
+    assert properties.calls == 1
+    assert '"last_inventory_search"' in ai.system_prompt
 
 
 def test_history_keeps_roles_and_media_context() -> None:

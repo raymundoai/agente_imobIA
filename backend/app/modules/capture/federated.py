@@ -454,6 +454,7 @@ class FederatedSearchRepository:
 
     def claim_next(self, lease_seconds: int, worker_id: str) -> CaptureJobSnapshot | None:
         now = datetime.now(UTC)
+        expired_runs: set[tuple[UUID, UUID]] = set()
         expired = list(
             self.session.scalars(
                 select(CaptureJobModel)
@@ -475,6 +476,14 @@ class FederatedSearchRepository:
                 source.status = "failed" if exhausted else "queued"
                 source.error_code = "lease_expired"
                 source.error = job.last_error
+                source.completed_at = now if exhausted else None
+                source.updated_at = now
+            expired_runs.add((job.tenant_id, job.search_run_id))
+
+        if expired_runs:
+            self.session.flush()
+            for tenant_id, run_id in expired_runs:
+                self._refresh_run(tenant_id, run_id, now)
 
         job = self.session.scalar(
             select(CaptureJobModel)

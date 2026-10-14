@@ -185,3 +185,44 @@ def test_federated_run_persists_parent_before_jobs_and_aggregates_results(
         session.commit()
         assert repository.find_reusable_run(tenant_id, demand, ["test_source"]) is None
     engine.dispose()
+
+
+def test_exhausted_capture_lease_finishes_the_search_run(migrated_database: str) -> None:
+    tenant_id = uuid4()
+    engine = create_engine(migrated_database)
+    with Session(engine, autoflush=False, expire_on_commit=False) as session:
+        session.add(
+            TenantModel(
+                id=tenant_id,
+                name="Imobiliária Teste",
+                slug="capture-lease-test",
+                status="active",
+                settings={},
+            )
+        )
+        session.commit()
+        demand = SqlAlchemyLeadDemandRepository(session).create(
+            tenant_id,
+            LeadDemand(
+                tenant_id=tenant_id,
+                lead_name="Teste",
+                phone="5551999999999",
+                purpose=LeadPurpose.BUY,
+                city="São Paulo",
+            ),
+        )
+        repository = FederatedSearchRepository(session)
+        run = repository.create_run(tenant_id, demand, ["test_source"], max_attempts=1)
+        job = repository.claim_next(lease_seconds=60, worker_id="integration-test")
+        assert job is not None
+        persisted_job = session.get(CaptureJobModel, job.id)
+        persisted_job.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        session.commit()
+
+        assert repository.claim_next(lease_seconds=60, worker_id="integration-test") is None
+        refreshed = repository.get_run(tenant_id, run.id)
+        assert refreshed is not None
+        assert refreshed.status == "failed"
+        assert refreshed.completed_source_count == 1
+        assert repository.list_run_sources(tenant_id, run.id)[0].status == "failed"
+    engine.dispose()

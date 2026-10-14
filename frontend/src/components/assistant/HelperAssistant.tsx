@@ -2,6 +2,7 @@ import { ArrowLeft, BookOpen, Search, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { ARTICLES, type Article, type HelpContext, SCREENS, type TourStep } from "../../help/content";
 import { openAppLink, pageFromPath, ROUTE_CHANGED_EVENT } from "../../lib/appNavigation";
+import { HELP_DOCKED_EVENT, HELP_DOCKED_KEY, HELP_OPEN_EVENT, isHelpDocked } from "../../lib/helpAssistant";
 import { openFeedback } from "../FeedbackModal";
 import { Modal } from "../Modal";
 import { Mascot } from "./Mascot";
@@ -46,10 +47,17 @@ export function HelperAssistant() {
   const [context, setContext] = useState<HelpContext>(() => currentContext());
   const [bubble, setBubble] = useState(false);
   const [panel, setPanel] = useState(false);
+  const [docked, setDocked] = useState(isHelpDocked);
   const [autoTips, setAutoTips] = useState(readAuto);
   const [tour, setTour] = useState<TourStep[] | null>(null);
   const [helpOpen, setHelpOpen] = useState<{ article?: string } | null>(null);
   const screen = SCREENS[context];
+
+  useEffect(() => {
+    const open = () => { setPanel(true); setBubble(false); };
+    window.addEventListener(HELP_OPEN_EVENT, open);
+    return () => window.removeEventListener(HELP_OPEN_EVENT, open);
+  }, []);
 
   useEffect(() => {
     const sync = () => setContext(currentContext());
@@ -64,13 +72,21 @@ export function HelperAssistant() {
   // Speak up once per screen, a moment after it opens, unless the person turned tips off.
   useEffect(() => {
     setBubble(false);
-    if (!autoTips || readSeen().includes(context)) return undefined;
+    if (docked || !autoTips || readSeen().includes(context)) return undefined;
     const handle = window.setTimeout(() => {
       setBubble(true);
       writeSeen([...readSeen(), context]);
     }, 1400);
     return () => window.clearTimeout(handle);
-  }, [context, autoTips]);
+  }, [context, autoTips, docked]);
+
+  function dock() {
+    setBubble(false);
+    setPanel(false);
+    setDocked(true);
+    try { window.localStorage.setItem(HELP_DOCKED_KEY, "true"); } catch { /* visit only */ }
+    window.dispatchEvent(new Event(HELP_DOCKED_EVENT));
+  }
 
   function toggleAuto(next: boolean) {
     setAutoTips(next);
@@ -92,10 +108,10 @@ export function HelperAssistant() {
 
   return (
     <>
-      <div className="assistant">
+      <div className={docked ? "assistant assistant-docked" : "assistant"}>
         {bubble && !panel ? (
           <div className="assistant-bubble" role="status">
-            <button aria-label="Fechar dica" className="assistant-bubble-close" onClick={() => setBubble(false)} type="button">
+            <button aria-label="Fechar dica e mover ajuda para o menu" className="assistant-bubble-close" onClick={dock} type="button">
               <X size={14} />
             </button>
             <p>{screen.tip}</p>
@@ -145,7 +161,18 @@ export function HelperAssistant() {
           </section>
         ) : null}
 
-        <button
+        {!docked ? (
+          <button
+            aria-label="Mover ajuda para Dúvidas no menu"
+            className="assistant-dock-button"
+            onClick={dock}
+            title="Mover para Dúvidas"
+            type="button"
+          >
+            <X size={12} />
+          </button>
+        ) : null}
+        {!docked ? <button
           aria-expanded={panel}
           aria-label="Abrir ajuda"
           className="assistant-button"
@@ -153,7 +180,7 @@ export function HelperAssistant() {
           type="button"
         >
           <Mascot alert={bubble} />
-        </button>
+        </button> : null}
       </div>
 
       {tour ? <Tour onClose={() => setTour(null)} steps={tour} /> : null}

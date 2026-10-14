@@ -134,6 +134,12 @@ export function PropertySearchPage() {
   const [compatibilityFilter, setCompatibilityFilter] = useState<CompatibilityFilter>("all");
   const [resultDisplayLimit, setResultDisplayLimit] = useState(resultPageSize);
   const [captureForm, setCaptureForm] = useState({ source: "olx", source_url: "", title: "", price: "", neighborhood: "" });
+  const [clockNow, setClockNow] = useState(Date.now);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setClockNow(Date.now()), 15000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const hydrateRunResults = useCallback(async (run: FederatedSearchRun) => {
     if (run.result_count <= run.results.length && !run.results_has_more) return run;
@@ -521,6 +527,10 @@ export function PropertySearchPage() {
   const searchInProgress = visibleSearchRuns.some(
     (run) => !terminalSearchStatuses.has(run.status),
   );
+  const stalledSearch = visibleSearchRuns.some((run) => (
+    !terminalSearchStatuses.has(run.status)
+    && clockNow - Date.parse(run.updated_at) > 180000
+  ));
   const standardSearchFinished = Boolean(
     standardSearchRun && ["partial", "completed"].includes(standardSearchRun.status),
   );
@@ -704,6 +714,12 @@ export function PropertySearchPage() {
                       </button>
                     ) : null}
                   </div>
+                  {stalledSearch ? (
+                    <p className="search-stall-warning" role="status">
+                      A busca está sem progresso há mais de 3 minutos. Você pode cancelar e tentar
+                      novamente. Se continuar assim, informe o suporte.
+                    </p>
+                  ) : null}
                 </div>
               </section>
 

@@ -5,6 +5,10 @@ import threading
 from app.config import get_settings
 from app.container import Container
 from app.modules.capture.processor import CaptureJobProcessor
+from app.modules.contacts import models as contact_models  # noqa: F401
+from app.modules.conversations.adapters import models as conversation_models  # noqa: F401
+from app.modules.properties.adapters import models as property_models  # noqa: F401
+from app.modules.users.adapters import models as user_models  # noqa: F401
 
 
 def main() -> None:

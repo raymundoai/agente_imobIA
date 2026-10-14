@@ -219,6 +219,7 @@ export type FederatedSearchRun = {
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
+  updated_at: string;
   cache_hit: boolean;
   cache_expires_at: string | null;
   requested_by_user_id: string | null;

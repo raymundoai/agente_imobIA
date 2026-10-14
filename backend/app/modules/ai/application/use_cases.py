@@ -2,6 +2,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID, uuid4, uuid5
@@ -247,6 +248,7 @@ class GenerateAiReplyUseCase:
         chat_options = runtime.chat_options() if runtime else None
         chat_extra: dict[str, Any] = {"options": chat_options} if chat_options else {}
         history = self._conversations.list_messages(tenant_id, conversation_id)[-25:]
+        conversation_context = self._conversation_context(tenant_id, conversation)
         user_text = input_text or next(
             (message.text for message in reversed(history) if message.direction.value == "inbound"),
             "",
@@ -284,7 +286,7 @@ class GenerateAiReplyUseCase:
                 agent_key,
                 agent_settings,
                 chunks,
-                self._conversation_context(tenant_id, conversation),
+                conversation_context,
                 runtime,
             ),
             messages=self._messages_from_history(history),
@@ -312,11 +314,26 @@ class GenerateAiReplyUseCase:
                     if side_effect_guard is not None:
                         side_effect_guard()
                     output = self._execute_tool(
-                        call.name, call.arguments, tenant_id, conversation_id
+                        call.name,
+                        call.arguments,
+                        tenant_id,
+                        conversation_id,
+                        last_inventory_search=conversation_context.get("last_inventory_search"),
                     )
-                    tools_called.append({"name": call.name, "arguments": call.arguments})
+                    called = {"name": call.name, "arguments": call.arguments}
+                    if call.name == "search_properties":
+                        called["result_status"] = output.get("status")
+                        conversation_context["last_inventory_search"] = {
+                            "filters": _inventory_filters(call.arguments),
+                            "status": output.get("status"),
+                        }
+                    tools_called.append(called)
                     if call.name == "request_human_handoff":
                         handoff_reason = str(call.arguments.get("reason") or "ai_requested")
+                    elif call.name == "create_or_update_lead" and call.arguments.get(
+                        "handoff_reason"
+                    ):
+                        handoff_reason = str(call.arguments["handoff_reason"])
                     tool_outputs.append(
                         {
                             "role": "tool",
@@ -342,7 +359,7 @@ class GenerateAiReplyUseCase:
                     agent_key,
                     agent_settings,
                     chunks,
-                    self._conversation_context(tenant_id, conversation),
+                    conversation_context,
                     runtime,
                 )
                 + retry_instruction,
@@ -363,6 +380,8 @@ class GenerateAiReplyUseCase:
             final_text = TECHNICAL_FALLBACK_MESSAGE
             handoff_reason = handoff_reason or "technical_response_failure"
             response_error = "ai_response_empty_after_retries"
+        if handoff_reason is None and _promises_human_handoff(final_text, agent_settings):
+            handoff_reason = "transfer_promised"
         response_parts = split_ai_response(final_text)
         response_text = "\n\n".join(response_parts)
         base_message_id = outbound_message_id or uuid4()
@@ -467,14 +486,31 @@ class GenerateAiReplyUseCase:
         given_digits = re.sub(r"\D", "", given)
         known_digits = re.sub(r"\D", "", conversation.phone)
         result = {**arguments, "phone": conversation.phone}
+        notes = str(result.get("notes") or "").strip()
+        bedroom_match = re.search(
+            r"\b(?:pelo menos\s+|ao menos\s+|m[ií]nimo(?: de)?\s+)?"
+            r"(\d+)\s+(?:quartos?|dormit[oó]rios?)\b",
+            notes,
+            flags=re.IGNORECASE,
+        )
+        if bedroom_match:
+            if result.get("bedrooms") is None:
+                result["bedrooms"] = int(bedroom_match.group(1))
+            notes = (notes[: bedroom_match.start()] + notes[bedroom_match.end() :]).strip(" ,;.-\n")
+            result["notes"] = notes or None
         if given_digits and not known_digits.endswith(given_digits[-8:]):
             extra = f"Outro telefone informado pelo lead: {given}"
-            notes = str(arguments.get("notes") or "").strip()
             result["notes"] = f"{notes}\n{extra}" if notes else extra
         return result
 
     def _execute_tool(
-        self, name: str, arguments: dict[str, Any], tenant_id: UUID, conversation_id: UUID
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        tenant_id: UUID,
+        conversation_id: UUID,
+        *,
+        last_inventory_search: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if name == "search_knowledge_base":
             query = str(arguments.get("query") or "")
@@ -500,6 +536,12 @@ class GenerateAiReplyUseCase:
                 "crm_deal_id": lead.crm_deal_id,
             }
         if name == "search_properties":
+            if (
+                last_inventory_search
+                and last_inventory_search.get("status") in {"not_found", "not_found_recently"}
+                and last_inventory_search.get("filters") == _inventory_filters(arguments)
+            ):
+                return {"status": "not_found_recently", "properties": []}
             if self._properties is None:
                 return {"status": "unavailable", "properties": []}
             properties = self._properties.search_by_filters(
@@ -672,6 +714,17 @@ class GenerateAiReplyUseCase:
                     "notes": demand.notes,
                     "status": demand.status.value,
                 }
+        cutoff = datetime.now(UTC) - timedelta(hours=24)
+        for audit in reversed(self._audit_logs.list_for_conversation(tenant_id, conversation.id)):
+            if audit.created_at < cutoff:
+                break
+            for call in reversed(audit.tools_called):
+                if call.get("name") == "search_properties" and call.get("result_status"):
+                    context["last_inventory_search"] = {
+                        "filters": _inventory_filters(call.get("arguments") or {}),
+                        "status": call["result_status"],
+                    }
+                    return context
         return context
 
     @staticmethod
@@ -726,6 +779,11 @@ class GenerateAiReplyUseCase:
         return (
             f"{_agent_identity(agent_settings, profile)} "
             f"{base_prompt}\n\n"
+            "Regras operacionais: quartos ficam em bedrooms, não em notes. "
+            "Se last_inventory_search registrar not_found ou not_found_recently para os mesmos "
+            "critérios, "
+            "não repita a busca nem o aviso de carteira vazia. "
+            "Antes de prometer acionar corretor ou equipe, chame request_human_handoff.\n\n"
             f"{extra}"
             f"Perfil da empresa:\n{structured_profile}\n\n"
             f"Configuração deste agente:\n{structured_agent}\n\n"
@@ -853,6 +911,44 @@ class GenerateAiReplyUseCase:
         ]
 
 
+def _inventory_filters(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Keep only search criteria in a stable form for conversation memory."""
+
+    def normalized(value: Any) -> str | None:
+        return " ".join(str(value).casefold().split()) if value not in (None, "") else None
+
+    def price(value: Any) -> str | None:
+        amount = _decimal(value)
+        return format(amount.normalize(), "f") if amount is not None else None
+
+    return {
+        "city": normalized(arguments.get("city")),
+        "purpose": normalized(arguments.get("purpose")),
+        "property_type": normalized(arguments.get("property_type")),
+        "neighborhoods": sorted(
+            value for item in arguments.get("neighborhoods") or [] if (value := normalized(item))
+        ),
+        "price_min": price(arguments.get("price_min")),
+        "price_max": price(arguments.get("price_max")),
+        "bedrooms": _integer(arguments.get("bedrooms")),
+        "parking_spaces": _integer(arguments.get("parking_spaces")),
+    }
+
+
+def _promises_human_handoff(text: str, agent_settings: dict[str, Any]) -> bool:
+    transfer_message = str(agent_settings.get("transfer_message") or "").strip()
+    if transfer_message and transfer_message.casefold() in text.casefold():
+        return True
+    return bool(
+        re.search(
+            r"\b(?:vou|irei|estou)\s+(?:acionar|chamar|encaminhar|passar|pedir)"
+            r"[^.!?]{0,100}\b(?:corretor|equipe|atendente|humano)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def split_ai_response(text: str, *, max_parts: int = 5, target_chars: int = 500) -> list[str]:
     cleaned = str(text or "").strip().replace("**", "")
     cleaned = re.sub(r"\s*;\s*", ". ", cleaned)
@@ -929,16 +1025,20 @@ DEFAULT_BASE_PROMPT = (
     "faixa de valor, quartos, vagas e urgência. Não repita perguntas já respondidas. "
     "O telefone do lead já é conhecido pelo canal da conversa: não peça o número. "
     "Registre valores exatamente como o lead informou, sem ajustar ou arredondar. "
+    "Preencha quartos em bedrooms e vagas em parking_spaces, sem repeti-los em notes. "
     "Em notes, guarde só preferências do lead que ajudem na busca, nunca descrições "
     "de imagens, áudios ou resumos do atendimento. "
     "Quando houver critérios suficientes, salve a demanda com create_or_update_lead e "
     "busque imóveis com search_properties. Essa ferramenta contém somente a carteira "
     "própria autorizada para oferta. Nunca mencione portal, captação, anunciante ou URL "
     "de origem. Nunca invente imóveis ou dados ausentes. "
-    "Se não houver resultado, explique isso e informe que a equipe poderá iniciar uma "
-    "busca externa. Não negocie valores, não dê orientação jurídica conclusiva e peça "
+    "Se não houver resultado, explique uma vez e informe que a equipe poderá iniciar uma "
+    "busca externa. Consulte last_inventory_search: para os mesmos critérios sem resultado, "
+    "não repita a busca nem o aviso; avance a conversa. Não negocie valores, não dê "
+    "orientação jurídica conclusiva e peça "
     "handoff quando a autonomia for insuficiente ou o lead pedir uma pessoa. "
     "Respeite integralmente handoff_rules e restrictions da configuração. Ao transferir, "
+    "chame request_human_handoff antes de dizer que vai acionar a equipe; "
     "use a transfer_message configurada, adaptando apenas o mínimo necessário ao contexto. "
     "Faça uma pergunta por vez. Escreva como uma conversa de WhatsApp: frases curtas, "
     "linguagem simples e sem tabelas ou títulos. Obedeça ao tom de voz e à quantidade "

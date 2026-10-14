@@ -165,6 +165,7 @@ class SearchRunResponse(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     created_at: datetime
+    updated_at: datetime
     cache_hit: bool = False
     cache_expires_at: datetime | None = None
     requested_by_user_id: UUID | None = None
@@ -787,6 +788,7 @@ def _search_run_response(
         started_at=run.started_at,
         completed_at=run.completed_at,
         created_at=run.created_at,
+        updated_at=run.updated_at,
         cache_hit=cache_hit,
         cache_expires_at=run.cache_expires_at,
         requested_by_user_id=run.requested_by_user_id,

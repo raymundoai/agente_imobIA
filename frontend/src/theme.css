@@ -1818,6 +1818,11 @@ label .optional { font-weight: 400; }
 
 .assistant-button:hover { transform: translateY(-2px); }
 .assistant-button:focus-visible { box-shadow: var(--ring), var(--shadow-md); outline: none; }
+.assistant-docked { bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+.assistant-dock-button { align-items: center; background: var(--card); border: 1px solid var(--border); border-radius: 50%; box-shadow: var(--shadow-sm); color: var(--foreground); cursor: pointer; display: flex; height: 21px; justify-content: center; padding: 0; position: absolute; right: -5px; bottom: 43px; width: 21px; }
+.assistant-docked:empty { display: none; }
+.nav-help-button { border: 0; cursor: pointer; font-family: inherit; }
+.search-stall-warning { background: color-mix(in srgb, var(--warning) 12%, var(--card)); border: 1px solid var(--warning); border-radius: var(--radius-sm); color: var(--foreground); font-size: 13px; line-height: 1.45; margin: 0; padding: 10px 12px; }
 
 .mascot { animation: mascot-bob 3.6s ease-in-out infinite; overflow: visible; }
 .mascot-eyes, .mascot-pupils { animation: mascot-blink 5s infinite; transform-box: fill-box; transform-origin: center; }

@@ -2,6 +2,7 @@ import {
   BarChart3,
   ChevronsLeft,
   ChevronsRight,
+  CircleHelp,
   Home,
   MessageSquare,
   Search,
@@ -12,6 +13,7 @@ import { useEffect, useState } from "react";
 import { appRoutes, type AppPage, shouldHandleClientNavigation } from "../lib/appNavigation";
 import { UserMenu } from "./UserMenu";
 import { BrandMark } from "./BrandMark";
+import { HELP_DOCKED_EVENT, isHelpDocked, openHelp } from "../lib/helpAssistant";
 
 export const navigationItems = [
   { key: "dashboard", label: "Visão geral", short: "Início", icon: BarChart3 },
@@ -35,6 +37,13 @@ export function Sidebar({
   const [collapsed, setCollapsed] = useState(
     () => window.localStorage.getItem("imobos.sidebar.collapsed") === "true",
   );
+  const [helpDocked, setHelpDocked] = useState(isHelpDocked);
+
+  useEffect(() => {
+    const sync = () => setHelpDocked(isHelpDocked());
+    window.addEventListener(HELP_DOCKED_EVENT, sync);
+    return () => window.removeEventListener(HELP_DOCKED_EVENT, sync);
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem("imobos.sidebar.collapsed", String(collapsed));
@@ -82,6 +91,13 @@ export function Sidebar({
             </a>
           );
         })}
+        {helpDocked ? (
+          <button className="nav-v2-item nav-help-button" onClick={openHelp} title="Dúvidas" type="button">
+            <CircleHelp size={17} />
+            <span className="nav-label">Dúvidas</span>
+            <span aria-hidden="true" className="nav-short">Dúvidas</span>
+          </button>
+        ) : null}
       </nav>
 
       <UserMenu onOpenSettings={() => onNavigate("settings")} />
