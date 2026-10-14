@@ -47,6 +47,7 @@ o commit em **Decisão**.
 | B-015 | Registrar quartos no campo da demanda | Correção | Equipe | Média | Em validação |
 | B-016 | Busca externa sem progresso visível | Correção | Equipe | Alta | Em validação |
 | B-017 | Landing page e domínio público | Melhoria | Equipe | Média | Em andamento |
+| B-018 | Prévia de foto otimizada mostra versão antiga | Correção | Equipe | Média | Implementado |
 
 ## Itens
 
@@ -342,4 +343,17 @@ o commit em **Decisão**.
   seção de preços para ampliar a oferta depois.
 - **Decisão (14/10/2026):** publicar a página no servidor atual, com os botões levando ao
   cadastro; a equipe fará o apontamento do `www`.
+
+### B-018 · Prévia de foto otimizada mostra versão antiga
+
+- **Tipo:** Correção · **Origem:** Equipe · **Registrado em:** 14/10/2026
+- **Prioridade:** Média · **Status:** Implementado
+- **Descrição:** após otimizar fotos de um imóvel, a comparação pode mostrar a mesma imagem nas
+  opções Original e Otimizada, apesar de o processamento ter terminado.
+- **Andamento (14/10/2026):** o recarregamento da página exibiu a imagem otimizada no caso
+  observado, confirmando uma prévia antiga em cache. Testes com duas fotos preservaram arquivos
+  separados. Correção publicada em produção; o acesso público e os serviços passaram na
+  checagem após o deploy.
+- **Decisão (14/10/2026, `496400b`):** atualizar a URL da prévia quando uma otimização for
+  concluída, para que o navegador busque a imagem nova.
 
