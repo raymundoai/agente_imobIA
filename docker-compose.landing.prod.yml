@@ -1,0 +1,6 @@
+# Landing page em um serviço Compose separado do aplicativo.
+services:
+  landing:
+    build:
+      context: ./landing
+    restart: unless-stopped
