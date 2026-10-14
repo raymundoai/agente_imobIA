@@ -58,6 +58,16 @@ class CountingImageAi(FakeAutoReplyAi):
         )
 
 
+class EchoImageAi(FakeAutoReplyAi):
+    def edit_image(self, content: bytes, *, filename: str, prompt: str) -> ImageEditResult:
+        return ImageEditResult(
+            content=b"\x89PNG\r\n\x1a\noptimized-" + content[8:],
+            input_image_tokens=100,
+            input_text_tokens=10,
+            output_image_tokens=100,
+        )
+
+
 class DispatchFailureAi(FakeAutoReplyAi):
     def __init__(self, error: Exception) -> None:
         self.error = error
@@ -363,7 +373,8 @@ def test_image_billing_idempotency_prevents_duplicate_openai_cost(
         headers=auth,
         files={"files": ("foto.png", b"\x89PNG\r\n\x1a\nsource", "image/png")},
     )
-    image_id = upload.json()[0]["id"]
+    original_image = upload.json()[0]
+    image_id = original_image["id"]
     url = f"/properties/{property_id}/images/{image_id}/reprocess"
     operation_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     payload = {"operation_id": operation_id, "optimizations": ["iluminação"]}
@@ -380,6 +391,12 @@ def test_image_billing_idempotency_prevents_duplicate_openai_cost(
     assert first.status_code == 200, first.text
     assert second.status_code == 409
     assert retry.status_code == 200, retry.text
+    assert first.json()["display_url"] != original_image["display_url"]
+    assert retry.json()["display_url"] != first.json()["display_url"]
+    assert retry.json()["original_url"] == original_image["original_url"]
+    assert (
+        client.get(retry.json()["display_url"], headers=auth).content == b"\x89PNG\r\n\x1a\nresult"
+    )
     assert ai.image_calls == 2
     commercial = client.get("/usage/commercial", headers=auth).json()
     image_usage = next(
@@ -388,6 +405,40 @@ def test_image_billing_idempotency_prevents_duplicate_openai_cost(
     assert image_usage["measured"] == 2
     assert image_usage["consumed"] == 2
     assert image_usage["available"] == 28
+
+
+def test_two_images_keep_independent_originals_and_optimized_previews(client: TestClient) -> None:
+    _, token = _provision(client, "tenant-a")
+    client.app.state.container.ai_provider = EchoImageAi()
+    auth = {"Authorization": f"Bearer {token}"}
+    property_id = _create_property_for_image(client, auth)
+    originals = [b"\x89PNG\r\n\x1a\nfirst", b"\x89PNG\r\n\x1a\nsecond"]
+    upload = client.post(
+        f"/properties/{property_id}/images",
+        headers=auth,
+        files=[
+            ("files", (f"foto-{index}.png", content, "image/png"))
+            for index, content in enumerate(originals)
+        ],
+    )
+    assert upload.status_code == 201, upload.text
+    images = upload.json()
+    assert len(images) == 2
+
+    for image, original in zip(images, originals, strict=True):
+        response = client.post(
+            f"/properties/{property_id}/images/{image['id']}/reprocess",
+            headers=auth,
+            json={"optimizations": ["lighting"]},
+        )
+        assert response.status_code == 200, response.text
+        optimized = response.json()
+        assert optimized["display_url"] != image["display_url"]
+        assert client.get(optimized["original_url"], headers=auth).content == original
+        assert (
+            client.get(optimized["display_url"], headers=auth).content
+            == b"\x89PNG\r\n\x1a\noptimized-" + original[8:]
+        )
 
 
 def _create_property_for_image(client: TestClient, headers: dict[str, str]) -> str:

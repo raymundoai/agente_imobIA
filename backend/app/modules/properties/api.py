@@ -344,6 +344,9 @@ def _image_model(
 
 def _linked_image_response(image: PropertyImageModel) -> LinkedPropertyImageResponse:
     base = f"/properties/{image.property_id}/images/{image.id}/content"
+    # A versão exibida muda após cada tratamento; a URL precisa mudar junto para
+    # não reutilizar a original que o navegador guardou em cache.
+    display_version = int(image.updated_at.timestamp() * 1_000_000)
     return LinkedPropertyImageResponse(
         id=image.id,
         property_id=image.property_id,
@@ -356,7 +359,7 @@ def _linked_image_response(image: PropertyImageModel) -> LinkedPropertyImageResp
         media_type=("image" if image.original_content_type.startswith("image/") else "video"),
         derived_size=image.derived_size,
         original_url=f"{base}?variant=original",
-        display_url=f"{base}?variant=display",
+        display_url=f"{base}?variant=display&v={display_version}",
         error=image.error,
     )
 

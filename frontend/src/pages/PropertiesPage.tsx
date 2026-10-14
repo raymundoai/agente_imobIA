@@ -1206,7 +1206,7 @@ export function PropertiesPage() {
                   />
                 </label>
                 <label className="form-span-2">
-                  Link de origem
+                  Link do site
                   <input
                     onChange={(event) => updateForm("source_url", event.target.value)}
                     placeholder="Opcional"
@@ -1493,7 +1493,7 @@ export function PropertiesPage() {
               <div aria-live="polite" className="property-ai-loading" role="status">
                 <LoaderCircle className="spin" size={30} />
                 <strong>{optimizationProgress}</strong>
-                <span>A IA está preparando a nova versão. Não feche esta janela.</span>
+                <span>Mantenha esta aba aberta; você pode usar outra aba enquanto isso.</span>
               </div>
             ) : null}
             <div className="modal-header">
