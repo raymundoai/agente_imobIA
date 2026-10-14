@@ -46,7 +46,7 @@ o commit em **Decisão**.
 | B-014 | Transferir à equipe quando o agente prometer fazê-lo | Correção | Equipe | Alta | Em validação |
 | B-015 | Registrar quartos no campo da demanda | Correção | Equipe | Média | Em validação |
 | B-016 | Busca externa sem progresso visível | Correção | Equipe | Alta | Em validação |
-| B-017 | Landing page e domínio público | Melhoria | Equipe | Média | Em validação |
+| B-017 | Landing page e domínio público | Melhoria | Equipe | Média | Em andamento |
 
 ## Itens
 
@@ -333,11 +333,11 @@ o commit em **Decisão**.
 ### B-017 · Landing page e domínio público
 
 - **Tipo:** Melhoria · **Origem:** Equipe · **Registrado em:** 14/10/2026
-- **Prioridade:** Média · **Status:** Em validação
+- **Prioridade:** Média · **Status:** Em andamento
 - **Descrição:** apresentar o ImmobIA em uma página pública, explicar o funcionamento para
   corretores e mostrar a oferta beta vigente com um caminho direto para criar a conta.
-- **Andamento (14/10/2026):** página aprovada para publicação, com versão de produção preparada
-  em serviço separado. Falta conferir o apontamento do `www` depois da propagação do DNS.
+- **Andamento (14/10/2026):** página publicada em serviço separado e rota do `www` preparada.
+  Falta conferir o domínio público depois da propagação do DNS.
 - **Decisão (14/10/2026):** começar com a oferta beta para corretores convidados; reservar a
   seção de preços para ampliar a oferta depois.
 - **Decisão (14/10/2026):** publicar a página no servidor atual, com os botões levando ao

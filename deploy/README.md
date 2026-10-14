@@ -1,6 +1,8 @@
 # Deploy da ImmobIA no Easypanel
 
-Tudo roda num único serviço **Compose** do Easypanel, a partir de `docker-compose.prod.yml`, na raiz do repositório.
+O aplicativo roda em um serviço **Compose** do Easypanel, a partir de `docker-compose.prod.yml`,
+na raiz do repositório. A landing page roda em outro serviço, com
+`docker-compose.landing.prod.yml`.
 
 | Serviço          | O que faz                                                        | Domínio        |
 |------------------|------------------------------------------------------------------|----------------|
@@ -12,6 +14,12 @@ Tudo roda num único serviço **Compose** do Easypanel, a partir de `docker-comp
 | `billing-worker` | Gera a fatura mensal do corretor beta ao fim de cada ciclo      | não            |
 | `postgres`       | Banco de dados (com pgvector)                                    | não            |
 | `backup`         | Cópia diária do banco e das mídias (mantém 14 dias)              | não            |
+
+## Landing page
+
+Crie um serviço Compose separado com o repositório na branch `main`, build path `/` e arquivo
+`docker-compose.landing.prod.yml`. No Easypanel, direcione o domínio público ao serviço interno
+`landing`, porta 80, com HTTPS. O DNS do `www` deve apontar ao mesmo servidor do aplicativo.
 
 ## 1. Preparar as variáveis
 
