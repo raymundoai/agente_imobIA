@@ -1763,6 +1763,14 @@ label .optional { font-weight: 400; }
 .pack-pending .link-button { color: var(--primary); font-weight: 600; }
 
 /* Platform: beta pricing */
+.invitation-actions { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+.invitation-actions label { display: grid; gap: 6px; }
+.invitation-actions input { width: 100px; }
+.invitation-created { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 14px; border-radius: 8px; background: var(--muted, #f3f4f6); }
+.invitation-created code { overflow-wrap: anywhere; font-size: 15px; }
+.invitation-list { display: grid; gap: 8px; margin-top: 16px; }
+.invitation-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border, #ddd); }
+.invitation-row span:nth-child(2) { flex: 1; }
 .beta-toggle { align-items: flex-start; display: flex; gap: 10px; margin: 6px 0 12px; }
 .beta-toggle input { margin-top: 3px; }
 .beta-toggle span { display: grid; gap: 2px; }

@@ -68,7 +68,7 @@ def clean_database(request: pytest.FixtureRequest) -> Generator[None, None, None
                 "property_demand_matches, properties, contacts, maintenance_tickets, lead_demands, "
                 "message_jobs, messages, conversations, "
                 "credit_reservations, credit_ledger, credit_accounts, usage_records, "
-                "platform_users, users, "
+                "signup_invitations, platform_users, users, "
                 "tenants CASCADE"
             )
         )
@@ -82,7 +82,7 @@ def clean_database(request: pytest.FixtureRequest) -> Generator[None, None, None
                 "property_demand_matches, properties, contacts, maintenance_tickets, lead_demands, "
                 "message_jobs, messages, conversations, "
                 "credit_reservations, credit_ledger, credit_accounts, usage_records, "
-                "platform_users, users, "
+                "signup_invitations, platform_users, users, "
                 "tenants CASCADE"
             )
         )

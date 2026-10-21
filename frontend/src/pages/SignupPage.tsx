@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { request } from "../api/client";
 import type { SignupResponse } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
@@ -12,7 +12,8 @@ type SignupForm = {
   admin_name: string;
   email: string;
   password: string;
-  business_type: "broker" | "agency" | "";
+  business_type: "broker";
+  invitation_code: string;
 };
 
 const emptyForm: SignupForm = {
@@ -21,7 +22,8 @@ const emptyForm: SignupForm = {
   admin_name: "",
   email: "",
   password: "",
-  business_type: "",
+  business_type: "broker",
+  invitation_code: "",
 };
 
 export function SignupPage() {
@@ -62,20 +64,20 @@ export function SignupPage() {
       <form className="login-card signup-card" onSubmit={submit}>
         <div>
           <h1>Criar conta</h1>
-          <p>Depois do cadastro, você configura seu atendimento. Nesta fase, a contratação está disponível para corretores convidados ao beta.</p>
+          <p>O cadastro está aberto para corretores convidados ao beta. Depois, você configura seu atendimento e assina o plano.</p>
         </div>
+        <label>
+          Código de convite
+          <input autoCapitalize="characters" autoComplete="off" required value={form.invitation_code} onChange={(event) => update("invitation_code", event.target.value)} placeholder="IMB-XXXXXX-XXXXXX-XXXXXX-XXXXXX" />
+          <small className="field-hint">Use o código que você recebeu da equipe ImmobIA. Cada código vale para uma conta.</small>
+        </label>
         <label>
           Seu nome
           <input autoComplete="name" value={form.admin_name} onChange={(event) => update("admin_name", event.target.value)} />
         </label>
-        <fieldset>
-          <legend>Como você trabalha?</legend>
-          <label><input checked={form.business_type === "broker"} name="business_type" onChange={() => update("business_type", "broker")} type="radio" /> Corretor autônomo</label>
-          <label><input checked={form.business_type === "agency"} name="business_type" onChange={() => update("business_type", "agency")} type="radio" /> Imobiliária</label>
-        </fieldset>
         <label>
-          Nome da imobiliária ou nome profissional
-          <input autoComplete="organization" placeholder="Ex.: Eugênia Imóveis ou Pedro Corretor" value={form.company_name} onChange={(event) => update("company_name", event.target.value)} />
+          Nome profissional
+          <input autoComplete="organization" placeholder="Ex.: Ana Corretora" value={form.company_name} onChange={(event) => update("company_name", event.target.value)} />
           <small className="field-hint">É como o agente de IA vai se apresentar aos leads.</small>
         </label>
         <label>
@@ -107,7 +109,7 @@ export function SignupPage() {
 }
 
 function validate(form: SignupForm): string | null {
-  if (!form.business_type) return "Escolha se você é corretor autônomo ou imobiliária.";
+  if (!form.invitation_code.trim()) return "Informe seu código de convite.";
   if (form.admin_name.trim().length < 2) return "Informe seu nome.";
   if (form.company_name.trim().length < 2) return "Informe o nome da imobiliária ou seu nome profissional.";
   if (!form.email.includes("@")) return "Informe um email válido.";

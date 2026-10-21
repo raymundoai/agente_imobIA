@@ -119,6 +119,8 @@ class Settings(BaseSettings):
     platform_bootstrap_token: SecretStr | None = None
     # Self-service signup from the login page. Off unless explicitly enabled per environment.
     public_signup_enabled: bool = False
+    # Closed beta: only a valid invitation can create a broker account.
+    signup_invitation_required: bool = True
     # Attempt limits on login and signup; only worth disabling in local load tests.
     auth_rate_limit_enabled: bool = True
     # 0 = no free trial: new accounts wait for their first subscription with no allowance.

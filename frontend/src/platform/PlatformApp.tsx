@@ -19,6 +19,7 @@ import { MetricCard } from "../components/MetricCard";
 import { runWithLoading } from "../lib/asyncState";
 import { AgentPromptSettings, TenantAgentInstructions } from "./AgentPromptSettings";
 import { BetaPricesSettings } from "./BetaPricesSettings";
+import { SignupInvitations } from "./SignupInvitations";
 import { FeedbackInbox } from "./FeedbackInbox";
 import { TenantAccess } from "./TenantAccess";
 import { BrandMark } from "../components/BrandMark";
@@ -332,10 +333,11 @@ export function PlatformApp() {
       {!loading && activeTab === "settings" ? (
         <section className="page-stack">
           <div>
-            <h2>Integrações</h2>
-            <p>Serviços externos usados por toda a plataforma.</p>
+            <h2>Configurações da plataforma</h2>
+            <p>Integrações, convites e preços para o beta.</p>
           </div>
           <AsaasSetup token={token} />
+          <SignupInvitations token={token} />
           <BetaPricesSettings token={token} />
         </section>
       ) : null}

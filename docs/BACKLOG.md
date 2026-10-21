@@ -46,8 +46,10 @@ o commit em **Decisão**.
 | B-014 | Transferir à equipe quando o agente prometer fazê-lo | Correção | Equipe | Alta | Em validação |
 | B-015 | Registrar quartos no campo da demanda | Correção | Equipe | Média | Em validação |
 | B-016 | Busca externa sem progresso visível | Correção | Equipe | Alta | Em validação |
-| B-017 | Landing page e domínio público | Melhoria | Equipe | Média | Em andamento |
+| B-017 | Landing page e domínio público | Melhoria | Equipe | Média | Implementado |
 | B-018 | Prévia de foto otimizada mostra versão antiga | Correção | Equipe | Média | Implementado |
+| B-019 | Cadastro indisponível a partir da landing page | Correção | Equipe | Alta | Implementado |
+| B-020 | Cadastro beta por código de convite | Melhoria | Equipe | Alta | Em validação |
 
 ## Itens
 
@@ -164,10 +166,10 @@ o commit em **Decisão**.
 - **Descrição:** o Essencial (R$ 369) é acessível para uma imobiliária, mas caro para um corretor
   autônomo. Criar uma oferta própria para corretores; os preços anteriores abaixo são hipóteses
   históricas e a condição beta vigente está na decisão de 11/10/2026.
-- **No sistema:** o cadastro inicial pergunta o tipo de conta e o guarda como categoria
-  comercial. A oferta beta exige corretor e liberação pelo admin; a elegibilidade é validada
-  também no servidor. Os planos existentes de imobiliárias continuam registrados para as
-  contas anteriores, mas ficam ocultos nas novas contratações.
+- **No sistema:** o cadastro guarda o tipo de conta como categoria comercial. A oferta beta exige
+  corretor e código de convite de uso único (B-020); a elegibilidade é validada também no
+  servidor. Os planos existentes de imobiliárias continuam registrados para as contas anteriores,
+  mas ficam ocultos nas novas contratações.
 - **Pontos a levantar antes de aprovar:**
   - os volumes de cada franquia: quantos atendimentos e buscas um corretor faz por mês. Validar
     com os beta testers e com a pesquisa quantitativa (com apoio de Creci e Secovi), que deve
@@ -334,7 +336,7 @@ o commit em **Decisão**.
 ### B-017 · Landing page e domínio público
 
 - **Tipo:** Melhoria · **Origem:** Equipe · **Registrado em:** 14/10/2026
-- **Prioridade:** Média · **Status:** Em andamento
+- **Prioridade:** Média · **Status:** Implementado
 - **Descrição:** apresentar o ImmobIA em uma página pública, explicar o funcionamento para
   corretores e mostrar a oferta beta vigente com um caminho direto para criar a conta.
 - **Andamento (14/10/2026):** página publicada em serviço separado e rota do `www` preparada.
@@ -343,6 +345,11 @@ o commit em **Decisão**.
   seção de preços para ampliar a oferta depois.
 - **Decisão (14/10/2026):** publicar a página no servidor atual, com os botões levando ao
   cadastro; a equipe fará o apontamento do `www`.
+- **Andamento (21/10/2026):** a página está acessível com HTTPS válido no domínio com e sem
+  `www`. Falta restabelecer o cadastro de destino (B-019) antes da divulgação.
+- **Decisão (21/10/2026):** concluir o apontamento do domínio com e sem `www` e validar HTTPS,
+  página e botões de cadastro. O destino voltou a responder após a recuperação do aplicativo
+  (B-019).
 
 ### B-018 · Prévia de foto otimizada mostra versão antiga
 
@@ -356,4 +363,24 @@ o commit em **Decisão**.
   checagem após o deploy.
 - **Decisão (14/10/2026, `496400b`):** atualizar a URL da prévia quando uma otimização for
   concluída, para que o navegador busque a imagem nova.
+
+### B-019 · Cadastro indisponível a partir da landing page
+
+- **Tipo:** Correção · **Origem:** Equipe · **Registrado em:** 21/10/2026
+- **Prioridade:** Alta · **Status:** Implementado
+- **Descrição:** o botão de criar conta da landing page levava ao endereço correto, mas a página
+  de cadastro respondeu HTTP 502 na checagem de 21/10.
+- **Decisão (21/10/2026):** republicar o aplicativo após aprovação e confirmar HTTP 200 no
+  cadastro e nos arquivos da página. A criação de uma conta real não fez parte da checagem.
+
+### B-020 · Cadastro beta por código de convite
+
+- **Tipo:** Melhoria · **Origem:** Equipe · **Registrado em:** 21/10/2026
+- **Prioridade:** Alta · **Status:** Em validação
+- **Descrição:** exigir um código de convite para criar uma conta durante o beta fechado. O código
+  libera automaticamente a condição beta do corretor, sem marcação manual no admin.
+- **Decisão (21/10/2026):** gerar e revogar os códigos no admin; cada código abre uma conta, vence
+  em até 90 dias e aparece por inteiro somente na criação. O cadastro só aceita corretores nesta
+  fase. O plano continua sujeito ao pagamento da primeira mensalidade. Implementado localmente,
+  aguardando validação e publicação.
 

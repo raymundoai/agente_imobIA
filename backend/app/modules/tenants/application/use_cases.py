@@ -29,6 +29,7 @@ class CreateTenantUseCase:
         admin_email: str,
         admin_password: str,
         settings: dict[str, Any] | None = None,
+        commit: bool = True,
     ) -> tuple[Tenant, User]:
         tenant = Tenant(name=name.strip(), slug=slug.strip().lower(), settings=dict(settings or {}))
         admin = User(
@@ -39,7 +40,7 @@ class CreateTenantUseCase:
             role=UserRole.ADMIN,
             is_master=True,
         )
-        self._provisioning.create_with_admin(tenant, admin)
+        self._provisioning.create_with_admin(tenant, admin, commit=commit)
         self._events.publish(
             DomainEvent(
                 name="TenantCreated",

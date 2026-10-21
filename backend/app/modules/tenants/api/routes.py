@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.container import Container, get_container, get_db_session
 from app.modules.auth.api.dependencies import CurrentPrincipal, get_current_principal, require_roles
 from app.modules.billing_usage.commercial import CommercialEntitlementService
+from app.modules.platform.invitations import lock_valid_invitation
 from app.modules.tenants.adapters.repositories import SqlAlchemyTenantRepository
 from app.modules.tenants.api.schemas import (
     CreateTenantRequest,
@@ -45,13 +46,21 @@ def signup(
     session: Session = Depends(get_db_session),
     container: Container = Depends(get_container),
 ) -> SignupResponse:
-    """Self-service account: tenant, master admin and (if enabled) a free trial, then a session."""
+    """Create a broker account from a one-use beta invitation, then a session."""
 
     if not container.settings.public_signup_enabled:
         raise ForbiddenError("O cadastro de novas contas está desativado")
     container.auth_rate_limiter.check_and_hit("signup_ip", client_ip(request))
+    requires_invitation = container.settings.signup_invitation_required
+    if requires_invitation and payload.business_type != "broker":
+        raise ForbiddenError("Nesta fase, os convites são para corretores autônomos")
+    if requires_invitation and not payload.invitation_code:
+        raise ForbiddenError("Informe o código de convite para criar sua conta")
     if SqlAlchemyUserRepository(session).list_by_email(str(payload.email)):
         raise ConflictError("Este email já tem uma conta. Entre com ele ou use outro email.")
+    invitation = None
+    if requires_invitation:
+        invitation = lock_valid_invitation(session, payload.invitation_code or "")
     repository = SqlAlchemyTenantRepository(session)
     tenant, admin = CreateTenantUseCase(
         repository, container.password_hasher, container.event_bus
@@ -74,14 +83,24 @@ def signup(
                 "accepted_by": str(payload.email),
             },
         },
+        commit=False,
     )
     commercial = CommercialEntitlementService(session)
-    trial_days = container.settings.trial_days
+    trial_days = 0 if requires_invitation else container.settings.trial_days
     trial = (
-        commercial.start_trial(tenant.id, days=trial_days, commercial_segment=payload.business_type)
+        commercial.start_trial(
+            tenant.id, days=trial_days, commercial_segment=payload.business_type, commit=False
+        )
         if trial_days > 0
-        else commercial.start_pending(tenant.id, commercial_segment=payload.business_type)
+        else commercial.start_pending(
+            tenant.id, commercial_segment=payload.business_type, commit=False
+        )
     )
+    if invitation is not None:
+        trial.beta_pricing = True
+        invitation.redeemed_at = datetime.now(UTC)
+        invitation.redeemed_tenant_id = tenant.id
+    session.commit()
     tokens = container.token_service
     return SignupResponse(
         tenant_id=tenant.id,

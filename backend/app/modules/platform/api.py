@@ -44,6 +44,7 @@ from app.modules.billing_usage.service import CreditLedgerService
 from app.modules.contacts.models import ContactModel
 from app.modules.conversations.adapters.models import ConversationModel
 from app.modules.leads.adapters.models import LeadDemandModel
+from app.modules.platform.invitations import SignupInvitationModel, create_invitation
 from app.modules.platform.models import PlatformUserModel
 from app.modules.properties.adapters.models import PropertyModel
 from app.modules.tenants.adapters.models import TenantModel
@@ -53,7 +54,12 @@ from app.modules.tenants.application.use_cases import CreateTenantUseCase
 from app.modules.users.adapters.models import UserModel
 from app.modules.users.adapters.repositories import SqlAlchemyUserRepository
 from app.modules.users.application.use_cases import GeneratePasswordSetupUseCase
-from app.shared.errors.exceptions import AuthenticationError, ConfigurationError, NotFoundError
+from app.shared.errors.exceptions import (
+    AuthenticationError,
+    ConfigurationError,
+    ConflictError,
+    NotFoundError,
+)
 from app.shared.security.rate_limit import client_ip
 
 router = APIRouter(prefix="/platform", tags=["platform"])
@@ -72,6 +78,23 @@ class PlatformTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int = 28800
+
+
+class SignupInvitationItem(BaseModel):
+    id: UUID
+    code_suffix: str
+    created_at: datetime
+    expires_at: datetime
+    redeemed_at: datetime | None
+    revoked_at: datetime | None
+
+
+class CreatedSignupInvitation(SignupInvitationItem):
+    code: str
+
+
+class CreateSignupInvitationRequest(BaseModel):
+    valid_days: int = Field(default=30, ge=1, le=90)
 
 
 class PlatformDashboardResponse(BaseModel):
@@ -317,6 +340,53 @@ def get_platform_principal(
         return PlatformPrincipal(user_id=UUID(payload["sub"]), email=str(payload["email"]))
     except (jwt.PyJWTError, KeyError, TypeError, ValueError) as exc:
         raise AuthenticationError("Invalid or expired platform token") from exc
+
+
+@router.get("/signup-invitations", response_model=list[SignupInvitationItem])
+def platform_list_signup_invitations(
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> list[SignupInvitationModel]:
+    return list(
+        session.scalars(
+            select(SignupInvitationModel).order_by(SignupInvitationModel.created_at.desc())
+        )
+    )
+
+
+@router.post(
+    "/signup-invitations",
+    response_model=CreatedSignupInvitation,
+    status_code=status.HTTP_201_CREATED,
+)
+def platform_create_signup_invitation(
+    payload: CreateSignupInvitationRequest,
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> CreatedSignupInvitation:
+    invitation, code = create_invitation(session, valid_days=payload.valid_days)
+    item = SignupInvitationItem.model_validate(invitation, from_attributes=True)
+    return CreatedSignupInvitation.model_validate({**item.model_dump(), "code": code})
+
+
+@router.post("/signup-invitations/{invitation_id}/revoke", response_model=SignupInvitationItem)
+def platform_revoke_signup_invitation(
+    invitation_id: UUID,
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> SignupInvitationModel:
+    invitation = session.scalar(
+        select(SignupInvitationModel)
+        .where(SignupInvitationModel.id == invitation_id)
+        .with_for_update()
+    )
+    if invitation is None:
+        raise NotFoundError("Convite não encontrado")
+    if invitation.redeemed_at is not None:
+        raise ConflictError("Este convite já foi usado")
+    invitation.revoked_at = datetime.now(UTC)
+    session.commit()
+    return invitation
 
 
 @router.post(

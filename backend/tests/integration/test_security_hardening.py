@@ -97,6 +97,7 @@ def test_platform_login_is_limited(client: TestClient) -> None:
 
 def test_signup_is_limited_per_address(client: TestClient) -> None:
     client.app.state.container.settings.public_signup_enabled = True
+    client.app.state.container.settings.signup_invitation_required = False
     for index in range(5):
         response = client.post(
             "/signup",

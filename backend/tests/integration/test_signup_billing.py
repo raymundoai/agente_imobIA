@@ -79,6 +79,7 @@ class FakeAsaasClient:
 @pytest.fixture
 def signup_enabled(client: TestClient) -> TestClient:
     client.app.state.container.settings.public_signup_enabled = True
+    client.app.state.container.settings.signup_invitation_required = False
     client.app.state.container.settings.trial_days = 0
     return client
 
@@ -579,11 +580,14 @@ def test_broker_beta_invoice_covers_base_and_unbilled_usage_once(
     )
     assert order.status_code == 201, order.text
     assert order.json()["value_cents"] == 3000
-    assert _confirm(
-        client,
-        "broker-pack-paid",
-        {"id": "pay_pack_3", "externalReference": f"immobia:pack:{order.json()['id']}"},
-    )["outcome"] == "pack_granted"
+    assert (
+        _confirm(
+            client,
+            "broker-pack-paid",
+            {"id": "pay_pack_3", "externalReference": f"immobia:pack:{order.json()['id']}"},
+        )["outcome"]
+        == "pack_granted"
+    )
     with client.app.state.container.database.session_factory() as session:
         commercial = CommercialEntitlementService(session)
         for index in range(16):
@@ -594,6 +598,8 @@ def test_broker_beta_invoice_covers_base_and_unbilled_usage_once(
             event = commercial.settle(tenant_id, key)
             assert event.within_allowance is (index < 15)
     assert client.get("/billing", headers=headers).json()["broker_usage"]["unbilled_cents"] == 250
+
+
 def test_internal_test_account_is_unlimited_and_offered_only_the_test_plan(
     signup_enabled: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

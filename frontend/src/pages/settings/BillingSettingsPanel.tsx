@@ -212,7 +212,7 @@ export function BillingSettingsPanel() {
       ) : null}
 
       {!subscription && overview.payments_enabled && isAdmin && !overview.plans.length ? (
-        <div className="info-box">As novas contratações estão disponíveis para corretores convidados ao beta. Fale com o suporte para liberar sua conta.</div>
+        <div className="info-box">O plano beta está disponível para corretores que criaram a conta com um código de convite.</div>
       ) : null}
 
       {!subscription && overview.payments_enabled && isAdmin && overview.plans.length > 0 ? (

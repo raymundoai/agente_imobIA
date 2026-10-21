@@ -44,7 +44,7 @@ class SqlAlchemyTenantRepository(TenantRepositoryPort, TenantProvisioningPort):
         self._session.refresh(model)
         return _to_domain(model)
 
-    def create_with_admin(self, tenant: Tenant, admin: User) -> None:
+    def create_with_admin(self, tenant: Tenant, admin: User, *, commit: bool = True) -> None:
         tenant_model = TenantModel(
             id=tenant.id,
             name=tenant.name,
@@ -56,7 +56,10 @@ class SqlAlchemyTenantRepository(TenantRepositoryPort, TenantProvisioningPort):
         user_model = UserModel.from_domain(admin)
         self._session.add_all([tenant_model, user_model])
         try:
-            self._session.commit()
+            if commit:
+                self._session.commit()
+            else:
+                self._session.flush()
         except IntegrityError as exc:
             self._session.rollback()
             raise ConflictError("Tenant slug or administrator email already exists") from exc
