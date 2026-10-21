@@ -49,7 +49,7 @@ o commit em **Decisão**.
 | B-017 | Landing page e domínio público | Melhoria | Equipe | Média | Implementado |
 | B-018 | Prévia de foto otimizada mostra versão antiga | Correção | Equipe | Média | Implementado |
 | B-019 | Cadastro indisponível a partir da landing page | Correção | Equipe | Alta | Implementado |
-| B-020 | Cadastro beta por código de convite | Melhoria | Equipe | Alta | Em validação |
+| B-020 | Cadastro beta por código de convite | Melhoria | Equipe | Alta | Implementado |
 
 ## Itens
 
@@ -376,11 +376,13 @@ o commit em **Decisão**.
 ### B-020 · Cadastro beta por código de convite
 
 - **Tipo:** Melhoria · **Origem:** Equipe · **Registrado em:** 21/10/2026
-- **Prioridade:** Alta · **Status:** Em validação
+- **Prioridade:** Alta · **Status:** Implementado
 - **Descrição:** exigir um código de convite para criar uma conta durante o beta fechado. O código
   libera automaticamente a condição beta do corretor, sem marcação manual no admin.
 - **Decisão (21/10/2026):** gerar e revogar os códigos no admin; cada código abre uma conta, vence
   em até 90 dias e aparece por inteiro somente na criação. O cadastro só aceita corretores nesta
-  fase. O plano continua sujeito ao pagamento da primeira mensalidade. Implementado localmente,
-  aguardando validação e publicação.
+  fase. O plano continua sujeito ao pagamento da primeira mensalidade.
+- **Publicado em 21/10/2026 (`811de25`):** migração dos convites aplicada, cadastro e admin
+  atualizados. A API rejeitou cadastro sem código e a lista de convites respondeu no admin.
+  Ainda falta um cadastro real de corretor com código para validar o fluxo completo em produção.
 
