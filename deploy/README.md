@@ -66,6 +66,11 @@ Se mudar o domínio do `web`, atualize `APP_PUBLIC_URL` e `BACKEND_PUBLIC_URL` e
 - Crie uma conta de corretor pelo cadastro do painel `web` com esse código e passe pelo assistente
   de configuração. Confira que ela vê somente o plano Corretor beta (R$ 59,90, 20 buscas), sem
   marcação manual no admin, e gere a primeira fatura por PIX ou cartão.
+- Para os três acessos gratuitos específicos, peça que cada corretor crie a conta com um convite
+  diferente e informe o e-mail cadastrado. Em **Configurações → Convites para o beta → Acessos
+  gratuitos de teste**, libere pelo e-mail antes de gerar qualquer fatura. Confira 15 dias,
+  10 atendimentos de IA, 10 otimizações de fotos e 20 buscas. A quarta liberação deve ser
+  recusada. Ao fim do teste, a conta pode contratar o Corretor beta normalmente.
 - Conecte um WhatsApp por QR Code, cadastre um imóvel e converse a partir de outro celular.
 - Compre um pacote de 15 otimizações e confira os créditos. O preço é R$ 30,00.
 - Confira no painel o consumo avulso de IA e imagens; a renovação soma esse consumo à próxima

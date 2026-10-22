@@ -28,6 +28,7 @@ from app.modules.billing_usage.asaas import (
 )
 from app.modules.billing_usage.commercial import (
     BROKER_BETA_PLAN_CODE,
+    BROKER_TEST_PLAN_CODE,
     CommercialEntitlementService,
 )
 from app.shared.errors.exceptions import ConflictError, ExternalServiceError, NotFoundError
@@ -66,7 +67,13 @@ class BrokerBillingService:
         commercial = CommercialEntitlementService(self._session).subscription(tenant_id, lock=True)
         if commercial.commercial_segment != "broker" or not commercial.beta_pricing:
             raise ConflictError("A oferta beta está disponível apenas para corretores convidados")
-        if commercial.status != "pending":
+        current_plan = self._session.get(CommercialPlanModel, commercial.plan_id)
+        can_convert_test = (
+            commercial.status == "trial"
+            and current_plan is not None
+            and current_plan.code == BROKER_TEST_PLAN_CODE
+        )
+        if commercial.status != "pending" and not can_convert_test:
             raise ConflictError("Esta conta já possui um plano ou pagamento em andamento")
         open_agency = self._session.scalar(
             select(AsaasSubscriptionModel.id).where(
@@ -263,7 +270,7 @@ class BrokerBillingService:
             if plan is None:
                 raise RuntimeError("Plano da fatura não encontrado")
             current = CommercialEntitlementService(self._session).subscription(invoice.tenant_id)
-            if current.status == "pending":
+            if current.status in {"pending", "trial"}:
                 # The first full month starts when payment actually clears.
                 invoice.cycle_start = invoice.paid_at
                 invoice.cycle_end = next_month(invoice.paid_at)

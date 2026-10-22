@@ -226,6 +226,19 @@ class CommercialPackModel(Base):
     )
 
 
+class BrokerTestAccessModel(Base):
+    __tablename__ = "broker_test_accesses"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        unique=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class TenantCommercialSubscriptionModel(Base):
     __tablename__ = "tenant_commercial_subscriptions"
     __table_args__ = (

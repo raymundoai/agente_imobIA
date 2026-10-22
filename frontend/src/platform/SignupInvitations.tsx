@@ -20,18 +20,50 @@ function status(invitation: Invitation) {
   return "Disponível";
 }
 
-export function SignupInvitations({ token }: { token: string }) {
+export function SignupInvitations({ token, onChanged }: { token: string; onChanged: () => void }) {
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [newCode, setNewCode] = useState<string | null>(null);
   const [validDays, setValidDays] = useState(90);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [testEmail, setTestEmail] = useState("");
+  const [testSlots, setTestSlots] = useState<{ used: number; limit: number } | null>(null);
+  const [testFeedback, setTestFeedback] = useState<string | null>(null);
+  const [grantingTest, setGrantingTest] = useState(false);
 
   useEffect(() => {
     request<Invitation[]>("/platform/signup-invitations", {}, token)
       .then(setInvitations)
       .catch((reason) => setFeedback(reason instanceof Error ? reason.message : "Não foi possível carregar os convites."));
   }, [token]);
+
+  useEffect(() => {
+    request<{ used: number; limit: number }>("/platform/broker-test-access", {}, token)
+      .then(setTestSlots)
+      .catch(() => setTestFeedback("Não foi possível consultar os acessos gratuitos."));
+  }, [token]);
+
+  async function grantTestAccess() {
+    if (!testEmail.trim()) return;
+    setGrantingTest(true);
+    setTestFeedback(null);
+    try {
+      const tenant = await request<{ name: string; commercial_cycle_ends_at: string }>(
+        "/platform/broker-test-access",
+        { method: "POST", body: JSON.stringify({ email: testEmail.trim() }) },
+        token,
+      );
+      const slots = await request<{ used: number; limit: number }>("/platform/broker-test-access", {}, token);
+      setTestSlots(slots);
+      setTestFeedback(`Acesso liberado para ${tenant.name} até ${new Date(tenant.commercial_cycle_ends_at).toLocaleDateString("pt-BR")}.`);
+      setTestEmail("");
+      onChanged();
+    } catch (reason) {
+      setTestFeedback(reason instanceof Error ? reason.message : "Não foi possível liberar o teste.");
+    } finally {
+      setGrantingTest(false);
+    }
+  }
 
   async function create() {
     setBusy(true);
@@ -114,6 +146,21 @@ export function SignupInvitations({ token }: { token: string }) {
           ))}
         </div>
       ) : <p className="field-hint">Nenhum convite criado ainda.</p>}
+      <div className="settings-subsection">
+        <h3>Acessos gratuitos de teste</h3>
+        <p>Depois que o corretor criar a conta com o convite, informe aqui o e-mail cadastrado. São três acessos de 15 dias, com 10 atendimentos de IA, 10 otimizações de fotos e 20 buscas. Não peça que gere a primeira fatura antes da liberação.</p>
+        <p>{testSlots ? `${testSlots.used} de ${testSlots.limit} acessos utilizados` : "Consultando acessos..."}</p>
+        <form className="invitation-actions" onSubmit={(event) => { event.preventDefault(); void grantTestAccess(); }}>
+          <label>
+            E-mail cadastrado
+            <input type="email" required value={testEmail} onChange={(event) => setTestEmail(event.target.value)} />
+          </label>
+          <button className="secondary-button" disabled={grantingTest || (testSlots !== null && testSlots.used >= testSlots.limit)} type="submit">
+            {grantingTest ? "Liberando..." : "Liberar teste"}
+          </button>
+        </form>
+        {testFeedback ? <p className="field-hint" role="status">{testFeedback}</p> : null}
+      </div>
     </Card>
   );
 }

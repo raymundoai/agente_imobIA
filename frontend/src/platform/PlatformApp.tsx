@@ -337,7 +337,7 @@ export function PlatformApp() {
             <p>Integrações, convites e preços para o beta.</p>
           </div>
           <AsaasSetup token={token} />
-          <SignupInvitations token={token} />
+          <SignupInvitations token={token} onChanged={() => void load()} />
           <BetaPricesSettings token={token} />
         </section>
       ) : null}

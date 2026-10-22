@@ -22,7 +22,10 @@ from app.modules.auth.api.dependencies import (
     require_roles,
 )
 from app.modules.billing_usage.adapters.models import CommercialPlanModel
-from app.modules.billing_usage.commercial import CommercialEntitlementService
+from app.modules.billing_usage.commercial import (
+    BROKER_TEST_PLAN_CODE,
+    CommercialEntitlementService,
+)
 from app.modules.leads.adapters.repositories import SqlAlchemyLeadDemandRepository
 from app.modules.network.models import NetworkMembershipModel, PartnershipRequestModel
 from app.modules.properties.adapters.models import PropertyImageModel, PropertyModel
@@ -161,10 +164,14 @@ class PartnershipListResponse(BaseModel):
 def has_paid_plan(session: Session, tenant_id: UUID) -> bool:
     subscription = CommercialEntitlementService(session).subscription(tenant_id)
     plan = session.get(CommercialPlanModel, subscription.plan_id)
-    return (
-        plan is not None
-        and plan.monthly_price_cents > 0
-        and subscription.status in {"active", "past_due"}
+    return plan is not None and (
+        (plan.monthly_price_cents > 0 and subscription.status in {"active", "past_due"})
+        or (
+            plan.code == BROKER_TEST_PLAN_CODE
+            and subscription.status == "trial"
+            and subscription.trial_ends_at is not None
+            and datetime.now(UTC) < subscription.trial_ends_at
+        )
     )
 
 

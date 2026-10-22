@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.modules.billing_usage.adapters.models import (
     AiAttendanceSessionModel,
+    BrokerInvoiceModel,
+    BrokerTestAccessModel,
     CommercialEntitlementGrantModel,
     CommercialPackModel,
     CommercialPlanModel,
@@ -17,7 +19,7 @@ from app.modules.billing_usage.adapters.models import (
     CommercialUsageReservationModel,
     TenantCommercialSubscriptionModel,
 )
-from app.shared.errors.exceptions import PaymentRequiredError
+from app.shared.errors.exceptions import ConflictError, PaymentRequiredError
 
 AI_ATTENDANCE = "ai_attendance"
 PROPERTY_SEARCH_STANDARD = "property_search_standard"
@@ -34,6 +36,8 @@ TRIAL_PLAN_CODE = "teste_gratis"
 # Placeholder for accounts waiting for their first subscription: no allowance at all.
 NO_PLAN_CODE = "sem_plano"
 BROKER_BETA_PLAN_CODE = "corretor_beta"
+BROKER_TEST_PLAN_CODE = "corretor_teste_15d"
+BROKER_TEST_LIMIT = 3
 # Pack sizes per resource; the price comes from the contracted plan's reference unit price.
 PACK_UNITS = {AI_ATTENDANCE: 50, PROPERTY_SEARCH_STANDARD: 50, IMAGE_OPTIMIZATION: 20}
 # A pack costs slightly more than the same units inside the plan, so upgrading stays better.
@@ -434,8 +438,8 @@ class CommercialEntitlementService:
         )
         if plan is None:
             raise ValueError("Commercial plan not found")
-        if plan.code == TRIAL_PLAN_CODE:
-            # As a regular plan it would renew every month; trials only start at signup.
+        if plan.code in {TRIAL_PLAN_CODE, BROKER_TEST_PLAN_CODE}:
+            # Trial plans have their own start paths and must never renew as regular plans.
             raise ValueError("The trial plan cannot be assigned")
         now = datetime.now(UTC)
         if cycle_start is None or cycle_end is None:
@@ -449,8 +453,66 @@ class CommercialEntitlementService:
         subscription.enforcement_mode = enforcement_mode
         subscription.cycle_started_at = cycle_start
         subscription.cycle_ends_at = cycle_end
+        subscription.trial_ends_at = None
         if subscription.status in {"pilot", "active"}:
             self._provision_plan_grants(subscription, plan)
+        self._session.commit()
+        return subscription
+
+    def broker_test_slots_used(self) -> int:
+        return int(
+            self._session.scalar(select(func.count()).select_from(BrokerTestAccessModel)) or 0
+        )
+
+    def start_broker_test(self, tenant_id: UUID) -> TenantCommercialSubscriptionModel:
+        """Grant one of three lifetime test slots after invited signup, without billing."""
+
+        self._advisory_lock("broker-test-access:three-slots")
+        subscription = self.subscription(tenant_id, lock=True)
+        current = self._session.get(CommercialPlanModel, subscription.plan_id)
+        if current is not None and current.code == BROKER_TEST_PLAN_CODE:
+            return subscription  # Repeating the approval never resets its 15-day clock.
+        if self._session.scalar(
+            select(BrokerTestAccessModel.id).where(BrokerTestAccessModel.tenant_id == tenant_id)
+        ):
+            raise ConflictError("Esta conta já utilizou seu acesso gratuito")
+        if (
+            subscription.commercial_segment != "broker"
+            or not subscription.beta_pricing
+            or subscription.internal_test
+            or subscription.status != "pending"
+        ):
+            raise ConflictError(
+                "Acesso de teste disponível apenas para corretor convidado sem plano"
+            )
+        if self._session.scalar(
+            select(BrokerInvoiceModel.id).where(BrokerInvoiceModel.tenant_id == tenant_id)
+        ):
+            raise ConflictError("Esta conta já gerou uma fatura; resolva a cobrança antes do teste")
+        if self.broker_test_slots_used() >= BROKER_TEST_LIMIT:
+            raise ConflictError("Os três acessos gratuitos de teste já foram utilizados")
+        plan = self._session.scalar(
+            select(CommercialPlanModel).where(
+                CommercialPlanModel.code == BROKER_TEST_PLAN_CODE,
+                CommercialPlanModel.is_current.is_(True),
+            )
+        )
+        if plan is None:
+            raise ConflictError("Plano de teste beta indisponível")
+        now = datetime.now(UTC)
+        ends_at = now + timedelta(days=15)
+        subscription.plan_id = plan.id
+        subscription.status = "trial"
+        subscription.enforcement_mode = "enforce"
+        subscription.cycle_started_at = now
+        subscription.cycle_ends_at = ends_at
+        subscription.trial_ends_at = ends_at
+        self._session.add(
+            BrokerTestAccessModel(
+                id=uuid4(), tenant_id=tenant_id, created_at=now, expires_at=ends_at
+            )
+        )
+        self._provision_plan_grants(subscription, plan)
         self._session.commit()
         return subscription
 
@@ -711,6 +773,9 @@ class CommercialEntitlementService:
         return summaries
 
     def _roll_cycle(self, subscription: TenantCommercialSubscriptionModel, now: datetime) -> None:
+        if subscription.status == "trial":
+            # Trial allowances and their end date never renew automatically.
+            return
         plan = self._session.get(CommercialPlanModel, subscription.plan_id)
         if plan is not None and plan.code == BROKER_BETA_PLAN_CODE:
             # A new broker cycle begins only after its consolidated invoice is paid.

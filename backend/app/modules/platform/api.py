@@ -37,6 +37,7 @@ from app.modules.billing_usage.asaas import (
     asaas_client_from_settings,
 )
 from app.modules.billing_usage.commercial import (
+    BROKER_TEST_LIMIT,
     COMMERCIAL_RESOURCES,
     CommercialEntitlementService,
 )
@@ -95,6 +96,15 @@ class CreatedSignupInvitation(SignupInvitationItem):
 
 class CreateSignupInvitationRequest(BaseModel):
     valid_days: int = Field(default=90, ge=1, le=90)
+
+
+class BrokerTestAccessRequest(BaseModel):
+    email: EmailStr
+
+
+class BrokerTestAccessSlots(BaseModel):
+    used: int
+    limit: int
 
 
 class PlatformDashboardResponse(BaseModel):
@@ -387,6 +397,51 @@ def platform_revoke_signup_invitation(
     invitation.revoked_at = datetime.now(UTC)
     session.commit()
     return invitation
+
+
+@router.get("/broker-test-access", response_model=BrokerTestAccessSlots)
+def platform_broker_test_slots(
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> BrokerTestAccessSlots:
+    return BrokerTestAccessSlots(
+        used=CommercialEntitlementService(session).broker_test_slots_used(),
+        limit=BROKER_TEST_LIMIT,
+    )
+
+
+@router.post("/broker-test-access", response_model=PlatformTenantSummary)
+def platform_grant_broker_test(
+    payload: BrokerTestAccessRequest,
+    _: PlatformPrincipal = Depends(get_platform_principal),
+    session: Session = Depends(get_db_session),
+) -> PlatformTenantSummary:
+    users = session.scalars(
+        select(UserModel)
+        .where(
+            func.lower(UserModel.email) == str(payload.email).lower(),
+            UserModel.is_master.is_(True),
+        )
+        .limit(2)
+    ).all()
+    if not users:
+        raise NotFoundError("Nenhuma conta cadastrada com este e-mail")
+    if len(users) > 1:
+        raise ConflictError("Este e-mail está em mais de uma conta; procure a conta no admin")
+    tenant = session.get(TenantModel, users[0].tenant_id)
+    if tenant is None:
+        raise NotFoundError("Conta não encontrada")
+    if (
+        session.scalar(
+            select(SignupInvitationModel.id).where(
+                SignupInvitationModel.redeemed_tenant_id == tenant.id
+            )
+        )
+        is None
+    ):
+        raise ConflictError("Esta conta não foi criada com um código de convite")
+    CommercialEntitlementService(session).start_broker_test(tenant.id)
+    return _tenant_summary(session, tenant)
 
 
 @router.post(

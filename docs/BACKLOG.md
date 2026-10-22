@@ -38,7 +38,7 @@ o commit em **Decisão**.
 | B-006 | Revisão de segurança da infraestrutura | Correção | Equipe | Alta | Em andamento |
 | B-007 | Diferenciar os planos por recurso, não só pela franquia | Ideia | Equipe | A definir | Novo |
 | B-008 | Planos para corretor autônomo | Ideia | Equipe | Alta | Implementado (beta) |
-| B-009 | Imposto real na precificação | Correção | Equipe | Alta | Novo |
+| B-009 | Imposto real na precificação | Correção | Equipe | Alta | Em andamento |
 | B-010 | Testar o agente em conversas fora do escopo | Correção | Equipe | Alta | Aprovado |
 | B-011 | Endereço com CEP no cadastro e estudo de exclusividade territorial | Melhoria | Equipe | A definir | Novo |
 | B-012 | Ajuda sem cobrir ações da tela | Melhoria | Equipe | Média | Em validação |
@@ -50,6 +50,7 @@ o commit em **Decisão**.
 | B-018 | Prévia de foto otimizada mostra versão antiga | Correção | Equipe | Média | Implementado |
 | B-019 | Cadastro indisponível a partir da landing page | Correção | Equipe | Alta | Implementado |
 | B-020 | Cadastro beta por código de convite | Melhoria | Equipe | Alta | Implementado |
+| B-021 | Três acessos gratuitos limitados para corretores beta | Melhoria | Equipe | Alta | Em andamento |
 
 ## Itens
 
@@ -247,13 +248,14 @@ o commit em **Decisão**.
 ### B-009 · Imposto real na precificação
 
 - **Tipo:** Correção · **Origem:** Equipe (reunião de 07/10/2026) · **Registrado em:** 07/10/2026
-- **Prioridade:** Alta · **Status:** Novo
-- **Descrição:** a planilha financeira e o painel de precificação usam 6% de imposto (Simples
-  Nacional, primeira faixa). Na reunião, a estimativa como PJ foi de 18,5%. A diferença muda
-  todas as margens.
-- **Próximo passo:** confirmar o regime e a alíquota com a contabilidade e atualizar a planilha, o
-  simulador e, se preciso, os preços de referência por unidade.
-- **Decisão:** —
+- **Prioridade:** Alta · **Status:** Em andamento
+- **Descrição:** a premissa anterior de 6% subestimava o imposto considerado nas margens. A
+  alíquota de 18,5% foi adotada para os cálculos de trabalho, sem alterar os preços publicados.
+- **Próximo passo:** atualizar o painel privado de precificação, revisar as margens da oferta
+  beta de corretor (não modelada na planilha atual) e validar enquadramento e alíquota efetiva
+  com a contabilidade quando possível.
+- **Decisão:** em 21/10/2026, 18,5% confirmado como premissa de trabalho pela equipe. Planilha
+  financeira no Google Sheets e cópia local atualizadas; painel privado pendente.
 
 ### B-010 · Testar o agente em conversas fora do escopo
 
@@ -393,4 +395,18 @@ o commit em **Decisão**.
 - **Validação e ajuste publicado em 21/10/2026 (`361077a`):** o cadastro real com convite
   funcionou e a falta de código bloqueou a criação da conta. O aviso, antes exibido em inglês,
   agora aparece em português. O bundle novo foi confirmado em produção.
+
+### B-021 · Três acessos gratuitos limitados para corretores beta
+
+- **Tipo:** Melhoria · **Origem:** Equipe · **Registrado em:** 21/10/2026
+- **Prioridade:** Alta · **Status:** Em andamento
+- **Descrição:** reservar três acessos para testes, incluindo o primeiro corretor convidado e
+  outros dois contatos. Cada pessoa cria a conta com um convite comum e informa o e-mail
+  cadastrado à equipe; só então o admin libera 15 dias sem pagamento, com 10 atendimentos de IA,
+  10 otimizações de fotos, 20 buscas e acesso à Rede ImmobIA. O uso para ao fim do prazo ou da
+  franquia, sem cobrança de excedentes. O limite de três contas é vitalício nesta campanha.
+- **Decisão (21/10/2026):** preparar liberação manual por e-mail no admin. A contratação do plano
+  beta pago fica disponível durante e após o teste; uma fatura já criada impede a concessão
+  gratuita até que a cobrança seja resolvida. Código local implementado e em validação; ainda
+  não publicado.
 
