@@ -38,7 +38,7 @@ def invitation_hash(code: str) -> str:
 
 
 def create_invitation(
-    session: Session, *, valid_days: int = 30
+    session: Session, *, valid_days: int = 90
 ) -> tuple[SignupInvitationModel, str]:
     raw = secrets.token_hex(12).upper()
     code = "IMB-" + "-".join(raw[index : index + 6] for index in range(0, 24, 6))

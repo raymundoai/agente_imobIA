@@ -23,7 +23,7 @@ function status(invitation: Invitation) {
 export function SignupInvitations({ token }: { token: string }) {
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [newCode, setNewCode] = useState<string | null>(null);
-  const [validDays, setValidDays] = useState(30);
+  const [validDays, setValidDays] = useState(90);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 

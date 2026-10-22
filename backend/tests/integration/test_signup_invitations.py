@@ -31,9 +31,14 @@ def _signup(code: str | None = None, **overrides: object) -> dict[str, object]:
 
 
 def _create(client: TestClient, auth: dict[str, str]) -> dict:
-    response = client.post("/platform/signup-invitations", headers=auth, json={"valid_days": 30})
+    response = client.post("/platform/signup-invitations", headers=auth, json={})
     assert response.status_code == 201, response.text
-    return response.json()
+    invitation = response.json()
+    validity = datetime.fromisoformat(invitation["expires_at"]) - datetime.fromisoformat(
+        invitation["created_at"]
+    )
+    assert validity == timedelta(days=90)
+    return invitation
 
 
 def test_invited_broker_gets_beta_offer_and_code_cannot_be_reused(client: TestClient) -> None:

@@ -94,7 +94,7 @@ class CreatedSignupInvitation(SignupInvitationItem):
 
 
 class CreateSignupInvitationRequest(BaseModel):
-    valid_days: int = Field(default=30, ge=1, le=90)
+    valid_days: int = Field(default=90, ge=1, le=90)
 
 
 class PlatformDashboardResponse(BaseModel):
