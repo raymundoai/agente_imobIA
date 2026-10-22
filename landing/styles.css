@@ -143,7 +143,7 @@ h1, h2, h3 { font-family: Manrope, system-ui, sans-serif; }
 .beta-seal-kicker { margin-bottom: 2px; color: #52600f; font-family: Manrope, system-ui, sans-serif; font-size: 10px; font-weight: 800; letter-spacing: .14em; }
 .beta-seal-copy strong { font-family: Manrope, system-ui, sans-serif; font-size: 18px; font-weight: 800; letter-spacing: -.035em; line-height: 1.2; }
 .beta-seal-copy > span:last-child { font-size: 12px; line-height: 1.45; font-weight: 600; }
-.pricing-layout { display: grid; grid-template-columns: .88fr 1.12fr; align-items: center; gap: 100px; }
+.pricing-layout { display: grid; grid-template-columns: .88fr 1.12fr; align-items: start; gap: 100px; }
 .pricing-intro h2 { max-width: 500px; margin: 19px 0 19px; }
 .pricing-intro > p { max-width: 465px; color: #c7dcd9; font-size: 16px; line-height: 1.75; }
 .price-card { width: min(100%, 530px); margin-left: auto; padding: 36px 41px 31px; border-radius: 17px; background: #fbfbf7; color: #19363a; box-shadow: 0 30px 75px rgba(0,21,29,.24); }
