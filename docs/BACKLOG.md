@@ -385,4 +385,6 @@ o commit em **Decisão**.
 - **Publicado em 21/10/2026 (`811de25`):** migração dos convites aplicada, cadastro e admin
   atualizados. A API rejeitou cadastro sem código e a lista de convites respondeu no admin.
   Ainda falta um cadastro real de corretor com código para validar o fluxo completo em produção.
+- **Ajuste de 21/10/2026 (`222b3af`):** a validade inicial de novos convites passou de 30 para
+  90 dias. O admin ainda permite escolher de 1 a 90 dias; convites existentes não mudam.
 
