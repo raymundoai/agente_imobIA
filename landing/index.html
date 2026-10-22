@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20261022-beta" />
     <title>ImmobIA — atendimento que acompanha seu ritmo</title>
   </head>
   <body>
@@ -239,11 +239,18 @@
 
       <section class="section pricing-section" id="preco" aria-labelledby="pricing-title">
         <div class="container">
-          <div class="beta-access-seal">
-            <span class="beta-seal-icon" aria-hidden="true">✳</span>
-            <div>
-              <strong>CONDIÇÃO ESPECIAL PARA O BETA</strong>
-              <span>Para criar sua conta, você precisa de um código de convite.</span>
+          <div class="beta-access-seal" role="note" aria-label="Acesso beta por convite">
+            <span class="beta-seal-icon" aria-hidden="true">
+              <svg viewBox="0 0 48 48" fill="none">
+                <path d="M7 13.5a4 4 0 0 0 4-4h26a4 4 0 0 0 4 4v21a4 4 0 0 0-4 4H11a4 4 0 0 0-4-4v-21Z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" />
+                <path d="M17 9.5v29" stroke="currentColor" stroke-width="2" stroke-dasharray="3 4" opacity=".65" />
+                <path d="m25 24 4 4 7-8" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
+            <div class="beta-seal-copy">
+              <span class="beta-seal-kicker">ACESSO ANTECIPADO · POR CONVITE</span>
+              <strong>Condição especial para beta testers</strong>
+              <span>Tenha seu código de convite em mãos para criar a conta.</span>
             </div>
           </div>
           <div class="pricing-layout">
