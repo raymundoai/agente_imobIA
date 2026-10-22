@@ -50,7 +50,7 @@ o commit em **Decisão**.
 | B-018 | Prévia de foto otimizada mostra versão antiga | Correção | Equipe | Média | Implementado |
 | B-019 | Cadastro indisponível a partir da landing page | Correção | Equipe | Alta | Implementado |
 | B-020 | Cadastro beta por código de convite | Melhoria | Equipe | Alta | Implementado |
-| B-021 | Três acessos gratuitos limitados para corretores beta | Melhoria | Equipe | Alta | Em andamento |
+| B-021 | Três acessos gratuitos limitados para corretores beta | Melhoria | Equipe | Alta | Implementado |
 
 ## Itens
 
@@ -399,14 +399,14 @@ o commit em **Decisão**.
 ### B-021 · Três acessos gratuitos limitados para corretores beta
 
 - **Tipo:** Melhoria · **Origem:** Equipe · **Registrado em:** 21/10/2026
-- **Prioridade:** Alta · **Status:** Em andamento
+- **Prioridade:** Alta · **Status:** Implementado
 - **Descrição:** reservar três acessos para testes, incluindo o primeiro corretor convidado e
   outros dois contatos. Cada pessoa cria a conta com um convite comum e informa o e-mail
   cadastrado à equipe; só então o admin libera 15 dias sem pagamento, com 10 atendimentos de IA,
   10 otimizações de fotos, 20 buscas e acesso à Rede ImmobIA. O uso para ao fim do prazo ou da
   franquia, sem cobrança de excedentes. O limite de três contas é vitalício nesta campanha.
-- **Decisão (21/10/2026):** preparar liberação manual por e-mail no admin. A contratação do plano
-  beta pago fica disponível durante e após o teste; uma fatura já criada impede a concessão
-  gratuita até que a cobrança seja resolvida. Código local implementado e em validação; ainda
-  não publicado.
+- **Decisão (21/10/2026, `55a4d5e`):** liberação manual por e-mail no admin, publicada em
+  produção. A contratação do plano beta pago fica disponível durante e após o teste; uma fatura
+  já criada impede a concessão gratuita até que a cobrança seja resolvida. A API e o painel
+  foram verificados em produção; a primeira concessão real depende do cadastro dos convidados.
 
