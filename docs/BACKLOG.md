@@ -350,6 +350,9 @@ o commit em **Decisão**.
 - **Decisão (21/10/2026):** concluir o apontamento do domínio com e sem `www` e validar HTTPS,
   página e botões de cadastro. O destino voltou a responder após a recuperação do aplicativo
   (B-019).
+- **Publicado em 21/10/2026 (`361077a`):** a oferta beta ganhou um selo de acesso por convite;
+  o texto explica que o código é necessário no cadastro e retira a referência à liberação
+  manual. Conferido no domínio com e sem `www`.
 
 ### B-018 · Prévia de foto otimizada mostra versão antiga
 
@@ -384,7 +387,10 @@ o commit em **Decisão**.
   fase. O plano continua sujeito ao pagamento da primeira mensalidade.
 - **Publicado em 21/10/2026 (`811de25`):** migração dos convites aplicada, cadastro e admin
   atualizados. A API rejeitou cadastro sem código e a lista de convites respondeu no admin.
-  Ainda falta um cadastro real de corretor com código para validar o fluxo completo em produção.
+  O cadastro real de corretor com código foi confirmado pelo usuário em 21/10.
 - **Ajuste de 21/10/2026 (`222b3af`):** a validade inicial de novos convites passou de 30 para
   90 dias. O admin ainda permite escolher de 1 a 90 dias; convites existentes não mudam.
+- **Validação e ajuste publicado em 21/10/2026 (`361077a`):** o cadastro real com convite
+  funcionou e a falta de código bloqueou a criação da conta. O aviso, antes exibido em inglês,
+  agora aparece em português. O bundle novo foi confirmado em produção.
 
