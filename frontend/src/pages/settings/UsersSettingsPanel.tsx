@@ -272,8 +272,8 @@ export function UsersSettingsPanel() {
   }
 
   async function submitPasswordChange() {
-    if (passwords.next.length < 12) {
-      feedback(null, "A nova senha deve ter pelo menos 12 caracteres.");
+    if (passwords.next.length < 8) {
+      feedback(null, "A nova senha deve ter pelo menos 8 caracteres.");
       return;
     }
     if (passwords.next !== passwords.confirmation) {
@@ -392,7 +392,7 @@ export function UsersSettingsPanel() {
         <div className="settings-panel-header compact"><div><h2>Minha segurança</h2><p>{me ? `${me.name} · ${me.email}` : "Altere sua senha de acesso."}</p></div><KeyRound aria-hidden="true" size={22} /></div>
         <div className="team-password-form">
           <label>Senha atual<input autoComplete="current-password" type="password" value={passwords.current} onChange={(event) => setPasswords((current) => ({ ...current, current: event.target.value }))} /></label>
-          <label>Nova senha<input autoComplete="new-password" type="password" value={passwords.next} onChange={(event) => setPasswords((current) => ({ ...current, next: event.target.value }))} /><small>Mínimo de 12 caracteres.</small></label>
+          <label>Nova senha<input autoComplete="new-password" type="password" value={passwords.next} onChange={(event) => setPasswords((current) => ({ ...current, next: event.target.value }))} /><small>Mínimo de 8 caracteres.</small></label>
           <label>Confirmar nova senha<input autoComplete="new-password" type="password" value={passwords.confirmation} onChange={(event) => setPasswords((current) => ({ ...current, confirmation: event.target.value }))} /></label>
         </div>
         <div className="settings-actions"><span>Ao alterar, todas as outras sessões serão encerradas.</span><button disabled={operation === "password" || !passwords.current || !passwords.next || !passwords.confirmation} onClick={() => void submitPasswordChange()} type="button">{operation === "password" ? "Alterando..." : "Alterar senha"}</button></div>

@@ -21,8 +21,8 @@ export function InviteAcceptancePage() {
       setError("Este link de convite está incompleto.");
       return;
     }
-    if (password.length < 12) {
-      setError("Use uma senha com pelo menos 12 caracteres.");
+    if (password.length < 8) {
+      setError("Use uma senha com pelo menos 8 caracteres.");
       return;
     }
     setLoading(true);
@@ -59,7 +59,7 @@ export function InviteAcceptancePage() {
           </div>
           <label>
             Nova senha
-            <PasswordInput autoComplete="new-password" minLength={12} onChange={setPassword} value={password} />
+            <PasswordInput autoComplete="new-password" minLength={8} onChange={setPassword} value={password} />
           </label>
           {error ? <div className="error-box">{error}</div> : null}
           <button disabled={loading || !token} type="submit">

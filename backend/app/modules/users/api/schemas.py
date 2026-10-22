@@ -10,7 +10,7 @@ from app.modules.users.domain.entities import User, UserAuditLog, UserRole, User
 class CreateUserRequest(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     email: EmailStr
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
     role: UserRole
 
 

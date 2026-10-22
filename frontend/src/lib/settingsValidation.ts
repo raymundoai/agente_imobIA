@@ -13,7 +13,7 @@ export function validateNewUserForm(form: {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
     errors.email = "Informe um email válido.";
   }
-  if (form.password.length < 12) errors.password = "Use pelo menos 12 caracteres.";
+  if (form.password.length < 8) errors.password = "Use pelo menos 8 caracteres.";
   return errors;
 }
 

@@ -25,11 +25,11 @@ test("valida cadastro da equipe antes da chamada à API", () => {
   assert.deepEqual(validateNewUserForm({ name: "", email: "invalido", password: "123" }), {
     name: "Informe pelo menos 2 caracteres.",
     email: "Informe um email válido.",
-    password: "Use pelo menos 12 caracteres.",
+    password: "Use pelo menos 8 caracteres.",
   });
   assert.deepEqual(validateNewUserForm({
     name: "Bruna Muller",
     email: "bruna@example.com",
-    password: "senha-segura-123",
+    password: "senha123",
   }), {});
 });

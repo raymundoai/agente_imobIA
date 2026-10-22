@@ -134,11 +134,14 @@ h1, h2, h3 { font-family: Manrope, system-ui, sans-serif; }
 .feature-list h3 { margin: 1px 0 8px; font-size: 17px; letter-spacing: -.04em; }
 .feature-list p { margin: 0; max-width: 460px; color: #5b7372; font-size: 13px; line-height: 1.65; }
 .pricing-section { background: #103e46; color: #fff; overflow: hidden; }
+.beta-access-seal { width: fit-content; max-width: 100%; display: flex; align-items: center; gap: 15px; margin: 0 0 48px; padding: 13px 22px 13px 13px; border: 1px solid #ffe275; border-radius: 18px; background: #f5c518; color: #14363a; box-shadow: 0 16px 35px rgba(0,20,25,.22), 0 0 0 6px rgba(245,197,24,.1); transform: rotate(-1deg); }
+.beta-seal-icon { width: 49px; height: 49px; flex: none; display: grid; place-items: center; border-radius: 13px; background: #103e46; color: #f5c518; font-size: 30px; line-height: 1; }
+.beta-access-seal strong, .beta-access-seal span { display: block; }
+.beta-access-seal strong { font-family: Manrope, system-ui, sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .1em; }
+.beta-access-seal div > span { margin-top: 3px; font-size: 13px; line-height: 1.4; font-weight: 700; }
 .pricing-layout { display: grid; grid-template-columns: .88fr 1.12fr; align-items: center; gap: 100px; }
 .pricing-intro h2 { max-width: 500px; margin: 19px 0 19px; }
 .pricing-intro > p { max-width: 465px; color: #c7dcd9; font-size: 16px; line-height: 1.75; }
-.pricing-note { max-width: 400px; display: flex; gap: 14px; margin-top: 44px; padding-top: 22px; border-top: 1px solid rgba(255,255,255,.18); color: #bbd3cf; font-size: 12px; line-height: 1.65; }
-.pricing-note span:first-child { color: #f5c518; font-size: 22px; line-height: 1; }
 .price-card { width: min(100%, 530px); margin-left: auto; padding: 36px 41px 31px; border-radius: 17px; background: #fbfbf7; color: #19363a; box-shadow: 0 30px 75px rgba(0,21,29,.24); }
 .price-pill { display: inline-block; padding: 7px 10px; border-radius: 5px; background: #e4f1e8; color: #0a6568; font-size: 10px; font-weight: 800; letter-spacing: .13em; }
 .price-line { display: flex; align-items: baseline; gap: 6px; margin: 16px 0 1px; font-family: Manrope, sans-serif; }
@@ -218,7 +221,7 @@ h1, h2, h3 { font-family: Manrope, system-ui, sans-serif; }
   .feature-intro { position: static; }
   .feature-intro h2 { max-width: 560px; }
   .price-card { width: 100%; margin-left: 0; }
-  .pricing-note { margin-top: 26px; }
+  .beta-access-seal { margin-bottom: 34px; transform: none; }
   .final-inner { align-items: start; flex-direction: column; }
   .footer-inner { flex-wrap: wrap; gap: 15px; padding-block: 24px; }
   .footer-inner p { margin: 0; }

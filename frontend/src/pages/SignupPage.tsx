@@ -61,7 +61,7 @@ export function SignupPage() {
 
   return (
     <AuthLayout>
-      <form className="login-card signup-card" onSubmit={submit}>
+      <form className="login-card signup-card" noValidate onSubmit={submit}>
         <div>
           <h1>Criar conta</h1>
           <p>O cadastro está aberto para corretores convidados ao beta. Depois, você configura seu atendimento e assina o plano.</p>
@@ -86,7 +86,7 @@ export function SignupPage() {
         </label>
         <label>
           Senha
-          <PasswordInput autoComplete="new-password" minLength={12} onChange={(value) => update("password", value)} value={form.password} />
+          <PasswordInput autoComplete="new-password" minLength={8} onChange={(value) => update("password", value)} value={form.password} />
         </label>
         <label className="terms-check">
           <input checked={form.accept_terms} onChange={(event) => update("accept_terms", event.target.checked)} type="checkbox" />
@@ -95,7 +95,7 @@ export function SignupPage() {
             <a href="/privacidade" rel="noreferrer" target="_blank">Política de privacidade</a>.
           </span>
         </label>
-        {error ? <div className="error-box">{error}</div> : null}
+        {error ? <div className="error-box" role="alert">{error}</div> : null}
         <button disabled={loading} type="submit">
           {loading ? "Criando conta..." : "Criar conta e começar"}
         </button>
@@ -112,8 +112,8 @@ function validate(form: SignupForm): string | null {
   if (!form.invitation_code.trim()) return "Informe seu código de convite.";
   if (form.admin_name.trim().length < 2) return "Informe seu nome.";
   if (form.company_name.trim().length < 2) return "Informe o nome da imobiliária ou seu nome profissional.";
-  if (!form.email.includes("@")) return "Informe um email válido.";
-  if (form.password.length < 12) return "A senha precisa ter ao menos 12 caracteres.";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return "Informe um email válido.";
+  if (form.password.length < 8) return "A senha precisa ter ao menos 8 caracteres.";
   if (!form.accept_terms) return "Para criar a conta, aceite os Termos de uso e a Política de privacidade.";
   return null;
 }

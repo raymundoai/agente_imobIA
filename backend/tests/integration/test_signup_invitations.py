@@ -22,7 +22,7 @@ def _signup(code: str | None = None, **overrides: object) -> dict[str, object]:
         "company_name": "Ana Corretora",
         "admin_name": "Ana Corretora",
         "email": "ana@example.com",
-        "password": "long-test-password-123",
+        "password": "senha123",
         "business_type": "broker",
         "accept_terms": True,
         **({"invitation_code": code} if code is not None else {}),
@@ -56,6 +56,8 @@ def test_invited_broker_gets_beta_offer_and_code_cannot_be_reused(client: TestCl
     assert invalid.status_code == 403
     agency = client.post("/signup", json=_signup(invitation["code"], business_type="agency"))
     assert agency.status_code == 403
+    short_password = client.post("/signup", json=_signup(invitation["code"], password="senha12"))
+    assert short_password.status_code == 422
 
     created = client.post("/signup", json=_signup(invitation["code"].lower()))
     assert created.status_code == 201, created.text

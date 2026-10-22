@@ -12,7 +12,7 @@ class CreateTenantRequest(BaseModel):
     slug: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9-]+$")
     admin_name: str = Field(min_length=2, max_length=160)
     admin_email: EmailStr
-    admin_password: str = Field(min_length=12, max_length=128)
+    admin_password: str = Field(min_length=8, max_length=128)
 
 
 class SignupRequest(BaseModel):
@@ -21,7 +21,7 @@ class SignupRequest(BaseModel):
     company_name: str = Field(min_length=2, max_length=160)
     admin_name: str = Field(min_length=2, max_length=160)
     email: EmailStr
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
     business_type: Literal["broker", "agency"]
     invitation_code: str | None = Field(default=None, max_length=40)
     # The terms of use and privacy policy must be accepted to open an account.

@@ -45,9 +45,15 @@ def test_invitation_is_single_use_and_activates_user(client: TestClient) -> None
     assert payload["user"]["must_change_password"] is True
     assert len(payload["token"]) >= 32
 
+    short_password = client.post(
+        "/auth/accept-invitation",
+        json={"token": payload["token"], "password": "senha12"},
+    )
+    assert short_password.status_code == 422
+
     accepted = client.post(
         "/auth/accept-invitation",
-        json={"token": payload["token"], "password": "new-secure-password-123"},
+        json={"token": payload["token"], "password": "senha123"},
     )
     assert accepted.status_code == 200, accepted.text
     assert accepted.json()["tenant_slug"] == "secure-team"
