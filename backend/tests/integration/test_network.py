@@ -152,6 +152,34 @@ def test_network_is_a_paid_plan_feature(client: TestClient, network: dict[str, A
     )
 
 
+def test_internal_test_account_keeps_network_access_after_payment_cancellation(
+    client: TestClient, network: dict[str, Any]
+) -> None:
+    from app.modules.billing_usage.commercial import CommercialEntitlementService
+
+    listing, _ = _join_and_share(client, network)
+    partner = network["partner"]
+    marked = client.patch(
+        f"/platform/tenants/{partner['id']}/internal-test",
+        headers=network["platform"],
+        json={"internal_test": True},
+    )
+    assert marked.status_code == 200, marked.text
+    with client.app.state.container.database.session_factory() as session:
+        CommercialEntitlementService(session).suspend(
+            UUID(partner["id"]), status="cancelled", expire_plan_grants=True
+        )
+
+    token = network["partner_token"]
+    settings = client.get("/network/settings", headers=_auth(token))
+    assert settings.status_code == 200
+    assert settings.json()["eligible"] is True
+    demand_id = _demand(client, token)
+    found = client.get(f"/network/search?demand_id={demand_id}", headers=_auth(token))
+    assert found.status_code == 200, found.text
+    assert [item["id"] for item in found.json()] == [listing["id"]]
+
+
 def test_sharing_requires_terms_photo_and_own_listing(
     client: TestClient, network: dict[str, Any]
 ) -> None:

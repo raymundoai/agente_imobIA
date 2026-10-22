@@ -51,6 +51,7 @@ o commit em **Decisão**.
 | B-019 | Cadastro indisponível a partir da landing page | Correção | Equipe | Alta | Implementado |
 | B-020 | Cadastro beta por código de convite | Melhoria | Equipe | Alta | Implementado |
 | B-021 | Três acessos gratuitos limitados para corretores beta | Melhoria | Equipe | Alta | Implementado |
+| B-022 | Liberar a Rede para contas internas de teste | Correção | Equipe | Média | Em andamento |
 
 ## Itens
 
@@ -409,4 +410,14 @@ o commit em **Decisão**.
   produção. A contratação do plano beta pago fica disponível durante e após o teste; uma fatura
   já criada impede a concessão gratuita até que a cobrança seja resolvida. A API e o painel
   foram verificados em produção; a primeira concessão real depende do cadastro dos convidados.
+
+### B-022 · Liberar a Rede para contas internas de teste
+
+- **Tipo:** Correção · **Origem:** Equipe · **Registrado em:** 22/10/2026
+- **Prioridade:** Média · **Status:** Em andamento
+- **Descrição:** o perfil de conta interna promete uso ilimitado dos recursos, mas a Rede
+  ImmobIA ainda exige uma assinatura ativa. A conta interna deve poder usar a Rede mesmo depois
+  de cancelar a assinatura criada apenas para validar o pagamento.
+- **Decisão (22/10/2026):** corrigir a regra de elegibilidade da Rede sem alterar a exigência de
+  plano para contas comuns. Implementado e testado localmente; publicação pendente.
 

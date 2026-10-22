@@ -163,6 +163,8 @@ class PartnershipListResponse(BaseModel):
 
 def has_paid_plan(session: Session, tenant_id: UUID) -> bool:
     subscription = CommercialEntitlementService(session).subscription(tenant_id)
+    if subscription.internal_test:
+        return True
     plan = session.get(CommercialPlanModel, subscription.plan_id)
     return plan is not None and (
         (plan.monthly_price_cents > 0 and subscription.status in {"active", "past_due"})
